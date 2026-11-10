@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'models.dart';
+import 'session.dart';
 
-/// Không lưu token ở web localStorage/shared_preferences.
-/// Mẫu dùng token tạm trong RAM để test API; bản triển khai phải nối OIDC/PKCE.
+/// Requests use an HttpOnly web cookie or native secure session cookie.
 class SalesApi {
   final String baseUrl;
   final String accessToken;
@@ -17,13 +17,10 @@ class SalesApi {
     }
     return uri.replace(queryParameters: params);
   }
-  Map<String, String> get _headers => {
-    'Authorization': 'Bearer $accessToken',
-    'Content-Type': 'application/json',
-  };
+  Map<String, String> get _headers => sessionHeaders(accessToken);
   Future<List<SalesRecord>> list(String kind) async {
     final res = await http.get(_uri('/api/v1/records', {'kind': kind}), headers: _headers);
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    final data = decodeApi(res);
     if (res.statusCode != 200) throw StateError('${data['error'] ?? 'API lỗi'}');
     return (data['items'] as List<dynamic>)
         .map((e) => SalesRecord.fromJson(e as Map<String, dynamic>)).toList();
@@ -31,7 +28,7 @@ class SalesApi {
   Future<SalesRecord> create(Map<String, dynamic> record) async {
     final res = await http.post(_uri('/api/v1/records'),
       headers: _headers, body: jsonEncode(record));
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    final data = decodeApi(res);
     if (res.statusCode != 201) throw StateError('${data['error'] ?? 'Không lưu được'}');
     return SalesRecord.fromJson(data['item'] as Map<String, dynamic>);
   }

@@ -4,6 +4,8 @@ import 'customers.dart';
 import 'editor.dart';
 import 'models.dart';
 import 'theme.dart';
+import 'session.dart';
+import 'auth_gate.dart';
 
 void main() => runApp(const SalesApp());
 
@@ -15,28 +17,31 @@ class SalesApp extends StatelessWidget {
     debugShowCheckedModeBanner: false,
     title: 'Sales Miền Tây',
     theme: SalesTheme.build(width: constraints.maxWidth),
-    home: const SalesHome(),
+    home: const AuthGate(),
     ),
   );
 }
 
 class SalesHome extends StatefulWidget {
-  const SalesHome({super.key});
+  final SalesSession session;
+  final Map<String,dynamic> me;
+  final RegionCatalog catalog;
+  final Future<void> Function() onLogout;
+  const SalesHome({super.key,required this.session,required this.me,required this.catalog,required this.onLogout});
   @override
   State<SalesHome> createState() => _SalesHomeState();
 }
 
 class _SalesHomeState extends State<SalesHome> {
-  static const initialApiUrl = String.fromEnvironment('API_BASE_URL');
   final List<SalesRecord> _items = [];
-  RegionCatalog? _catalog;
-  String _apiUrl = initialApiUrl;
-  String _accessToken = '';
+  RegionCatalog get _catalog => widget.catalog;
+  String get _apiUrl => salesOrigin;
+  String get _accessToken => widget.session.cookie;
+  String _province = '';
   bool _loading = false;
   int _selectedIndex = 0;
   String? _message;
 
-  bool get _online => _apiUrl.trim().isNotEmpty && _accessToken.trim().isNotEmpty;
   List<String> get _sections => ['Tổng quan', 'Khách hàng / Điểm bán', ...moduleKinds.map((e) => moduleLabels[e]!)];
   List<IconData> get _icons => const [
     Icons.dashboard_outlined, Icons.storefront_outlined, Icons.store_outlined, Icons.flag_outlined,
@@ -47,11 +52,7 @@ class _SalesHomeState extends State<SalesHome> {
   @override
   void initState() {
     super.initState();
-    RegionCatalog.load().then((catalog) {
-      if (mounted) setState(() => _catalog = catalog);
-    }).catchError((Object error) {
-      if (mounted) setState(() => _message = 'Không tải được danh mục địa bàn: $error');
-    });
+    _refresh();
   }
 
   void _notify(String message) {
@@ -59,7 +60,6 @@ class _SalesHomeState extends State<SalesHome> {
   }
 
   Future<void> _refresh() async {
-    if (!_online) return;
     setState(() => _loading = true);
     try {
       final api = SalesApi(_apiUrl, _accessToken);
@@ -71,66 +71,30 @@ class _SalesHomeState extends State<SalesHome> {
       });
       _notify('Đã đồng bộ ${_items.length} bản ghi');
     } catch (error) {
-      if (mounted) setState(() => _message = 'Lỗi đồng bộ: $error');
+      if (mounted) setState(() { _items.clear(); _message = 'Lỗi đồng bộ: $error'; });
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  Future<void> _settings() async {
-    final base = TextEditingController(text: _apiUrl);
-    final token = TextEditingController(text: _accessToken);
-    final confirmed = await showDialog<bool>(context: context, builder: (dialogContext) =>
-      AlertDialog(
-        title: const Text('Kết nối Cloudflare API'),
-        content: SizedBox(width: 460, child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text('Mẫu kết nối dành cho kiểm thử. Token chỉ tồn tại trong RAM; '
-              'bản production cần đăng nhập OIDC/PKCE thực thụ.'),
-          const SizedBox(height: 16),
-          TextField(controller: base, decoration: const InputDecoration(
-            labelText: 'API URL', hintText: 'https://field-sales-api...workers.dev')),
-          const SizedBox(height: 12),
-          TextField(controller: token, obscureText: true, decoration:
-            const InputDecoration(labelText: 'Access token kiểm thử')),
-        ])),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Hủy')),
-          FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Kết nối')),
-        ],
-      ));
-    if (confirmed == true) {
-      setState(() {
-        _apiUrl = base.text.trim();
-        _accessToken = token.text.trim();
-      });
-      if (_online) await _refresh();
-    }
-    base.dispose(); token.dispose();
+  Future<void> _profile() async {
+    await showDialog<void>(context:context,builder:(c)=>AlertDialog(title:const Text('Hồ sơ nhân viên'),content:Text(widget.me['full_name'].toString()+'\n'+widget.me['email'].toString()+'\nVai trò: '+widget.me['role'].toString()+'\nĐịa bàn: '+_catalog.provinces.join(', ')),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng')),FilledButton(onPressed:(){Navigator.pop(c);widget.onLogout();},child:const Text('Đăng xuất'))]));
   }
 
   Future<void> _addRecord(String kind) async {
-    if (_catalog == null) return;
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => RecordEditor(
-      kind: kind, catalog: _catalog!, onSave: (record) async {
-        if (_online) {
-          final saved = await SalesApi(_apiUrl, _accessToken).create(record);
-          if (mounted) setState(() => _items.insert(0, saved));
-        } else {
-          // Bản nháp demo trong bộ nhớ, không lưu số điện thoại lên storage web.
-          final demoRecord = SalesRecord.fromJson({...record,
-            'id': 'demo-${DateTime.now().microsecondsSinceEpoch}'});
-          if (mounted) setState(() => _items.insert(0, demoRecord));
-        }
+      kind: kind, catalog: _catalog, onSave: (record) async {
+        final saved = await SalesApi(_apiUrl, _accessToken).create(record);
+        if (mounted) setState(() => _items.insert(0, saved));
       },
     )));
-    if (!_online) _notify('Bản ghi chỉ nằm trong RAM (demo), sẽ mất khi thoát app');
   }
 
   String _money(num value) {
     final digits = value.round().toString();
     return '${digits.replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => '.')} đ';
   }
-  List<SalesRecord> _ofKind(String kind) => _items.where((e) => e.kind == kind).toList();
+  List<SalesRecord> _ofKind(String kind) => _items.where((e) => e.kind == kind && (_province.isEmpty || e.province == _province)).toList();
 
   Widget _stat(String label, String value, IconData icon) => Card(
     child: Padding(padding: const EdgeInsets.all(18), child: Column(
@@ -144,7 +108,7 @@ class _SalesHomeState extends State<SalesHome> {
   );
 
   Widget _coverageTable(List<SalesRecord> surveys) {
-    final provinces = _catalog?.provinces ?? <String>[];
+    final provinces = _catalog.provinces.where((p)=>_province.isEmpty||p==_province).toList();
     bool has(SalesRecord r, String property, String label) {
       final value = r.data[property];
       return value is List && value.contains(label);
@@ -254,7 +218,7 @@ class _SalesHomeState extends State<SalesHome> {
           Text(moduleLabels[kind]!, style: Theme.of(context).textTheme.headlineSmall),
           Text('${items.length} bản ghi', style: Theme.of(context).textTheme.bodySmall),
         ])),
-        FilledButton.icon(onPressed: _catalog == null ? null : () => _addRecord(kind),
+        FilledButton.icon(onPressed: () => _addRecord(kind),
           icon: const Icon(Icons.add), label: const Text('Thêm mới')),
       ])),
       Expanded(child: items.isEmpty
@@ -264,7 +228,7 @@ class _SalesHomeState extends State<SalesHome> {
             const SizedBox(height: 12),
             const Text('Chưa có dữ liệu'),
             const SizedBox(height: 10),
-            FilledButton.tonal(onPressed: _catalog == null ? null : () => _addRecord(kind),
+            FilledButton.tonal(onPressed: () => _addRecord(kind),
               child: const Text('Nhập biểu mẫu đầu tiên')),
           ])))
         : ListView.builder(padding: const EdgeInsets.all(12), itemCount: items.length,
@@ -280,9 +244,7 @@ class _SalesHomeState extends State<SalesHome> {
               title: Text(record.title),
               subtitle: Text(detail.isEmpty ? (record.data['notes']?.toString() ?? 'Chưa có ghi chú') : detail),
               leading: Icon(_icons[_selectedIndex], color: SalesTheme.brand),
-              trailing: record.id.startsWith('demo-')
-                ? const Tooltip(message: 'Chỉ lưu tạm trong RAM', child: Icon(Icons.cloud_off_outlined))
-                : const Icon(Icons.cloud_done_outlined),
+              trailing: const Icon(Icons.cloud_done_outlined),
             ));
           })),
     ]);
@@ -303,10 +265,9 @@ class _SalesHomeState extends State<SalesHome> {
         actions: [
           if (_loading) const Padding(padding: EdgeInsets.all(16),
             child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
-          IconButton(onPressed: _online ? _refresh : null,
+          IconButton(onPressed: _loading ? null : _refresh,
             tooltip: 'Tải lại dữ liệu', icon: const Icon(Icons.sync)),
-          IconButton(onPressed: _settings,
-            tooltip: 'Kết nối API', icon: const Icon(Icons.settings_outlined)),
+          IconButton(onPressed: _profile,tooltip:'Hồ sơ nhân viên',icon:const Icon(Icons.account_circle_outlined)),
         ],
       ),
       drawer: narrow ? Drawer(child: SafeArea(child: ListView(children: [
@@ -325,22 +286,11 @@ class _SalesHomeState extends State<SalesHome> {
             NavigationRailDestination(icon: Icon(_icons[i]), label: Text(_sections[i]))],
         ),
         Expanded(child: Column(children: [
-          Material(color: _online ? const Color(0xFFE3F4EC) : const Color(0xFFFFF1DB),
-            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              child: Row(children: [
-                Icon(_online ? Icons.cloud_done_outlined : Icons.info_outline, size: 18),
-                const SizedBox(width: 8),
-                Expanded(child: Text(_online
-                  ? 'Kết nối API — xác thực tạm cho thử nghiệm'
-                  : 'Chế độ demo: dữ liệu chỉ ở RAM, KHÔNG lưu bền; không nhập dữ liệu khách thật.',
-                  style: const TextStyle(fontSize: 12))),
-              ]))),
+          Padding(padding:const EdgeInsets.all(12),child:DropdownButtonFormField<String>(initialValue:_province,isExpanded:true,decoration:const InputDecoration(labelText:'Địa bàn'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả địa bàn của tôi')),for(final p in _catalog.provinces)DropdownMenuItem(value:p,child:Text(p))],onChanged:(p)=>setState(()=>_province=p??''))),
           if (_message != null) Material(color: const Color(0xFFFBE8E7),
             child: Padding(padding: const EdgeInsets.all(10), child: Text(_message!))),
-          Expanded(child: _catalog == null
-            ? const Center(child: CircularProgressIndicator())
-            : _selectedIndex == 0 ? _overview() : _selectedIndex == 1
-              ? CustomerDirectoryPage(service: _online ? CustomerService(_apiUrl, _accessToken) : null, regions: _catalog!)
+          Expanded(child: _selectedIndex == 0 ? _overview() : _selectedIndex == 1
+              ? CustomerDirectoryPage(key:ValueKey(_province),service:CustomerService(_apiUrl,_accessToken,province:_province),regions:_catalog)
               : _records(moduleKinds[_selectedIndex - 2])),
         ])),
       ]),

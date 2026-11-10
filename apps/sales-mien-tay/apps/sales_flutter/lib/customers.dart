@@ -6,6 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import 'models.dart';
+import 'session.dart';
 
 class FieldCustomer {
   final String id, name, address, province, district, category, status;
@@ -25,7 +26,8 @@ class FieldCustomer {
 
 class CustomerService {
   final String endpoint, token;
-  const CustomerService(this.endpoint, this.token);
+  final String province;
+  const CustomerService(this.endpoint, this.token,{this.province=''});
   Uri uri(String path, [Map<String, String>? query]) {
     final url = Uri.parse('${endpoint.replaceFirst(RegExp(r'/$'), '')}$path');
     if (url.scheme != 'https' && url.host != 'localhost' && url.host != '127.0.0.1') {
@@ -33,16 +35,16 @@ class CustomerService {
     }
     return url.replace(queryParameters: query);
   }
-  Map<String, String> get headers => {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'};
+  Map<String, String> get headers => sessionHeaders(token);
   Map<String, dynamic> decode(http.Response res, [int ok = 200]) {
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    final data = decodeApi(res);
     if (res.statusCode != ok && !(ok == 201 && res.statusCode == 200)) {
       throw StateError(data['error']?.toString() ?? 'Lỗi ${res.statusCode}');
     }
     return data;
   }
   Future<List<FieldCustomer>> list() async {
-    final data = decode(await http.get(uri('/api/v1/customers'), headers: headers));
+    final data = decode(await http.get(uri('/api/v1/customers',{'province':province}), headers: headers));
     return (data['items'] as List<dynamic>)
         .map((e) => FieldCustomer.fromJson(e as Map<String, dynamic>)).toList();
   }
@@ -72,7 +74,7 @@ class CustomerService {
   }
   Future<Uint8List> photoBytes(String customerId, String photoId) async {
     final res = await http.get(uri('/api/v1/customers/$customerId/photos/$photoId'), headers: headers);
-    if (res.statusCode != 200) throw StateError('Không tải được ảnh');
+    if (res.statusCode != 200) {checkSessionStatus(res);throw StateError('Không tải được ảnh');}
     return res.bodyBytes;
   }
 }
@@ -96,7 +98,7 @@ Future<Position> captureGps(BuildContext context) async {
 }
 
 class CustomerDirectoryPage extends StatefulWidget {
-  final CustomerService? service;
+  final CustomerService service;
   final RegionCatalog regions;
   const CustomerDirectoryPage({super.key, required this.service, required this.regions});
   @override
@@ -110,24 +112,20 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
   @override
   void initState() {super.initState(); refresh();}
   Future<void> refresh() async {
-    if (widget.service == null) return;
     setState(() => loading = true);
     try {
-      final items = await widget.service!.list();
+      final items = await widget.service.list();
       if (mounted) setState(() {customers = items; error = null;});
-    } catch (e) {if (mounted) setState(() => error = '$e');}
+    } catch (e) {if (mounted) setState(() {customers=[];error = '$e';});}
     finally {if (mounted) setState(() => loading = false);}
   }
   Future<void> add() async {
-    if (widget.service == null) return;
     final created = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) =>
-        CustomerEditor(service: widget.service!, regions: widget.regions)));
+        CustomerEditor(service: widget.service, regions: widget.regions)));
     if (created == true) refresh();
   }
   @override
   Widget build(BuildContext context) {
-    if (widget.service == null) return const Center(child: Padding(
-      padding: EdgeInsets.all(24), child: Text('Cần kết nối API có đăng nhập để quản lý khách hàng. Không nhập thông tin khách thật trong chế độ demo.')));
     return Column(children: [
       Padding(padding: const EdgeInsets.fromLTRB(18,16,18,8), child: Row(children: [
         const Expanded(child: Text('Khách hàng / Điểm bán', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold))),
@@ -144,7 +142,7 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
           title: Text(c.name), subtitle: Text('${c.district}, ${c.province} · ${c.address}'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) =>
-            CustomerDetail(service: widget.service!, customer: c))),
+            CustomerDetail(service: widget.service, customer: c))),
         ));
       })),
     ]);
