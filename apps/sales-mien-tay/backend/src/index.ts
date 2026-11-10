@@ -192,7 +192,7 @@ export default {
           if(typeof id!=='string'||!/^[0-9a-f-]{36}$/i.test(id)||(body.kind==='visit'&&(typeof day!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day))||new Date(day).toISOString().slice(0,10)!==day||typeof sequence!=='number'||!Number.isInteger(sequence)||sequence<1||sequence>9999)))return bad('Điểm ghé, ngày hoặc thứ tự không hợp lệ');
           const customer=await sql`SELECT name,province,district,owner_sub FROM customers WHERE id::text=${id} AND public.sales_can_access(${user.sub},owner_sub,province,district)`;
           if(!customer.length)return bad('Không có quyền điểm bán',403);
-          if(body.kind==='visit'&&customer[0].owner_sub!==user.sub)return bad('Chỉ lập tuyến cho khách hàng của mình',403);
+          if(customer[0].owner_sub!==user.sub)return bad('Chỉ lập tuyến/biểu mẫu cho khách hàng của mình',403);
           if(body.province!==customer[0].province||body.district!==customer[0].district)return bad('Địa bàn tuyến không khớp điểm bán');
           body.customer_name=customer[0].name;
         }

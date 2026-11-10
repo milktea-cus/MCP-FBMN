@@ -158,7 +158,7 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
         return Card(child: ListTile(
           leading: const CircleAvatar(child: Icon(Icons.storefront)),
           title: Text(c.name), subtitle: Text('${c.district}, ${c.province} · ${c.address}'),
-          trailing: IconButton(tooltip:'Sửa thông tin',icon:const Icon(Icons.edit_outlined),onPressed:() async {final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>CustomerEditor(service:widget.service,regions:widget.regions,customer:c,queue:widget.queue)));if(changed==true&&mounted)refresh();}),
+          trailing: c.owner!=widget.service.identity?const Icon(Icons.chevron_right):IconButton(tooltip:'Sửa thông tin',icon:const Icon(Icons.edit_outlined),onPressed:() async {final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>CustomerEditor(service:widget.service,regions:widget.regions,customer:c,queue:widget.queue)));if(changed==true&&mounted)refresh();}),
           onTap: () async {final changed=await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) =>
             CustomerDetail(service: widget.service, customer: c,regions:widget.regions,queue:widget.queue)));if(changed==true&&mounted)refresh();},
         ));
@@ -304,8 +304,9 @@ class _CustomerDetailState extends State<CustomerDetail> {
   @override
   Widget build(BuildContext context) {
     final customer = widget.customer;
+    final own=customer.owner==widget.service.identity;
     return Scaffold(
-      appBar: AppBar(title: Text(customer.name),actions:[IconButton(tooltip:'Sửa thông tin',icon:const Icon(Icons.edit_outlined),onPressed:() async {final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>CustomerEditor(service:widget.service,regions:widget.regions,customer:customer,queue:widget.queue)));if(changed==true&&context.mounted)Navigator.pop(context,true);})]),
+      appBar: AppBar(title: Text(customer.name),actions:[if(own)IconButton(tooltip:'Sửa thông tin',icon:const Icon(Icons.edit_outlined),onPressed:() async {final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>CustomerEditor(service:widget.service,regions:widget.regions,customer:customer,queue:widget.queue)));if(changed==true&&context.mounted)Navigator.pop(context,true);})]),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
@@ -317,12 +318,13 @@ class _CustomerDetailState extends State<CustomerDetail> {
           Text('Số điện thoại: ${customer.phone ?? 'Chưa có'}'),
           Text('GPS: ${customer.latitude?.toStringAsFixed(6) ?? 'Chưa ghi'} / ${customer.longitude?.toStringAsFixed(6) ?? 'Chưa ghi'}'),
           const SizedBox(height: 16),
-          if(widget.queue!=null)Wrap(spacing:8,children:[OutlinedButton.icon(onPressed:()=>addRecord('survey'),icon:const Icon(Icons.assignment_outlined),label:const Text('Khảo sát')),OutlinedButton.icon(onPressed:()=>addRecord('forecast'),icon:const Icon(Icons.payments_outlined),label:const Text('Dự kiến doanh thu'))]),
-          FilledButton.icon(
+          if(own&&widget.queue!=null)Wrap(spacing:8,children:[OutlinedButton.icon(onPressed:()=>addRecord('survey'),icon:const Icon(Icons.assignment_outlined),label:const Text('Khảo sát')),OutlinedButton.icon(onPressed:()=>addRecord('forecast'),icon:const Icon(Icons.payments_outlined),label:const Text('Dự kiến doanh thu'))]),
+          if(own)FilledButton.icon(
             onPressed: busy ? null : checkin,
             icon: const Icon(Icons.location_pin),
             label: Text(busy ? 'Đang lấy vị trí' : 'Check-in điểm bán (200m)'),
           ),
+          if(!own)const Text('Chế độ xem dữ liệu của nhân viên cấp dưới.'),
           if (message != null) Text(message!),
           const SizedBox(height: 24),
           Text('Lịch sử check-in',style:Theme.of(context).textTheme.titleMedium),
@@ -330,7 +332,7 @@ class _CustomerDetailState extends State<CustomerDetail> {
           for(final v in visits)ListTile(leading:const Icon(Icons.verified_outlined),title:Text(DateTime.tryParse(v['checkin_at'].toString())?.toLocal().toString().substring(0,16)??v['checkin_at'].toString()),subtitle:Text('Khoảng cách: ${v['distance_m']} m · GPS: ${v['accuracy_m']} m')),
           const SizedBox(height:16),
           Text('Ảnh điểm bán (${photos.length})', style: Theme.of(context).textTheme.titleMedium),
-          Wrap(spacing:8,children:[OutlinedButton.icon(onPressed:busy?null:()=>addPhoto(ImageSource.camera),icon:const Icon(Icons.camera_alt_outlined),label:const Text('Chụp ảnh')),OutlinedButton.icon(onPressed:busy?null:()=>addPhoto(ImageSource.gallery),icon:const Icon(Icons.photo_library_outlined),label:const Text('Chọn ảnh')),IconButton(onPressed:busy?null:load,tooltip:'Tải lại ảnh và lịch sử',icon:const Icon(Icons.sync))]),
+          Wrap(spacing:8,children:[if(own)OutlinedButton.icon(onPressed:busy?null:()=>addPhoto(ImageSource.camera),icon:const Icon(Icons.camera_alt_outlined),label:const Text('Chụp ảnh')),if(own)OutlinedButton.icon(onPressed:busy?null:()=>addPhoto(ImageSource.gallery),icon:const Icon(Icons.photo_library_outlined),label:const Text('Chọn ảnh')),IconButton(onPressed:busy?null:load,tooltip:'Tải lại ảnh và lịch sử',icon:const Icon(Icons.sync))]),
           ...photos.map((photoId) => FutureBuilder<Uint8List>(
             future: widget.service.photoBytes(customer.id, photoId),
             builder: (ctx, snapshot) {

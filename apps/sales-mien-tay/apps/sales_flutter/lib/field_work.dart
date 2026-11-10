@@ -7,6 +7,7 @@ import 'offline_queue.dart';
 import 'session.dart';
 
 String dayKey(DateTime day)=>'${day.year.toString().padLeft(4,'0')}-${day.month.toString().padLeft(2,'0')}-${day.day.toString().padLeft(2,'0')}';
+DateTime weekMonday(DateTime day)=>DateTime(day.year,day.month,day.day).subtract(Duration(days:day.weekday-1));
 String monthKey(DateTime day)=>dayKey(day).substring(0,7);
 String money(dynamic value){final n=num.tryParse(value.toString())??0;return '${n.round().toString().replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'),(m)=>'.')} đ';}
 class FieldWorkPage extends StatefulWidget{
@@ -29,14 +30,14 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
    final data=decodeApi(await http.get(uri,headers:widget.service.headers).timeout(const Duration(seconds:20)));
    final list=(data['items'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
    await widget.queue.cache(keyName,list);
-   if(mounted)setState((){rows=list;cached=false;});
+   if(mounted)setState((){rows=list;cached=false;if(!rows.any((r)=>r['owner_sub']==employee))employee='';if(!rows.any((r)=>r['district']==district))district='';});
   }catch(e){
    if(e is ApiFailure&&(e.status==401||e.status==403)){if(mounted)setState(()=>rows=[]);}
    else{try{final list=await widget.queue.cached(keyName);if(mounted)setState((){rows=list;cached=true;});}catch(_){}}
    if(mounted)setState(()=>error=e.toString());
   }finally{if(mounted)setState(()=>busy=false);}
  }
- Future<void> chooseDate()async{final d=await showDatePicker(context:context,initialDate:day,firstDate:DateTime(2020),lastDate:DateTime(2100));if(d!=null&&mounted){setState(()=>day=d);await load();}}
+ Future<void> chooseDate()async{final d=await showDatePicker(context:context,initialDate:day,firstDate:DateTime(2020),lastDate:DateTime(2100));if(d!=null&&mounted){setState((){day=d;rows=[];employee='';district='';});await load();}}
  Future<void> addStop()async{
   try{
    List<FieldCustomer> customers;
@@ -65,7 +66,7 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
   try{if(order==null||order<1||order>9999)throw StateError('Thứ tự phải từ 1 đến 9999');await widget.queue.enqueue('/api/v1/records/${row['id']}',{'version':row['version'],'data':{...data,'plannedDate':dayKey(date),'sequence':order,'purpose':note}},method:'PATCH');if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Đã lưu thay đổi · chờ đồng bộ')));}
   catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(e.toString())));}
  }
- DateTime get monday=>DateTime(day.year,day.month,day.day).subtract(Duration(days:day.weekday-1));
+ DateTime get monday=>weekMonday(day);
  Future<void> openCustomer(Map<String,dynamic> row)async{
   try{
    final id=row['customer_id'].toString();
@@ -78,7 +79,7 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
   }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Không mở được điểm bán: $e')));}
  }
  @override Widget build(BuildContext context){
-  final pending=widget.queue.pending.where((r){final p=r['payload'] as Map;final d=p['data'];return p['kind']=='visit'&&d is Map&&(weekly?(d['plannedDate'].toString().compareTo(dayKey(monday))>=0&&d['plannedDate'].toString().compareTo(dayKey(monday.add(const Duration(days:6))))<=0):d['plannedDate']==dayKey(day))&&(widget.service.province.isEmpty||p['province']==widget.service.province);}).toList();
+  final pending=widget.queue.pending.where((r){final p=r['payload'] as Map;final d=p['data'];return (p['kind']=='visit'||r['method']=='PATCH'&&d is Map&&d['customerId']!=null&&d['plannedDate']!=null)&&d is Map&&(weekly?(d['plannedDate'].toString().compareTo(dayKey(monday))>=0&&d['plannedDate'].toString().compareTo(dayKey(monday.add(const Duration(days:6))))<=0):d['plannedDate']==dayKey(day))&&(employee.isEmpty||employee==widget.queue.identity)&&(widget.service.province.isEmpty||p['province']==widget.service.province||r['method']=='PATCH');}).toList();
   final filtered=rows.where((r)=>(employee.isEmpty||r['owner_sub']==employee)&&(district.isEmpty||r['district']==district)).toList();
   final people=<String,String>{for(final r in rows)if(r['owner_sub']!=null)r['owner_sub'].toString():r['full_name']?.toString()??''};
   final districts=rows.map((r)=>r['district']?.toString()??'').where((d)=>d.isNotEmpty).toSet().toList()..sort();
@@ -91,7 +92,7 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
    Padding(padding:const EdgeInsets.all(12),child:Row(children:[Expanded(child:Text(widget.report?'Báo cáo tháng':'Tuyến đi',style:Theme.of(context).textTheme.titleLarge)),IconButton(onPressed:busy?null:load,icon:const Icon(Icons.sync)),if(!widget.report)FilledButton.icon(onPressed:busy?null:addStop,icon:const Icon(Icons.add),label:const Text('Điểm ghé'))])),
    Padding(padding:const EdgeInsets.symmetric(horizontal:12),child:OutlinedButton.icon(onPressed:busy?null:chooseDate,icon:const Icon(Icons.calendar_today),label:Text(widget.report?monthKey(day):dayKey(day)))),
    if(!widget.report)...[
-    SegmentedButton<bool>(segments:const [ButtonSegment(value:false,label:Text('Ngày')),ButtonSegment(value:true,label:Text('Tuần'))],selected:{weekly},onSelectionChanged:busy?null:(v){setState(()=>weekly=v.first);load();}),
+    SegmentedButton<bool>(segments:const [ButtonSegment(value:false,label:Text('Ngày')),ButtonSegment(value:true,label:Text('Tuần'))],selected:{weekly},onSelectionChanged:busy?null:(v){setState((){weekly=v.first;rows=[];employee='';district='';});load();}),
     if(weekly)Text('${dayKey(monday)} – ${dayKey(monday.add(const Duration(days:6)))}'),
     Padding(padding:const EdgeInsets.all(8),child:Column(children:[
       if(people.length>1)DropdownButtonFormField<String>(initialValue:people.containsKey(employee)?employee:'',decoration:const InputDecoration(labelText:'Nhân viên'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả trong quyền')),for(final e in people.entries)DropdownMenuItem(value:e.key,child:Text(e.value))],onChanged:(v)=>setState(()=>employee=v??'')),
@@ -107,7 +108,7 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
      const Text('Chỉ tiêu ≠ dự kiến ≠ doanh thu thực thu. Số liệu theo tháng và phạm vi quyền; chỉ tiêu chung không phân bổ tự động cho tỉnh.'),
      for(final r in rows)Card(child:ListTile(title:Text('${r['full_name']} · ${r['province']??'Chung'}'),subtitle:Text('Chỉ tiêu: ${money(r['target'])}\nDự kiến 5 tuần: ${money(r['forecast'])}\nCheck-in đã xác minh: ${r['checkins']} · ${r['forecasts']} dự kiến'))),
     ]else...[
-     for(final r in pending)Card(child:ListTile(leading:const Icon(Icons.cloud_upload_outlined),title:Text((r['payload'] as Map)['customer_name'].toString()),subtitle:Text(r['error']?.toString()??'Đã lưu máy · chờ đồng bộ'))),
+     for(final r in pending)Card(child:ListTile(leading:const Icon(Icons.cloud_upload_outlined),title:Text((r['payload'] as Map)['customer_name']?.toString()??'Thay đổi tuyến'),subtitle:Text(r['error']?.toString()??'Đã lưu máy · chờ đồng bộ'))),
      for(final r in visible)Card(child:ListTile(leading:CircleAvatar(child:Text(r['planned']==true?'${(r['data'] as Map)['sequence']??''}':'–')),title:Text(r['name'].toString()),subtitle:Text('${r['full_name']} · ${r['district']}, ${r['province']}\n${r['planned']==true?'${(r['data'] as Map)['plannedDate']} · ${r['visited']==true?'Đã ghé':'Chưa ghé theo lịch'}':'Chưa lên lịch'} · ${r['visited_week']==true?'Đã ghé tuần':'Chưa ghé tuần'}\nLần gần nhất: ${r['last_visit']==null?'Chưa có':DateTime.tryParse(r['last_visit'].toString())?.toLocal().toString().substring(0,16)??''}'),trailing:r['planned']==true&&r['owner_sub']==widget.queue.identity?IconButton(tooltip:'Sửa tuyến',icon:const Icon(Icons.edit_outlined),onPressed:()=>editStop(r)):const Icon(Icons.chevron_right),onTap:()=>openCustomer(r))),
     ],
     if(rows.isEmpty&&(widget.report||pending.isEmpty))const Padding(padding:EdgeInsets.all(18),child:Text('Chưa có dữ liệu trong kỳ đã chọn.')),

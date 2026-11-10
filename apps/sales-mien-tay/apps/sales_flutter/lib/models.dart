@@ -17,24 +17,26 @@ class SalesRecord {
   final String id;
   final String kind;
   final int version;
+  final String? owner;
   final String? province;
   final String? district;
   final String? customerName;
   final String? periodYm;
   final Map<String, dynamic> data;
   const SalesRecord({required this.id, required this.kind, this.province,
-    this.district, this.customerName, this.periodYm, required this.data,this.version=1});
+    this.district, this.customerName, this.periodYm, required this.data,this.version=1,this.owner});
 
   factory SalesRecord.fromJson(Map<String, dynamic> v) => SalesRecord(
     id: '${v['id'] ?? ''}',
     kind: '${v['kind'] ?? ''}',
+    owner:v['owner_sub'] as String?,
     version: (v['version'] as num?)?.toInt()??1,
     province: v['province'] as String?, district: v['district'] as String?,
     customerName: v['customer_name'] as String?,
     periodYm: v['period_ym'] as String?,
     data: (v['data'] is Map<String, dynamic>) ? v['data'] as Map<String, dynamic> : {},
   );
-  Map<String,dynamic> toJson()=>{'id':id,'version':version,'kind':kind,'province':province,'district':district,'customer_name':customerName,'period_ym':periodYm,'data':data};
+  Map<String,dynamic> toJson()=>{'id':id,'owner_sub':owner,'version':version,'kind':kind,'province':province,'district':district,'customer_name':customerName,'period_ym':periodYm,'data':data};
   String get title => (customerName?.isNotEmpty ?? false) ? customerName!
     : (data['title']?.toString().isNotEmpty ?? false) ? data['title'].toString()
     : (periodYm ?? kind);

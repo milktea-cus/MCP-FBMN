@@ -262,7 +262,7 @@ class _SalesHomeState extends State<SalesHome> {
               title: Text(record.title),
               subtitle: Text(detail.isEmpty ? (record.data['notes']?.toString() ?? 'Chưa có ghi chú') : detail),
               leading: Icon(_icons[_selectedIndex], color: SalesTheme.brand),
-              trailing: ['target','forecast'].contains(kind)?IconButton(tooltip:'Sửa kế hoạch',icon:const Icon(Icons.edit_outlined),onPressed:()=>_editPlan(record)):const Icon(Icons.cloud_done_outlined),
+              trailing: ['target','forecast'].contains(kind)&&record.owner==_queue.identity?IconButton(tooltip:'Sửa kế hoạch',icon:const Icon(Icons.edit_outlined),onPressed:()=>_editPlan(record)):const Icon(Icons.cloud_done_outlined),
             ));
           })),
     ]);
