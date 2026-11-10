@@ -6,6 +6,7 @@ import 'models.dart';
 import 'theme.dart';
 import 'session.dart';
 import 'auth_gate.dart';
+import 'staff_page.dart';
 
 void main() => runApp(const SalesApp());
 
@@ -267,6 +268,7 @@ class _SalesHomeState extends State<SalesHome> {
             child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
           IconButton(onPressed: _loading ? null : _refresh,
             tooltip: 'Tải lại dữ liệu', icon: const Icon(Icons.sync)),
+          if(widget.me['role']=='admin') IconButton(tooltip:'Quản lý nhân viên',icon:const Icon(Icons.manage_accounts_outlined),onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>StaffPage(session:widget.session)))),
           IconButton(onPressed: _profile,tooltip:'Hồ sơ nhân viên',icon:const Icon(Icons.account_circle_outlined)),
         ],
       ),
