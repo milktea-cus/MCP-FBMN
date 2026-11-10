@@ -111,7 +111,12 @@ export default {
         monday.setUTCDate(date.getUTCDate()-((date.getUTCDay()+6)%7));
         const sunday=new Date(monday);sunday.setUTCDate(monday.getUTCDate()+6);
         const weekStart=monday.toISOString().slice(0,10),weekEnd=sunday.toISOString().slice(0,10);
-        const weekly=url.searchParams.get('period')==='week',start=weekly?weekStart:day,end=weekly?weekEnd:day;
+        const period=url.searchParams.get('period')??'day';
+        if(!['day','week','month'].includes(period))return bad('Kỳ không hợp lệ');
+        const monthly=period==='month',weekly=period==='week';
+        const monthStart=day.slice(0,7)+'-01';
+        const monthEnd=new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth()+1,0)).toISOString().slice(0,10);
+        const start=monthly?monthStart:weekly?weekStart:day,end=monthly?monthEnd:weekly?weekEnd:day;
         const province=url.searchParams.get('province')??'';
         const items=await sql`WITH eligible AS (
           SELECT c.*,s.full_name FROM customers c JOIN staff_members s ON s.user_sub=c.owner_sub
@@ -125,16 +130,17 @@ export default {
         SELECT r.id,r.version,c.owner_sub,c.full_name,c.province,c.district,
           coalesce(r.data,'{}'::jsonb) AS data,c.id AS customer_id,c.name,c.address_line,c.latitude,c.longitude,
           r.id IS NOT NULL AS planned,
-          coalesce(v.visited,false) AS visited,coalesce(v.visited_week,false) AS visited_week,v.last_visit,v.week_visits
+          coalesce(v.visited,false) AS visited,coalesce(v.visited_week,false) AS visited_week,coalesce(v.visited_period,false) AS visited_period,v.last_visit,v.week_visits
         FROM eligible c LEFT JOIN planned r ON r.data->>'customerId'=c.id::text AND r.owner_sub=c.owner_sub
         LEFT JOIN LATERAL (
           SELECT bool_or(to_char(x.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh','YYYY-MM-DD')=coalesce(r.data->>'plannedDate',${day})) AS visited,
           bool_or((x.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN ${weekStart}::date AND ${weekEnd}::date) AS visited_week,
+          bool_or((x.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN ${start}::date AND ${end}::date) AS visited_period,
           max(x.checkin_at) AS last_visit,count(*) FILTER(WHERE (x.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN ${weekStart}::date AND ${weekEnd}::date) AS week_visits
           FROM field_visits x WHERE x.customer_id=c.id AND x.owner_sub=c.owner_sub
         ) v ON true
         ORDER BY r.data->>'plannedDate' NULLS LAST,CASE WHEN r.data->>'sequence' ~ '^[0-9]{1,4}$' THEN (r.data->>'sequence')::int ELSE 9999 END,c.name,c.id`;
-        return json({items,week_start:weekStart,week_end:weekEnd});
+        return json({items,week_start:weekStart,week_end:weekEnd,period_start:start,period_end:end});
       }
       if(url.pathname==='/api/v1/reports/monthly'&&req.method==='GET'){
         const month=url.searchParams.get('month')??'';
@@ -230,7 +236,8 @@ export default {
           const day=body.data.plannedDate,sequence=body.data.sequence;
           if(typeof day!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day))||new Date(day).toISOString().slice(0,10)!==day||typeof sequence!=='number'||!Number.isInteger(sequence)||sequence<1||sequence>9999)return bad('Ngày hoặc thứ tự không hợp lệ');
           const data={...old.data,plannedDate:day,sequence,purpose:String(body.data.purpose??'').slice(0,1000)};
-          try{const rows=await sql`UPDATE sales_records SET data=${JSON.stringify(data)}::jsonb,version=version+1,last_mutation_ref=${body.client_ref}::uuid,updated_at=now() WHERE id=${match[1]}::uuid AND version=${body.version!} AND public.sales_can_access(${user.sub},owner_sub,province,district) AND EXISTS(SELECT 1 FROM customers c WHERE c.id::text=${String(old.data.customerId)} AND public.sales_can_access(${user.sub},c.owner_sub,c.province,c.district)) RETURNING *`;return rows.length?json({item:rows[0]}):bad('Xung đột phiên bản hoặc quyền',409);}
+          try{const rows=await sql`UPDATE sales_records SET data=${JSON.stringify(data)}::jsonb,version=version+1,last_mutation_ref=${body.client_ref}::uuid,updated_at=now() WHERE id=${match[1]}::uuid AND version=${body.version!} AND public.sales_can_access(${user.sub},owner_sub,province,district) AND EXISTS(SELECT 1 FROM customers c WHERE c.id::text=${String(old.data.customerId)} AND public.sales_can_access(${user.sub},c.owner_sub,c.province,c.district))
+          AND NOT EXISTS(SELECT 1 FROM field_visits v WHERE v.customer_id::text=${String(old.data.customerId)} AND v.owner_sub=sales_records.owner_sub AND (v.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date=(sales_records.data->>'plannedDate')::date) RETURNING *`;return rows.length?json({item:rows[0]}):bad('Tuyến đã ghé, xung đột phiên bản hoặc quyền',409);}
           catch(e){if((e as {code?:string}).code==='23505')return bad('Khách đã có lịch ngày này',409);throw e;}
         }
         if(['target','forecast'].includes(old.kind)){

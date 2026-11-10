@@ -75,6 +75,22 @@ class OfflineQueue extends ChangeNotifier {
   await reload();
   if(_timer!=null)unawaited(sync());
  }
+ /// Store a confirmed multi-stop plan in one local transaction.
+ Future<void> enqueueRouteBatch(List<Map<String,dynamic>> records) async{
+  if(_closed)throw StateError('Phiên đã đóng');
+  if(records.isEmpty)return;
+  final d=await db;
+  if(_closed)throw StateError('Phiên đã đóng');
+  final t=d.transaction('outbox',idbModeReadWrite),store=t.objectStore('outbox');
+  final now=DateTime.now().millisecondsSinceEpoch;
+  for(var i=0;i<records.length;i++){
+   final record=records[i],id=record['client_ref'] as String;
+   await store.put({'key':'$namespace:$id','namespace':namespace,'account':identity,'created':now+i,
+    'path':'/api/v1/records','method':'POST','payload':record,'status':'pending','attempts':0,'upload_id':const Uuid().v4()});
+  }
+  await t.completed;await reload();
+  if(_timer!=null)unawaited(sync());
+ }
  Future<void> start() async{
   try{await reload();}catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
   if(_closed)return;
