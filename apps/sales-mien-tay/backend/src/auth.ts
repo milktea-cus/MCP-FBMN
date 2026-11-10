@@ -23,8 +23,17 @@ function setCookie(value: string, age: number) {
  return cookieName+'='+value+'; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age='+age;
 }
 async function provider(path: string, method: string, value?: string, body?: string) {
- return fetch(base+path,{method,redirect:'error',headers:{Origin:origin,Accept:'application/json',
- ...(value?{Cookie:sessionHeader(value)}:{}),...(body?{'Content-Type':'application/json'}:{})},body});
+ // Workers only supports "manual" and "follow". Never forward auth cookies or
+ // credentials to a redirected destination; reject redirects explicitly.
+ let res:Response;
+ try {
+  res=await fetch(base+path,{method,redirect:'manual',headers:{Origin:origin,Accept:'application/json',
+   ...(value?{Cookie:sessionHeader(value)}:{}),...(body?{'Content-Type':'application/json'}:{})},body});
+ } catch {
+  throw new AuthError(503,'Dịch vụ xác thực chưa sẵn sàng');
+ }
+ if(res.status>=300 && res.status<400) throw new AuthError(503,'Dịch vụ xác thực chưa sẵn sàng');
+ return res;
 }
 async function sessionSubject(value: string) {
  if(value.length<32||value.length>4096||! /^[A-Za-z0-9%._~+\/=:-]+$/.test(value))throw new AuthError(401,'Phiên đăng nhập không hợp lệ');
