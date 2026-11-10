@@ -233,7 +233,7 @@ class _CustomerEditorState extends State<CustomerEditor> {
       if(error!=null)Padding(padding:const EdgeInsets.all(8),child:Text(error!,style:const TextStyle(color:Colors.red))),
       const SizedBox(height:12),
       FilledButton(onPressed:saving?null:save,child:Text(saving?'Đang lưu...':'Lưu điểm bán')),
-    ])));
+    ]));
 }
 
 class CustomerDetail extends StatefulWidget {
