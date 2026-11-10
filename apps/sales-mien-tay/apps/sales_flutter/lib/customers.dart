@@ -258,23 +258,47 @@ class _CustomerDetailState extends State<CustomerDetail> {
     }catch(e){if(mounted)setState(()=>message='$e');}
     finally{if(mounted)setState(()=>busy=false);}
   }
-  @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:Text(widget.customer.name)),
-    body:ListView(padding:const EdgeInsets.all(16),children:[
-      Text(widget.customer.name,style:Theme.of(context).textTheme.headlineSmall),
-      Text('${widget.customer.category} · ${widget.customer.status}'),const SizedBox(height:12),
-      Text('Địa chỉ: ${widget.customer.address}, ${widget.customer.district}, ${widget.customer.province}'),
-      Text('Chủ điểm bán: ${widget.customer.contact??'Chưa có'}'),
-      Text('Số điện thoại: ${widget.customer.phone??'Chưa có'}'),
-      Text('GPS: ${widget.customer.latitude?.toStringAsFixed(6)??'Chưa ghi'} / ${widget.customer.longitude?.toStringAsFixed(6)??'Chưa ghi'}'),
-      const SizedBox(height:16),
-      FilledButton.icon(onPressed:busy?null:checkin,icon:const Icon(Icons.location_pin),
-        label:Text(busy?'Đang lấy vị trí':'Check-in điểm bán (200m)')),
-      if(message!=null)Text(message!),
-      const SizedBox(height:24),
-      Text('Ảnh điểm bán (${photos.length})',style:Theme.of(context).textTheme.titleMedium),
-      for(final photoId in photos) FutureBuilder<Uint8List>(future:widget.service.photoBytes(widget.customer.id,photoId),
-        builder:(ctx,snapshot){if(snapshot.hasData)return Padding(padding:const EdgeInsets.only(top:12),
-          child:Image.memory(snapshot.data!,height:180,fit:BoxFit.contain));
-          return const Padding(padding:EdgeInsets.all(10),child:Text('Đang tải ảnh...'));}),
-    ])));
+  @override
+  Widget build(BuildContext context) {
+    final customer = widget.customer;
+    return Scaffold(
+      appBar: AppBar(title: Text(customer.name)),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: <Widget>[
+          Text(customer.name, style: Theme.of(context).textTheme.headlineSmall),
+          Text('${customer.category} · ${customer.status}'),
+          const SizedBox(height: 12),
+          Text('Địa chỉ: ${customer.address}, ${customer.district}, ${customer.province}'),
+          Text('Chủ điểm bán: ${customer.contact ?? 'Chưa có'}'),
+          Text('Số điện thoại: ${customer.phone ?? 'Chưa có'}'),
+          Text('GPS: ${customer.latitude?.toStringAsFixed(6) ?? 'Chưa ghi'} / ${customer.longitude?.toStringAsFixed(6) ?? 'Chưa ghi'}'),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: busy ? null : checkin,
+            icon: const Icon(Icons.location_pin),
+            label: Text(busy ? 'Đang lấy vị trí' : 'Check-in điểm bán (200m)'),
+          ),
+          if (message != null) Text(message!),
+          const SizedBox(height: 24),
+          Text('Ảnh điểm bán (${photos.length})', style: Theme.of(context).textTheme.titleMedium),
+          ...photos.map((photoId) => FutureBuilder<Uint8List>(
+            future: widget.service.photoBytes(customer.id, photoId),
+            builder: (ctx, snapshot) {
+              if (snapshot.hasData) {
+                return Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Image.memory(snapshot.data!, height: 180, fit: BoxFit.contain),
+                );
+              }
+              return const Padding(
+                padding: EdgeInsets.all(10),
+                child: Text('Đang tải ảnh...'),
+              );
+            },
+          )),
+        ],
+      ),
+    );
+  }
 }
