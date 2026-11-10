@@ -19,14 +19,14 @@ List<Map<String,dynamic>> asRows(dynamic v)=>(v as List? ?? []).map(asMap).toLis
 String surveyStatus(Map<String,dynamic> s){
  if(s['server_status']=='completed'||s['status']=='completed')return 'Hoàn thành';
  if(s['status']=='completed_pending')return 'Chờ xác minh hoàn thành';
- if(s['server_status']=='in_progress'||s['status']=='in_progress'&&s['start_op']==null)return 'Đang khảo sát · GPS đã xác minh';
+ if(s['server_status']=='in_progress'||s['status']=='in_progress'&&s['start_op']==null)return s['location_initialized']==true||s['initialize_location']==true?'Đang khảo sát · tọa độ lần đầu đã ghi nhận':'Đang khảo sát · GPS đã xác minh';
  return 'Đang khảo sát · GPS chờ đồng bộ';
 }
 String? checklistError(List<Map<String,dynamic>> qs,Map<String,dynamic> answers){
  for(final q in qs){
   final v=answers[q['id']];
-  if(v==null||v is String&&v.trim().isEmpty){if(q['required']==true)return 'Thiếu: ${q['label']}';continue;}
-  if(q['type']=='number'&&(v is! num||!v.isFinite||v<0)||q['type']=='boolean'&&v is! bool||q['type']=='choice'&&!(q['options'] as List).contains(v)||q['type']=='text'&&(v is! String||v.length>2000))return 'Không hợp lệ: ${q['label']}';
+  if(v==null||v is String&&v.trim().isEmpty||q['type']=='multi_choice'&&v is List&&v.isEmpty){if(q['required']==true)return 'Thiếu: ${q['label']}';continue;}
+  if(q['type']=='number'&&(v is! num||!v.isFinite||v<0)||q['type']=='boolean'&&v is! bool||q['type']=='choice'&&!(q['options'] as List).contains(v)||q['type']=='multi_choice'&&(v is! List||v.length>50||v.toSet().length!=v.length||v.any((x)=>x is! String||!(q['options'] as List).contains(x)))||q['type']=='text'&&(v is! String||v.length>2000))return 'Không hợp lệ: ${q['label']}';
  }
  return null;
 }
@@ -89,11 +89,22 @@ class _SurveyPageState extends State<SurveyPage>{
   setState(()=>busy=true);
   try{
    final t=await template(row['province'].toString());if(!mounted)return;
-   final pos=await captureGps(context);
-   if(pos.accuracy>100)throw StateError('GPS cần độ chính xác tối đa 100m');
+   var pos=await captureGps(context);
+   while(!pos.accuracy.isFinite||pos.accuracy>100||pos.accuracy<0){
+    if(!mounted)return;
+    final retry=await showDialog<bool>(context:context,builder:(c)=>AlertDialog(title:const Text('Vị trí thiết bị chưa đủ chính xác'),content:Text('Sai số hiện tại: ${pos.accuracy.isFinite?pos.accuracy.toStringAsFixed(0):"không xác định"} m. Cần tối đa 100 m. Nếu dùng máy tính, hãy thử trên điện thoại có GPS; bật Vị trí chính xác và đứng nơi thoáng. Tọa độ khách hàng chưa được kiểm tra ở bước này.'),actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Hủy')),FilledButton(onPressed:()=>Navigator.pop(c,true),child:const Text('Lấy lại GPS'))]));
+    if(retry!=true||!mounted)return;
+    pos=await captureGps(context);
+   }
+   final first=row['latitude']==null&&row['longitude']==null;
+   if(first){
+    if(!mounted)return;
+    final consent=await showDialog<bool>(context:context,builder:(c)=>AlertDialog(title:const Text('Điểm bán chưa có tọa độ'),content:Text('Bạn đang ở đúng địa chỉ của ${row['name']}? ${row['address_line']??""}\n\nChỉ xác nhận khi đang có mặt và được phép ghi nhận tọa độ điểm bán. Vị trí GPS này sẽ làm mốc cho các lần ghé sau. Lần đầu là ghi nhận mốc, không phải đối chiếu với vị trí có sẵn.'),actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Hủy')),FilledButton(onPressed:()=>Navigator.pop(c,true),child:const Text('Xác nhận vị trí lần đầu'))]));
+    if(consent!=true||!mounted)return;
+   }else if(row['location_consent']==false){notify('Điểm bán chưa được phép sử dụng tọa độ. Kiểm tra hồ sơ khách hàng.');return;}
    final id=const Uuid().v4(),started=pos.timestamp.toUtc().toIso8601String();
-   final payload=<String,dynamic>{'client_ref':id,'customer_id':row['customer_id'],'route_stop_id':row['planned']==true?row['id']:null,'template_id':t['id'],'started_at':started,'latitude':pos.latitude,'longitude':pos.longitude,'accuracy_m':pos.accuracy};
-   final draft=<String,dynamic>{...payload,'id':id,'owner_sub':widget.queue.identity,'province':row['province'],'district':row['district'],'customer_name':row['name'],'template_version':t['version'],'questions':t['questions'],'status':'in_progress','start_op':id,'version':1,'answers':<String,dynamic>{},'note':'','photos':<Map<String,dynamic>>[]};
+   final payload=<String,dynamic>{'client_ref':id,'customer_id':row['customer_id'],'route_stop_id':row['planned']==true?row['id']:null,'template_id':t['id'],'started_at':started,'latitude':pos.latitude,'longitude':pos.longitude,'accuracy_m':pos.accuracy,if(first)'initialize_location':true};
+   final draft=<String,dynamic>{...payload,'id':id,'owner_sub':widget.queue.identity,'province':row['province'],'district':row['district'],'customer_name':row['name'],'template_version':t['version'],'questions':t['questions'],'status':'in_progress','location_initialized':first,'start_op':id,'version':1,'answers':<String,dynamic>{},'note':'','photos':<Map<String,dynamic>>[]};
    await widget.queue.saveSurveyDraft(draft,path:'/api/v1/sessions',payload:payload);
    if(mounted)await open(draft);
   }catch(e){notify('Không bắt đầu được: $e');}
@@ -233,8 +244,12 @@ class _SurveyDetailState extends State<SurveyDetail>{
  }
  Widget question(Map<String,dynamic> q){
   final key=q['id'].toString(),v=answers[key],label='${q['label']}${q['required']==true?' *':''}';
-  if(locked)return ListTile(contentPadding:EdgeInsets.zero,title:Text(label),subtitle:Text(v==null?'Chưa trả lời':v is bool?(v?'Có':'Không'):v.toString()));
+  if(locked)return ListTile(contentPadding:EdgeInsets.zero,title:Text(label),subtitle:Text(v==null?'Chưa trả lời':v is bool?(v?'Có':'Không'):v is List?v.join(', '):v.toString()));
   if(q['type']=='boolean')return DropdownButtonFormField<bool>(initialValue:v is bool?v:null,decoration:InputDecoration(labelText:label),items:const [DropdownMenuItem(value:true,child:Text('Có')),DropdownMenuItem(value:false,child:Text('Không'))],onChanged:(v)=>answer(key,v));
+  if(q['type']=='multi_choice'){
+   final options=(q['options'] as List).cast<String>(),selected=(v is List?v.cast<String>():<String>[]);
+   return InputDecorator(decoration:InputDecoration(labelText:label,helperText:'Chọn nhiều · ${selected.length} đã chọn'),child:Wrap(spacing:6,runSpacing:4,children:[for(final option in options)FilterChip(label:Text(option),selected:selected.contains(option),onSelected:busy?null:(checked)=>answer(key,checked?[...selected,option]:selected.where((x)=>x!=option).toList()))]));
+  }
   if(q['type']=='choice'){final options=(q['options'] as List).cast<String>();return DropdownButtonFormField<String>(initialValue:options.contains(v)?v:null,isExpanded:true,decoration:InputDecoration(labelText:label),items:[for(final o in options)DropdownMenuItem(value:o,child:Text(o))],onChanged:(v)=>answer(key,v));}
   return TextFormField(initialValue:v?.toString()??'',decoration:InputDecoration(labelText:label),keyboardType:q['type']=='number'?const TextInputType.numberWithOptions(decimal:true):TextInputType.text,maxLines:q['type']=='number'?1:2,onChanged:(s)=>answer(key,q['type']=='number'?num.tryParse(s):s));
  }
@@ -247,6 +262,7 @@ class _SurveyDetailState extends State<SurveyDetail>{
     Text(draft['route_stop_id']==null?'Ngoài tuyến':'Theo tuyến'),Text(surveyStatus(draft),style:Theme.of(context).textTheme.titleMedium),
     Text('Bắt đầu: ${draft['started_at']}'),if(draft['ended_at']!=null)Text('Kết thúc: ${draft['ended_at']}'),
     Text('GPS: ${draft['latitude']}, ${draft['longitude']} · Sai số ${draft['accuracy_m']} m'),
+    if(draft['location_initialized']==true)const Text('Ghi nhận tọa độ lần đầu · chưa có mốc để đối chiếu.'),
     if(!own)const Text('Chế độ xem của quản lý · không được sửa phiên người khác.'),
     if(busy)const LinearProgressIndicator(),if(message!=null)Text(message!),
     for(final p in pending)ListTile(contentPadding:EdgeInsets.zero,leading:const Icon(Icons.cloud_upload_outlined),title:Text(p['status']=='blocked'?'Cần xử lý lỗi đồng bộ':'Đang chờ đồng bộ'),subtitle:Text(p['error']?.toString()??p['path'].toString()),trailing:p['status']=='blocked'&&own?TextButton(onPressed:busy||widget.queue.syncing?null:()=>widget.queue.retrySurveyOperation(p['upload_id'].toString()),child:const Text('Thử lại')):null),
@@ -279,7 +295,7 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
  }
  Future<void> publish()async{
   if(busy||province.isEmpty)return;
-  if(qs.isEmpty||qs.length>50||qs.any((q)=>q['label'].toString().trim().isEmpty||q['type']=='choice'&&((q['options'] as List? ?? []).length<2))){setState(()=>message='Mỗi câu cần nhãn; câu chọn cần ít nhất 2 lựa chọn.');return;}
+  if(qs.isEmpty||qs.length>50||qs.any((q)=>q['label'].toString().trim().isEmpty||['choice','multi_choice'].contains(q['type'])&&((q['options'] as List? ?? []).length<2))){setState(()=>message='Mỗi câu cần nhãn; câu chọn cần ít nhất 2 lựa chọn.');return;}
   setState(()=>busy=true);
   try{
    final r=await http.post(widget.service.uri('/api/v1/survey-templates'),headers:widget.service.headers,body:jsonEncode({'client_ref':const Uuid().v4(),'province':province,'expected_version':version,'questions':qs})).timeout(const Duration(seconds:20));
@@ -290,12 +306,12 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
  @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Mẫu khảo sát theo tỉnh')),body:ListView(padding:const EdgeInsets.all(16),children:[
   DropdownButtonFormField<String>(initialValue:province.isEmpty?null:province,isExpanded:true,decoration:const InputDecoration(labelText:'Tỉnh/TP'),items:[for(final p in widget.regions.provinces)DropdownMenuItem(value:p,child:Text(p))],onChanged:busy?null:(p){if(p!=null)load(p);}),
   if(busy)const LinearProgressIndicator(),if(message!=null)Text(message!),
-  if(province.isNotEmpty)...[Text('Phiên bản hiện tại: $version · lưu sẽ tạo phiên bản mới'),const Text('Thiết lập NPP/nhãn/SKU theo tỉnh, không dùng danh mục NPP cố định cho mọi tỉnh.'),
+  if(province.isNotEmpty)...[Text('Phiên bản hiện tại: $version · lưu sẽ tạo phiên bản mới'),const Text('Chọn nhiều cho NPP, nhãn hàng, SKU. Thêm lựa chọn Khác và câu văn bản tùy chọn để ghi tên ngoài danh mục.'),
    for(final q in qs)Card(key:ValueKey(q['id']),child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
     TextFormField(key:ValueKey('${province}:$version:${q['id']}'),initialValue:q['label'].toString(),decoration:const InputDecoration(labelText:'Nội dung câu hỏi'),onChanged:(v)=>q['label']=v),
     const SizedBox(height:8),
-    DropdownButtonFormField<String>(initialValue:q['type'].toString(),decoration:const InputDecoration(labelText:'Kiểu trả lời'),items:const [DropdownMenuItem(value:'text',child:Text('Văn bản')),DropdownMenuItem(value:'number',child:Text('Số')),DropdownMenuItem(value:'boolean',child:Text('Có / Không')),DropdownMenuItem(value:'choice',child:Text('Chọn một'))],onChanged:(v)=>setState(()=>q['type']=v??'text')),
-    if(q['type']=='choice')TextFormField(initialValue:(q['options'] as List? ?? []).join(', '),decoration:const InputDecoration(labelText:'Lựa chọn (ngăn cách bằng dấu phẩy)'),onChanged:(v)=>q['options']=v.split(',').map((s)=>s.trim()).where((s)=>s.isNotEmpty).toSet().toList()),
+    DropdownButtonFormField<String>(initialValue:q['type'].toString(),decoration:const InputDecoration(labelText:'Kiểu trả lời'),items:const [DropdownMenuItem(value:'text',child:Text('Văn bản')),DropdownMenuItem(value:'number',child:Text('Số')),DropdownMenuItem(value:'boolean',child:Text('Có / Không')),DropdownMenuItem(value:'choice',child:Text('Chọn một')),DropdownMenuItem(value:'multi_choice',child:Text('Chọn nhiều'))],onChanged:(v)=>setState(()=>q['type']=v??'text')),
+    if(['choice','multi_choice'].contains(q['type']))TextFormField(initialValue:(q['options'] as List? ?? []).join(', '),decoration:const InputDecoration(labelText:'Lựa chọn (ngăn cách bằng dấu phẩy)'),onChanged:(v)=>q['options']=v.split(',').map((s)=>s.trim()).where((s)=>s.isNotEmpty).toSet().toList()),
     CheckboxListTile(contentPadding:EdgeInsets.zero,value:q['required']==true,title:const Text('Bắt buộc'),onChanged:(v)=>setState(()=>q['required']=v==true)),
     TextButton(onPressed:busy?null:()=>setState(()=>qs.remove(q)),child:const Text('Bỏ câu hỏi trong bản mới')),
    ]))),

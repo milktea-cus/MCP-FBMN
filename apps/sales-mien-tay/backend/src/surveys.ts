@@ -4,7 +4,7 @@ import districts from './districts_old.json';
 type Db=NeonQueryFunction<false,false>;
 type Env={DATABASE_URL:string;PHOTOS_BUCKET?:R2Bucket};
 type Actor={sub:string;admin:boolean;manager:boolean};
-type Question={id:string;label:string;type:'text'|'number'|'boolean'|'choice';required:boolean;options?:string[]};
+type Question={id:string;label:string;type:'text'|'number'|'boolean'|'choice'|'multi_choice';required:boolean;options?:string[]};
 type Body=Record<string,unknown>;
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const areas=districts as Record<string,string[]>;
@@ -41,9 +41,9 @@ function questions(value:unknown):Question[]|null{
  if(!Array.isArray(value)||value.length<1||value.length>50)return null;
  const out:Question[]=[];const seen=new Set<string>();
  for(const q of value){
-  if(!q||typeof q!=='object'||typeof q.id!=='string'||!/^([a-z][a-z0-9_]{0,39})$/.test(q.id)||seen.has(q.id)||typeof q.label!=='string'||!q.label.trim()||q.label.length>160||!['text','number','boolean','choice'].includes(q.type)||typeof q.required!=='boolean')return null;
+  if(!q||typeof q!=='object'||typeof q.id!=='string'||!/^([a-z][a-z0-9_]{0,39})$/.test(q.id)||seen.has(q.id)||typeof q.label!=='string'||!q.label.trim()||q.label.length>160||!['text','number','boolean','choice','multi_choice'].includes(q.type)||typeof q.required!=='boolean')return null;
   let options:string[]|undefined;
-  if(q.type==='choice'){if(!Array.isArray(q.options)||q.options.length<2||q.options.length>50||q.options.some((v:unknown)=>typeof v!=='string'||!v.trim()||v.length>120)||new Set(q.options).size!==q.options.length)return null;options=q.options;}
+  if(q.type==='choice'||q.type==='multi_choice'){if(!Array.isArray(q.options)||q.options.length<2||q.options.length>50||q.options.some((v:unknown)=>typeof v!=='string'||!v.trim()||v.length>120)||new Set(q.options).size!==q.options.length)return null;options=q.options;}
   seen.add(q.id);out.push({id:q.id,label:q.label.trim(),type:q.type,required:q.required,...(options?{options}:{})});
  }
  return out;
@@ -54,8 +54,8 @@ export function validateSurveyAnswers(template:Question[],value:unknown):string|
  if(Object.keys(answers).some(k=>!ids.has(k)))return 'Checklist có câu hỏi không thuộc mẫu';
  for(const q of template){
   const v=answers[q.id];
-  if(v===undefined||v===null||v===''){if(q.required)return 'Thiếu: '+q.label;continue;}
-  if(q.type==='text'&&(typeof v!=='string'||!v.trim()||v.length>2000)||q.type==='number'&&(typeof v!=='number'||!Number.isFinite(v)||v<0)||q.type==='boolean'&&typeof v!=='boolean'||q.type==='choice'&&(typeof v!=='string'||!q.options?.includes(v)))return 'Câu trả lời không hợp lệ: '+q.label;
+  if(v===undefined||v===null||v===''||q.type==='multi_choice'&&Array.isArray(v)&&v.length===0){if(q.required)return 'Thiếu: '+q.label;continue;}
+  if(q.type==='text'&&(typeof v!=='string'||!v.trim()||v.length>2000)||q.type==='number'&&(typeof v!=='number'||!Number.isFinite(v)||v<0)||q.type==='boolean'&&typeof v!=='boolean'||q.type==='choice'&&(typeof v!=='string'||!q.options?.includes(v))||q.type==='multi_choice'&&(!Array.isArray(v)||v.length>50||new Set(v).size!==v.length||v.some(x=>typeof x!=='string'||!q.options?.includes(x))))return 'Câu trả lời không hợp lệ: '+q.label;
  }
  return null;
 }
@@ -151,23 +151,33 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   if(prior)return prior.owner_sub===actor.sub&&prior.customer_id===cid&&prior.template_id===tid&&(prior.route_stop_id??null)===rid?json({item:prior,idempotent:true}):bad('UUID phiên đã được sử dụng',409);
   const customers=await db`SELECT c.* FROM customers c WHERE c.id=${cid}::uuid AND c.owner_sub=${actor.sub} AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)`;
   const c=customers[0];if(!c)return bad('Không có quyền điểm bán',403);
-  if(!c.location_consent||c.latitude===null||c.longitude===null)return bad('Điểm bán chưa có tọa độ được phép dùng',409);
-  const distance=meters(c.latitude,c.longitude,v.latitude as number,v.longitude as number);
-  if(distance>200)return bad('GPS ngoài bán kính 200m',422);
+  const first=c.latitude===null&&c.longitude===null;
+  if(first&&v.initialize_location!==true)return bad('Điểm bán chưa có tọa độ. Cần xác nhận ghi nhận vị trí lần đầu tại điểm bán.',409);
+  if(!first&&(!c.location_consent||c.latitude===null||c.longitude===null))return bad('Tọa độ điểm bán chưa được phép sử dụng',409);
+  const distance=first?0:meters(c.latitude,c.longitude,v.latitude as number,v.longitude as number);
+  if(distance>200)return bad('GPS cách điểm bán '+Math.round(distance)+'m, vượt bán kính 200m. Kiểm tra địa chỉ hoặc tọa độ đã lưu.',422);
   const template=await db`SELECT id FROM field_survey_templates WHERE id=${tid}::uuid AND province=${c.province}`;
   if(!template.length)return bad('Mẫu không thuộc tỉnh điểm bán',409);
   if(rid){const stops=await db`SELECT id FROM sales_records WHERE id=${rid}::uuid AND kind='visit' AND owner_sub=${actor.sub} AND data->>'customerId'=${cid} AND data->>'plannedDate'=${vnDay(started)} AND public.sales_can_access(${actor.sub},owner_sub,province,district)`;if(!stops.length)return bad('Điểm ghé không thuộc tuyến/ngày thực tế',409);}
   // One transaction: verified GPS history and parent session share the stable client UUID.
-  const rows=await db`WITH created AS (
-   INSERT INTO field_survey_sessions(id,customer_id,owner_sub,province,district,route_stop_id,template_id,started_at,latitude,longitude,accuracy_m,distance_m)
-   SELECT ${id}::uuid,c.id,${actor.sub},c.province,c.district,${rid}::uuid,${tid}::uuid,${started}::timestamptz,${v.latitude as number},${v.longitude as number},${v.accuracy_m as number},${distance}
-   FROM customers c WHERE c.id=${cid}::uuid AND c.owner_sub=${actor.sub} AND c.province=${c.province} AND c.district=${c.district} AND c.location_consent AND c.latitude=${c.latitude} AND c.longitude=${c.longitude}
+  const rows=await db`WITH eligible AS MATERIALIZED (
+   SELECT c.* FROM customers c WHERE c.id=${cid}::uuid AND c.owner_sub=${actor.sub} AND c.province=${c.province} AND c.district=${c.district}
    AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)
+   AND ((${first} AND c.latitude IS NULL AND c.longitude IS NULL) OR (NOT ${first} AND c.location_consent AND c.latitude IS NOT DISTINCT FROM ${c.latitude}::double precision AND c.longitude IS NOT DISTINCT FROM ${c.longitude}::double precision))
    AND (${rid===null} OR EXISTS(SELECT 1 FROM sales_records r WHERE r.id=${rid}::uuid AND r.kind='visit' AND r.owner_sub=${actor.sub} AND r.data->>'customerId'=${cid} AND r.data->>'plannedDate'=${vnDay(started)}))
-   ON CONFLICT(id) DO NOTHING RETURNING *
+   FOR UPDATE
+  ), created AS (
+   INSERT INTO field_survey_sessions(id,customer_id,owner_sub,province,district,route_stop_id,template_id,started_at,latitude,longitude,accuracy_m,distance_m,location_initialized)
+   SELECT ${id}::uuid,c.id,${actor.sub},c.province,c.district,${rid}::uuid,${tid}::uuid,${started}::timestamptz,${v.latitude as number},${v.longitude as number},${v.accuracy_m as number},${distance},${first}
+   FROM eligible c ON CONFLICT(id) DO NOTHING RETURNING *
+  ), initialized AS (
+   UPDATE customers c SET latitude=s.latitude,longitude=s.longitude,location_accuracy_m=s.accuracy_m,location_consent=true,version=c.version+1,updated_at=now()
+   FROM created s WHERE c.id=s.customer_id AND s.location_initialized AND c.latitude IS NULL AND c.longitude IS NULL RETURNING c.id
   ), gps AS (
    INSERT INTO field_visits(customer_id,owner_sub,client_ref,checkin_at,latitude,longitude,accuracy_m,distance_m,note)
-   SELECT customer_id,owner_sub,id,started_at,latitude,longitude,accuracy_m,distance_m,'Phiên khảo sát' FROM created RETURNING id
+   SELECT customer_id,owner_sub,id,started_at,latitude,longitude,accuracy_m,distance_m,
+    CASE WHEN location_initialized THEN 'Phiên khảo sát · ghi nhận tọa độ lần đầu' ELSE 'Phiên khảo sát' END
+   FROM created WHERE NOT location_initialized OR EXISTS(SELECT 1 FROM initialized) RETURNING id
   ) SELECT created.* FROM created JOIN gps ON true`;
   const item=await getSession(db,actor,id);
   if(!item||item.owner_sub!==actor.sub||item.customer_id!==cid||item.template_id!==tid||(item.route_stop_id??null)!==rid)return bad('Xung đột phiên hoặc quyền',409);
