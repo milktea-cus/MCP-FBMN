@@ -6,7 +6,8 @@ class RecordEditor extends StatefulWidget {
   final RegionCatalog catalog;
   final Future<void> Function(Map<String, dynamic>) onSave;
   final Map<String,dynamic>? linkedCustomer;
-  const RecordEditor({super.key, required this.kind, required this.catalog, required this.onSave,this.linkedCustomer});
+  final SalesRecord? initial;
+  const RecordEditor({super.key, required this.kind, required this.catalog, required this.onSave,this.linkedCustomer,this.initial});
   @override
   State<RecordEditor> createState() => _RecordEditorState();
 }
@@ -28,6 +29,7 @@ class _RecordEditorState extends State<RecordEditor> {
     super.initState();
     _ctrl('period').text = '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
     _ctrl('surveyDate').text = DateTime.now().toIso8601String().substring(0, 10);
+    final old=widget.initial;if(old!=null){for(final entry in old.data.entries){if(entry.value is String||entry.value is num)_ctrl(entry.key).text=entry.value.toString();}final weeks=old.data['weekly'];if(weeks is List){for(var i=0;i<weeks.length&&i<5;i++){_ctrl('week${i+1}').text=weeks[i].toString();}}_ctrl('period').text=old.periodYm??'';_ctrl('customerName').text=old.customerName??'';_province=old.province;_district=old.district;}
     final c=widget.linkedCustomer;if(c!=null){_ctrl('customerName').text=c['name'].toString();_province=c['province'].toString();_district=c['district'].toString();}
   }
   @override
@@ -41,7 +43,7 @@ class _RecordEditorState extends State<RecordEditor> {
       padding: const EdgeInsets.only(bottom: 12),
       child: TextFormField(
         controller: _ctrl(name),
-        readOnly: widget.linkedCustomer!=null&&name=='customerName',
+        readOnly: (widget.linkedCustomer!=null&&name=='customerName')||(widget.initial!=null&&['customerName','period'].contains(name)),
         keyboardType: numeric ? const TextInputType.numberWithOptions(decimal: true)
             : (multi ? TextInputType.multiline : TextInputType.text),
         maxLines: multi ? 3 : 1,
@@ -55,7 +57,7 @@ class _RecordEditorState extends State<RecordEditor> {
     child: Text(title, style: Theme.of(context).textTheme.titleMedium),
   );
   Widget _locations() {
-    if(widget.linkedCustomer!=null)return Padding(padding:const EdgeInsets.all(12),child:Text('Địa bàn điểm bán: $_district, $_province'));
+    if(widget.linkedCustomer!=null||widget.initial!=null)return Padding(padding:const EdgeInsets.all(12),child:Text('Địa bàn điểm bán: $_district, $_province'));
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       _title('Địa bàn theo địa giới cũ (trước 2025)'),
       DropdownButtonFormField<String>(
@@ -232,6 +234,7 @@ class _RecordEditorState extends State<RecordEditor> {
       }
     }
     final details = <String, dynamic>{
+      ...?widget.initial?.data,
       for (final entry in _inputs.entries) entry.key: entry.value.text.trim(),
     };
     if(widget.linkedCustomer!=null)details['customerId']=widget.linkedCustomer!['id'];

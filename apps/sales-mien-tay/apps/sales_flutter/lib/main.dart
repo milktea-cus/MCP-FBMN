@@ -101,6 +101,11 @@ class _SalesHomeState extends State<SalesHome> {
     )));
   }
 
+  Future<void> _editPlan(SalesRecord record)async{
+    await Navigator.push(context,MaterialPageRoute(builder:(_)=>RecordEditor(kind:record.kind,catalog:_catalog,initial:record,onSave:(data)async{
+      await _queue.enqueue('/api/v1/records/${record.id}',{'data':data['data'],'version':record.version},method:'PATCH');_notify('Đã lưu thay đổi trên máy · chờ đồng bộ');
+    })));
+  }
   String _money(num value) {
     final digits = value.round().toString();
     return '${digits.replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => '.')} đ';
@@ -257,7 +262,7 @@ class _SalesHomeState extends State<SalesHome> {
               title: Text(record.title),
               subtitle: Text(detail.isEmpty ? (record.data['notes']?.toString() ?? 'Chưa có ghi chú') : detail),
               leading: Icon(_icons[_selectedIndex], color: SalesTheme.brand),
-              trailing: const Icon(Icons.cloud_done_outlined),
+              trailing: ['target','forecast'].contains(kind)?IconButton(tooltip:'Sửa kế hoạch',icon:const Icon(Icons.edit_outlined),onPressed:()=>_editPlan(record)):const Icon(Icons.cloud_done_outlined),
             ));
           })),
     ]);

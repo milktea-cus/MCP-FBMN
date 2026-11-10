@@ -18,6 +18,7 @@ type Json = Record<string, unknown>;
 interface SalesRecordBody {
   kind?: Kind;
   client_ref?: string;
+  version?: number;
   province?: string;
   district?: string;
   customer_name?: string;
@@ -158,7 +159,7 @@ export default {
         const period = url.searchParams.get('period_ym') ?? '';
         const rows = await sql`
           SELECT id, kind, owner_sub, province, district, customer_name, period_ym,
-                 data, created_at, updated_at
+                 data, version, created_at, updated_at
           FROM sales_records
           WHERE kind = ${kind} AND public.sales_can_access(${user.sub},owner_sub,province,district)
             AND (${!province} OR province = ${province})
@@ -200,9 +201,21 @@ export default {
         let body: SalesRecordBody;
         try { body = await readBody(req); } catch { return bad('JSON không hợp lệ'); }
         if (body.kind || !body.data) return bad('PATCH chỉ hỗ trợ data cùng trường địa bàn');
-        const current = await sql`SELECT province,district,owner_sub FROM sales_records WHERE id=${match[1]}::uuid
+        const current = await sql`SELECT * FROM sales_records WHERE id=${match[1]}::uuid
           AND public.sales_can_access(${user.sub},owner_sub,province,district) LIMIT 1`;
         if (!current.length) return bad('Không tìm thấy hoặc không có quyền', 404);
+        const old=current[0];
+        if(['target','forecast'].includes(old.kind)){
+          if(typeof body.client_ref!=='string'||!/^[0-9a-f-]{36}$/i.test(body.client_ref)||!Number.isInteger(body.version))return bad('Thiếu phiên bản hoặc mã thao tác');
+          if(old.last_mutation_ref===body.client_ref)return json({item:old,idempotent:true});
+          if(Number(old.version)!==body.version)return bad('Kế hoạch đã thay đổi, tải lại trước khi sửa',409);
+          const data={...body.data, ...(old.data?.customerId?{customerId:old.data.customerId}:{})};
+          const error=validate({kind:old.kind,province:old.province,district:old.district,customer_name:old.customer_name,period_ym:old.period_ym,data},true);
+          if(error)return bad(error);
+          if(old.kind==='target'&&(typeof data.monthlyTarget!=='number'||!Number.isFinite(data.monthlyTarget)||data.monthlyTarget<0))return bad('Chỉ tiêu không hợp lệ');
+          const rows=await sql`UPDATE sales_records SET data=${JSON.stringify(data)}::jsonb,version=version+1,last_mutation_ref=${body.client_ref}::uuid,updated_at=now() WHERE id=${match[1]}::uuid AND version=${body.version!} AND public.sales_can_access(${user.sub},owner_sub,province,district) RETURNING *`;
+          return rows.length?json({item:rows[0]}):bad('Xung đột phiên bản hoặc quyền',409);
+        }
         const province = body.province ?? current[0].province;
         const district = body.district ?? current[0].district;
         if (province && !locationMap[province]) return bad('Tỉnh không hợp lệ');
