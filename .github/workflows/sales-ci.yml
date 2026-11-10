@@ -5,11 +5,13 @@ on:
     paths:
       - "apps/sales-mien-tay/**"
       - ".github/workflows/sales-ci.yml"
+      - ".github/workflows/sales-production-comment.yml"
   push:
     branches: [main]
     paths:
       - "apps/sales-mien-tay/**"
       - ".github/workflows/sales-ci.yml"
+      - ".github/workflows/sales-production-comment.yml"
   workflow_dispatch:
 
 permissions:

@@ -33,16 +33,14 @@ npx wrangler secret put DATABASE_URL
 
 Nhập pooled URL tại prompt của Wrangler, không đặt ở command line. Deploy lần đầu chưa có DB secret phải fail closed cho nghiệp vụ. Kiểm tra deployment thực tế và /health; /health chỉ chứng minh Worker sống, KHÔNG chứng minh database. Kiểm tra với admin/test JWT thật: API customers đọc được; token giả nhận 401; staff ngoài địa bàn 403; ảnh upload/read đúng quyền; R2 không public. Cấp staff scopes bằng admin API theo sub IdP xác minh và danh mục tỉnh/huyện. Chưa có nhân viên được phân quyền (0 rows khi kiểm tra).
 
-## 3. Vercel production bằng CMD
+## 3. Vercel production bằng IssueOps (không dùng CMD)
 
-Chỉ sau khi Worker live, login thật và các release gates đạt, từ repo root (Windows CMD):
+Kênh duy nhất: https://github.com/milktea-cus/MCP-FBMN/issues/2
 
-```bat
-git pull --ff-only origin main
-set "API_BASE_URL=https://field-sales-api.milktea-cus.workers.dev"
-rem VERCEL_TOKEN đã đặt an toàn trong môi trường.
-rem VERCEL_CLI_VERSION đặt phiên bản exact đã kiểm tra (npm view vercel version để tham khảo).
-call apps\sales-mien-tay\scripts\deploy-vercel.cmd
+Owner milktea-cus comment chính xác:
+
+```
+/deploy production
 ```
 
-Script tự gắn project/team, generate platform scaffolding, analyze, test, build Flutter web và deploy CLI --prod; không deploy preview. Kiểm tra URL https://sales-mien-tay.vercel.app sau khi CLI báo thành công. Phiên bản hiện còn thiếu đăng nhập thật/offline/kiosk, không mở cho kinh doanh chỉ vì build xanh.
+Workflow .github/workflows/sales-production-comment.yml xác thực owner và issue #2, lấy đúng SHA main có CI xanh, kiểm tra cổng production và API, build/test Flutter, tạo static prebuilt output và chạy Vercel CLI --prebuilt --prod. Không preview, không Git integration auto-deploy. VERCEL_TOKEN là Actions secret hoặc environment production secret; không đưa vào issue. Chỉ đặt environment/repository variable SALES_PRODUCTION_READY=true sau khi hoàn thành và nghiệm thu backend/auth, offline, kiosk và app; hiện chưa đạt. Kiểm tra GitHub Actions run và URL production sau khi workflow thành công. Các script CLI local trước đó là tài liệu lịch sử, không phải quy trình release chính thức.
