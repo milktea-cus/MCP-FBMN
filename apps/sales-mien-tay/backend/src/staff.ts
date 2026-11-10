@@ -21,7 +21,7 @@ export async function staffRoutes(req:Request,env:AuthEnv,actor:{sub:string;admi
  }
  const canonical=[...scopes.values()].filter(s=>s.district===''||!scopes.has(s.province+'|'));
  const manager=data.manager_sub??null;
- if(manager!==null&&(typeof manager!=='string'||manager===data.user_sub||data.role!=='sales'))return json({error:'Quản lý trực tiếp không hợp lệ'},400);
+ if(manager!==null&&(typeof manager!=='string'||manager===data.user_sub||!['sales','manager'].includes(String(data.role))))return json({error:'Quản lý trực tiếp không hợp lệ'},400);
  try{
   const email=typeof data.email==='string'?data.email.trim().toLowerCase():null;
   if(email!==null&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return json({error:'Email không hợp lệ'},400);

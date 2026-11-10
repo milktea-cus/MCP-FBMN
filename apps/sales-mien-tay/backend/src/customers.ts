@@ -123,7 +123,7 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
   if(!current) return fail('Không tìm thấy điểm bán hoặc không có quyền',404);
   if (!match[2] && req.method==='GET') return response({item:current});
   if (!match[2] && req.method==='PATCH') {
-    if (current.owner_sub!==actor.sub && !actor.admin && !actor.manager) return fail('Không được sửa khách hàng của người khác',403);
+    if (current.owner_sub!==actor.sub && !actor.admin) return fail('Không được sửa khách hàng của người khác',403);
     let data: ObjectBody;try{data=await input(req);}catch{return fail('JSON không hợp lệ');}
     if(data.client_ref!==undefined&&!uuid.test(String(data.client_ref)))return fail('client_ref không hợp lệ');
     if(data.client_ref&&current.last_mutation_ref===data.client_ref)return response({item:current,idempotent:true});
@@ -145,10 +145,11 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
   if (match[2]==='visits') {
     if (req.method==='GET') {
       const rows=await db`SELECT id,customer_id,owner_sub,checkin_at,latitude,longitude,accuracy_m,distance_m,note
-        FROM field_visits WHERE customer_id=${id}::uuid ORDER BY checkin_at DESC LIMIT 100`;
+        FROM field_visits WHERE customer_id=${id}::uuid AND public.sales_can_access(${actor.sub},owner_sub,${current.province},${current.district}) ORDER BY checkin_at DESC LIMIT 100`;
       return response({items:rows});
     }
     if (req.method!=='POST' || match[3])return fail('Method not allowed',405);
+    if(current.owner_sub!==actor.sub)return fail('Chỉ check-in khách hàng của mình',403);
     let data:ObjectBody;try{data=await input(req);}catch{return fail('JSON không hợp lệ');}
     if(!uuid.test(String(data.client_ref??'')))return fail('client_ref UUID bắt buộc');
     if(!point(data.latitude,data.longitude,data.accuracy_m) || typeof data.accuracy_m!=='number' || data.accuracy_m>100)
@@ -172,18 +173,19 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
   if(match[2]==='photos') {
     if(req.method==='GET' && !match[3]) {
       const rows=await db`SELECT id,mime_type,bytes,created_at FROM customer_photos
-        WHERE customer_id=${id}::uuid ORDER BY created_at DESC LIMIT 100`;
+        WHERE customer_id=${id}::uuid AND public.sales_can_access(${actor.sub},owner_sub,${current.province},${current.district}) ORDER BY created_at DESC LIMIT 100`;
       return response({items:rows});
     }
     if(req.method==='GET' && match[3] && uuid.test(match[3])) {
       if(!env.PHOTOS_BUCKET)return fail('Kho ảnh chưa được cấu hình',503);
-      const rows=await db`SELECT object_key,mime_type FROM customer_photos WHERE id=${match[3]}::uuid AND customer_id=${id}::uuid LIMIT 1`;
+      const rows=await db`SELECT object_key,mime_type FROM customer_photos WHERE id=${match[3]}::uuid AND customer_id=${id}::uuid AND public.sales_can_access(${actor.sub},owner_sub,${current.province},${current.district}) LIMIT 1`;
       if(!rows.length)return fail('Không tìm thấy ảnh',404);
       const blob=await env.PHOTOS_BUCKET.get(rows[0].object_key);
       if(!blob)return fail('Ảnh không còn trên kho',404);
       return new Response(blob.body,{headers:{'Content-Type':rows[0].mime_type,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
     }
     if(req.method==='POST' && !match[3]) {
+      if(current.owner_sub!==actor.sub)return fail('Chỉ thêm ảnh cho khách hàng của mình',403);
       if(!env.PHOTOS_BUCKET)return fail('Kho ảnh chưa được cấu hình',503);
       const uploadId=req.headers.get('X-Upload-Id');
       if(!uploadId || !uuid.test(uploadId))return fail('Thiếu X-Upload-Id UUID');

@@ -107,18 +107,34 @@ export default {
       if(url.pathname==='/api/v1/routes'&&req.method==='GET'){
         const day=url.searchParams.get('day')??'';
         if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day))||new Date(day).toISOString().slice(0,10)!==day)return bad('Ngày không hợp lệ');
+        const date=new Date(day+'T00:00:00Z'),monday=new Date(date);
+        monday.setUTCDate(date.getUTCDate()-((date.getUTCDay()+6)%7));
+        const sunday=new Date(monday);sunday.setUTCDate(monday.getUTCDate()+6);
+        const weekStart=monday.toISOString().slice(0,10),weekEnd=sunday.toISOString().slice(0,10);
+        const weekly=url.searchParams.get('period')==='week',start=weekly?weekStart:day,end=weekly?weekEnd:day;
         const province=url.searchParams.get('province')??'';
-        const items=await sql`SELECT r.id,r.owner_sub,r.customer_name,r.province,r.district,r.data,
-          c.id AS customer_id,c.name,c.address_line,c.latitude,c.longitude,
-          EXISTS(SELECT 1 FROM field_visits v WHERE v.customer_id=c.id AND v.owner_sub=r.owner_sub
-            AND (v.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date=${day}::date) AS visited
-          FROM sales_records r JOIN customers c ON c.id::text=r.data->>'customerId'
-          WHERE r.kind='visit' AND r.data->>'plannedDate'=${day}
-            AND public.sales_can_access(${user.sub},r.owner_sub,r.province,r.district)
-            AND public.sales_can_access(${user.sub},c.owner_sub,c.province,c.district)
-            AND (${!province} OR r.province=${province})
-          ORDER BY CASE WHEN r.data->>'sequence' ~ '^[0-9]{1,4}$' THEN (r.data->>'sequence')::int ELSE 9999 END,r.created_at,r.id`;
-        return json({items});
+        const items=await sql`WITH eligible AS (
+          SELECT c.*,s.full_name FROM customers c JOIN staff_members s ON s.user_sub=c.owner_sub
+          WHERE public.sales_can_access(${user.sub},c.owner_sub,c.province,c.district)
+          AND (${!province} OR c.province=${province})
+        ), planned AS (
+          SELECT r.id,r.version,r.owner_sub,r.data,r.province,r.district
+          FROM sales_records r WHERE r.kind='visit' AND r.data->>'plannedDate' BETWEEN ${start} AND ${end}
+          AND public.sales_can_access(${user.sub},r.owner_sub,r.province,r.district)
+        )
+        SELECT r.id,r.version,c.owner_sub,c.full_name,c.province,c.district,
+          coalesce(r.data,'{}'::jsonb) AS data,c.id AS customer_id,c.name,c.address_line,c.latitude,c.longitude,
+          r.id IS NOT NULL AS planned,
+          coalesce(v.visited,false) AS visited,coalesce(v.visited_week,false) AS visited_week,v.last_visit,v.week_visits
+        FROM eligible c LEFT JOIN planned r ON r.data->>'customerId'=c.id::text AND r.owner_sub=c.owner_sub
+        LEFT JOIN LATERAL (
+          SELECT bool_or(to_char(x.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh','YYYY-MM-DD')=coalesce(r.data->>'plannedDate',${day})) AS visited,
+          bool_or((x.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN ${weekStart}::date AND ${weekEnd}::date) AS visited_week,
+          max(x.checkin_at) AS last_visit,count(*) FILTER(WHERE (x.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN ${weekStart}::date AND ${weekEnd}::date) AS week_visits
+          FROM field_visits x WHERE x.customer_id=c.id AND x.owner_sub=c.owner_sub
+        ) v ON true
+        ORDER BY r.data->>'plannedDate' NULLS LAST,CASE WHEN r.data->>'sequence' ~ '^[0-9]{1,4}$' THEN (r.data->>'sequence')::int ELSE 9999 END,c.name,c.id`;
+        return json({items,week_start:weekStart,week_end:weekEnd});
       }
       if(url.pathname==='/api/v1/reports/monthly'&&req.method==='GET'){
         const month=url.searchParams.get('month')??'';
@@ -174,8 +190,9 @@ export default {
         if(body.kind&&['visit','forecast','survey'].includes(body.kind)&&body.data?.customerId!==undefined){
           const id=body.data.customerId,day=body.data.plannedDate,sequence=body.data.sequence;
           if(typeof id!=='string'||!/^[0-9a-f-]{36}$/i.test(id)||(body.kind==='visit'&&(typeof day!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day))||new Date(day).toISOString().slice(0,10)!==day||typeof sequence!=='number'||!Number.isInteger(sequence)||sequence<1||sequence>9999)))return bad('Điểm ghé, ngày hoặc thứ tự không hợp lệ');
-          const customer=await sql`SELECT name,province,district FROM customers WHERE id::text=${id} AND public.sales_can_access(${user.sub},owner_sub,province,district)`;
+          const customer=await sql`SELECT name,province,district,owner_sub FROM customers WHERE id::text=${id} AND public.sales_can_access(${user.sub},owner_sub,province,district)`;
           if(!customer.length)return bad('Không có quyền điểm bán',403);
+          if(body.kind==='visit'&&customer[0].owner_sub!==user.sub)return bad('Chỉ lập tuyến cho khách hàng của mình',403);
           if(body.province!==customer[0].province||body.district!==customer[0].district)return bad('Địa bàn tuyến không khớp điểm bán');
           body.customer_name=customer[0].name;
         }
@@ -205,6 +222,17 @@ export default {
           AND public.sales_can_access(${user.sub},owner_sub,province,district) LIMIT 1`;
         if (!current.length) return bad('Không tìm thấy hoặc không có quyền', 404);
         const old=current[0];
+        if(old.owner_sub!==user.sub&&!user.admin)return bad('Chỉ xem dữ liệu cấp dưới, không sửa thay',403);
+        if(old.kind==='visit'&&old.data?.customerId){
+          if(typeof body.client_ref!=='string'||!/^[0-9a-f-]{36}$/i.test(body.client_ref)||!Number.isInteger(body.version))return bad('Thiếu phiên bản hoặc mã thao tác');
+          if(old.last_mutation_ref===body.client_ref)return json({item:old,idempotent:true});
+          if(Number(old.version)!==body.version)return bad('Tuyến đã thay đổi, tải lại trước khi sửa',409);
+          const day=body.data.plannedDate,sequence=body.data.sequence;
+          if(typeof day!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day))||new Date(day).toISOString().slice(0,10)!==day||typeof sequence!=='number'||!Number.isInteger(sequence)||sequence<1||sequence>9999)return bad('Ngày hoặc thứ tự không hợp lệ');
+          const data={...old.data,plannedDate:day,sequence,purpose:String(body.data.purpose??'').slice(0,1000)};
+          try{const rows=await sql`UPDATE sales_records SET data=${JSON.stringify(data)}::jsonb,version=version+1,last_mutation_ref=${body.client_ref}::uuid,updated_at=now() WHERE id=${match[1]}::uuid AND version=${body.version!} AND public.sales_can_access(${user.sub},owner_sub,province,district) AND EXISTS(SELECT 1 FROM customers c WHERE c.id::text=${String(old.data.customerId)} AND public.sales_can_access(${user.sub},c.owner_sub,c.province,c.district)) RETURNING *`;return rows.length?json({item:rows[0]}):bad('Xung đột phiên bản hoặc quyền',409);}
+          catch(e){if((e as {code?:string}).code==='23505')return bad('Khách đã có lịch ngày này',409);throw e;}
+        }
         if(['target','forecast'].includes(old.kind)){
           if(typeof body.client_ref!=='string'||!/^[0-9a-f-]{36}$/i.test(body.client_ref)||!Number.isInteger(body.version))return bad('Thiếu phiên bản hoặc mã thao tác');
           if(old.last_mutation_ref===body.client_ref)return json({item:old,idempotent:true});

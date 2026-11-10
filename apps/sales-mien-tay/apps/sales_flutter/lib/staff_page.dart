@@ -67,7 +67,7 @@ class _StaffEditorState extends State<StaffEditor>{
     if(!mounted)return;
     setState(()=>subject.text=id);
    }
-   await widget.session.post('/api/v1/admin/staff',{'user_sub':subject.text.trim(),'email':email.text.trim(),'employee_code':code.text.trim(),'full_name':name.text.trim(),'phone':phone.text.trim(),'role':role,'active':active,'manager_sub':role=='sales'?manager:null,'scope_revision':widget.staff?['scope_revision']?.toString()??'0','scopes':[for(final e in scopes.entries)for(final d in e.value){'province':e.key,'district':d}]});
+   await widget.session.post('/api/v1/admin/staff',{'user_sub':subject.text.trim(),'email':email.text.trim(),'employee_code':code.text.trim(),'full_name':name.text.trim(),'phone':phone.text.trim(),'role':role,'active':active,'manager_sub':role!='admin'?manager:null,'scope_revision':widget.staff?['scope_revision']?.toString()??'0','scopes':[for(final e in scopes.entries)for(final d in e.value){'province':e.key,'district':d}]});
    if(mounted)Navigator.pop(context,true);
   }catch(e){if(mounted)setState(()=>error=e.toString());}
   finally{if(mounted)setState(()=>busy=false);}
@@ -80,7 +80,7 @@ class _StaffEditorState extends State<StaffEditor>{
    field(name,'Họ tên'),field(email,'Email nhân viên',readOnly:widget.staff==null&&subject.text.isNotEmpty),
    field(code,'Mã nhân viên'),field(phone,'Điện thoại'),
    DropdownButtonFormField<String>(initialValue:role,decoration:const InputDecoration(labelText:'Vai trò'),items:const [DropdownMenuItem(value:'admin',child:Text('Admin')),DropdownMenuItem(value:'manager',child:Text('Manager')),DropdownMenuItem(value:'sales',child:Text('Sales'))],onChanged:busy?null:(v)=>setState(()=>role=v??'sales')),
-   if(role=='sales')DropdownButtonFormField<String>(initialValue:widget.managers.any((m)=>m['user_sub']==manager)?manager:'',decoration:const InputDecoration(labelText:'Quản lý trực tiếp'),items:[const DropdownMenuItem(value:'',child:Text('Chưa phân quản lý')),for(final m in widget.managers)DropdownMenuItem(value:m['user_sub'].toString(),child:Text(m['full_name'].toString()))],onChanged:busy?null:(v)=>setState(()=>manager=v==''?null:v)),
+   if(role!='admin')DropdownButtonFormField<String>(initialValue:widget.managers.any((m)=>m['user_sub']==manager)?manager:'',decoration:const InputDecoration(labelText:'Quản lý trực tiếp'),items:[const DropdownMenuItem(value:'',child:Text('Chưa phân quản lý')),for(final m in widget.managers.where((m)=>m['user_sub']!=widget.staff?['user_sub']))DropdownMenuItem(value:m['user_sub'].toString(),child:Text(m['full_name'].toString()))],onChanged:busy?null:(v)=>setState(()=>manager=v==''?null:v)),
    SwitchListTile(title:const Text('Tài khoản hoạt động'),value:active,onChanged:busy?null:(v)=>setState(()=>active=v)),
    const Text('Địa bàn (chọn nhiều tỉnh/huyện)',style:TextStyle(fontWeight:FontWeight.bold)),
    for(final p in widget.catalog.provinces)ExpansionTile(title:Text(p),subtitle:Text(scopes[p]?.contains('')==true?'Toàn tỉnh':(scopes[p]?.length??0).toString()+' huyện'),children:[

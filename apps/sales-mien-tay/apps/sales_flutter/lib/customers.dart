@@ -12,13 +12,13 @@ import 'editor.dart';
 
 class FieldCustomer {
   final String id, name, address, province, district, category, status;
-  final String? phone, contact, note;
+  final String? phone, contact, note, owner;
   final double? latitude, longitude;
   final int version;
-  Map<String,dynamic> toJson()=>{'id':id,'name':name,'address_line':address,'province':province,'district':district,'category':category,'status':status,'phone':phone,'contact_name':contact,'note':note,'latitude':latitude,'longitude':longitude,'version':version};
+  Map<String,dynamic> toJson()=>{'id':id,'owner_sub':owner,'name':name,'address_line':address,'province':province,'district':district,'category':category,'status':status,'phone':phone,'contact_name':contact,'note':note,'latitude':latitude,'longitude':longitude,'version':version};
   FieldCustomer.fromJson(Map<String, dynamic> j)
       : id = j['id'].toString(), name = j['name'].toString(),
-        address = j['address_line'].toString(), province = j['province'].toString(),
+        owner = j['owner_sub'] as String?, address = j['address_line'].toString(), province = j['province'].toString(),
         district = j['district'].toString(), category = j['category'].toString(),
         status = j['status'].toString(), phone = j['phone'] as String?,
         contact = j['contact_name'] as String?, note = j['note'] as String?,
