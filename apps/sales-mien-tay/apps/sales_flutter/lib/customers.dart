@@ -14,6 +14,7 @@ class FieldCustomer {
   final String? phone, contact, note;
   final double? latitude, longitude;
   final int version;
+  Map<String,dynamic> toJson()=>{'id':id,'name':name,'address_line':address,'province':province,'district':district,'category':category,'status':status,'phone':phone,'contact_name':contact,'note':note,'latitude':latitude,'longitude':longitude,'version':version};
   FieldCustomer.fromJson(Map<String, dynamic> j)
       : id = j['id'].toString(), name = j['name'].toString(),
         address = j['address_line'].toString(), province = j['province'].toString(),
@@ -121,8 +122,9 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
     setState(() => loading = true);
     try {
       final items = await widget.service.list();
+      if(widget.queue!=null)await widget.queue!.cache('customers:${widget.service.province}',items.map((r)=>r.toJson()).toList());
       if (mounted) setState(() {customers = items; error = null;});
-    } catch (e) {if (mounted) setState(() {error = '$e';});}
+    } catch (e) {if(widget.queue!=null&&!(e is ApiFailure&&(e.status==401||e.status==403))){try{final cached=await widget.queue!.cached('customers:${widget.service.province}');if(mounted)setState(()=>customers=cached.map(FieldCustomer.fromJson).toList());}catch(_) {}}if (mounted) setState(() {error = '$e';});}
     finally {if (mounted) setState(() => loading = false);}
   }
   Future<void> add() async {

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'session.dart';
 import 'models.dart';
 import 'main.dart';
+import 'offline_queue.dart';
 
 class AuthGate extends StatefulWidget {
  const AuthGate({super.key});
@@ -16,6 +17,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
  bool busy=true,checking=false,obscure=true,otpMode=true,logoutPending=false;
  String? error,notice;
  bool recovering=false, connectionNotice=false;
+ DateTime? leaseExpires;
  Timer? timer;
  @override void initState(){
   super.initState();WidgetsBinding.instance.addObserver(this);
@@ -37,18 +39,26 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
    if(connectionNotice||recovering){if(mounted)setState((){connectionNotice=false;recovering=false;error=null;});}
    final changed=me==null||me!['identity']!=next['identity']||me!['scope_revision']!=next['scope_revision']||me!['role']!=next['role'];
    if(changed){
+    if(me!=null){await OfflineLease.clear();if(!mounted)return;Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;});}
     final meta=await session.get('/api/v1/meta');
     final regions=RegionCatalog((meta['districts'] as Map<String,dynamic>).map((k,v)=>MapEntry(k,(v as List).cast<String>())));
     if(!mounted)return;
     Navigator.of(context).popUntil((r)=>r.isFirst);
     setState((){me=next;catalog=regions;error=null;});
    }
+   leaseExpires=DateTime.now().add(OfflineLease.duration);
+   if(catalog!=null){try{await OfflineLease.remember(next,catalog!.districts);}catch(_){/* online session remains available */}
+   }
   }catch(e){
    final hadSession=me!=null;
    final rejected=e is ApiFailure && (e.status==401||e.status==403);
-   if(!rejected){if(mounted){if(hadSession){if(!connectionNotice){connectionNotice=true;ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Mất kết nối tạm thời. Phiên vẫn được giữ.')));}}else{setState(()=>recovering=true);}}return;}
+   if(!rejected){
+    if(hadSession&&leaseExpires!=null&&DateTime.now().isBefore(leaseExpires!)){if(mounted&&!connectionNotice){connectionNotice=true;ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Mất kết nối tạm thời. Phiên vẫn được giữ.')));}return;}
+    if(!hadSession){try{final saved=await OfflineLease.read();if(saved!=null&&mounted&&!logoutPending){final cachedMe=Map<String,dynamic>.from(saved['me'] as Map);final districts=(saved['districts'] as Map).map((k,v)=>MapEntry(k.toString(),(v as List).cast<String>()));leaseExpires=DateTime.fromMillisecondsSinceEpoch(saved['expires'] as int);setState((){me=cachedMe;catalog=RegionCatalog(districts);recovering=false;connectionNotice=true;});return;}}catch(_) {}}
+    if(mounted){Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;recovering=true;});}return;
+   }
    recovering=false;
-   if(rejected) await session.clear();
+   if(rejected){try{await OfflineLease.clear();}catch(_){}await session.clear();}
    if(mounted){
     if(hadSession)Navigator.of(context).popUntil((r)=>r.isFirst);
     setState((){me=null;catalog=null;error=hadSession||e.status!=401?e.toString():null;});
@@ -72,7 +82,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
  Future<void> logout() async{
   if(busy)return;
   setState((){logoutPending=true;busy=true;me=null;catalog=null;recovering=false;});
-  try{await session.logout();if(!mounted)return;Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;error=null;logoutPending=false;});}
+  try{await OfflineLease.clear();await session.logout();if(!mounted)return;Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;error=null;logoutPending=false;});}
   catch(e){if(mounted){Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;error='Chưa xác nhận đăng xuất trên máy chủ. Hãy kết nối mạng và thử lại.';});}}
   finally{if(mounted)setState(()=>busy=false);}
  }

@@ -32,6 +32,7 @@ class SalesRecord {
     periodYm: v['period_ym'] as String?,
     data: (v['data'] is Map<String, dynamic>) ? v['data'] as Map<String, dynamic> : {},
   );
+  Map<String,dynamic> toJson()=>{'id':id,'kind':kind,'province':province,'district':district,'customer_name':customerName,'period_ym':periodYm,'data':data};
   String get title => (customerName?.isNotEmpty ?? false) ? customerName!
     : (data['title']?.toString().isNotEmpty ?? false) ? data['title'].toString()
     : (periodYm ?? kind);
