@@ -31,9 +31,12 @@ export async function staffRoutes(req:Request,env:AuthEnv,actor:{sub:string;admi
    if(String(old.scope_revision)!==String(data.scope_revision??'0'))return json({error:'Hồ sơ đã thay đổi, mở lại trước khi lưu.'},409);
    if((await db`SELECT 1 FROM staff_members WHERE lower(email)=${email} AND user_sub<>${data.user_sub}`).length)return json({error:'Email đã được sử dụng.'},409);
    if((await db`SELECT 1 FROM staff_members WHERE employee_code=${data.employee_code.trim()} AND user_sub<>${data.user_sub}`).length)return json({error:'Mã nhân viên đã tồn tại.'},409);
+   if(manager!==null&&!(await db`SELECT 1 FROM staff_members WHERE user_sub=${manager as string} AND role='manager' AND active`).length)return json({error:'Quản lý trực tiếp không hợp lệ.'},400);
+   if(old.role==='admin'&&old.active&&(!data.active||data.role!=='admin')&&!(await db`SELECT 1 FROM staff_members WHERE role='admin' AND active AND user_sub<>${data.user_sub}`).length)return json({error:'Không được khóa hoặc hạ quyền Admin cuối cùng.'},409);
    await changeStaffEmail(req,data.user_sub,email);
   }
   const result=await db`SELECT public.sales_save_staff(${actor.sub},${data.user_sub},${data.employee_code.trim()},${data.full_name.trim()},${String(data.phone??'')},${String(data.role)},${data.active},${manager as string|null},${JSON.stringify(canonical)}::jsonb,${String(data.scope_revision??'0')}::bigint) AS item`;
+  if(email&&String(result[0].item?.staff?.email??'').toLowerCase()!==email)return json({error:'Email xác thực chưa đồng bộ. Mở lại hồ sơ và thử lại.'},409);
   return json({item:result[0].item});
  }catch(e){
   if(e instanceof AuthError)return json({error:e.message},e.status);

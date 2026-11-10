@@ -183,18 +183,19 @@ class _CustomerEditorState extends State<CustomerEditor> {
     catch(e){if(mounted)setState(()=>error='$e');}
   }
   Future<void> save() async {
+    if(saving)return;
     if (!key.currentState!.validate() || province == null || district == null) {
       setState(() => error = 'Vui lòng điền thông tin và chọn tỉnh/huyện'); return;
     }
     setState(() => saving = true);
     try {
-      final data=<String,dynamic>{'client_ref':clientRef,'name':name.text.trim(),
+      final data=<String,dynamic>{if(widget.customer==null)'client_ref':clientRef,'name':name.text.trim(),
         'address_line':address.text.trim(),'contact_name':contact.text.trim().isEmpty?null:contact.text.trim(),
         'phone':phone.text.trim().isEmpty?null:phone.text.trim(),'note':note.text.trim().isEmpty?null:note.text.trim(),
         'province':province,'district':district,'category':category,
         if(widget.customer==null||position!=null)...{'location_consent':position != null,'latitude':position?.latitude,'longitude':position?.longitude,'location_accuracy_m':position?.accuracy}};
       final created=widget.customer==null?await widget.service.add(data):await widget.service.update(widget.customer!,data);
-      if (photo != null) await widget.service.uploadPhoto(created.id, photo!);
+      if (photo != null) {try{await widget.service.uploadPhoto(created.id, photo!);}catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Đã lưu điểm bán, nhưng chưa tải được ảnh: $e')));}}
       if (mounted) Navigator.pop(context, true);
     } catch(e){if(mounted)setState(()=>error='$e');}
     finally {if(mounted)setState(()=>saving=false);}

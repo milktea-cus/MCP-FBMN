@@ -15,11 +15,12 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
  RegionCatalog? catalog;
  bool busy=true,checking=false,obscure=true,otpMode=true,logoutPending=false;
  String? error,notice;
+ bool recovering=false, connectionNotice=false;
  Timer? timer;
  @override void initState(){
   super.initState();WidgetsBinding.instance.addObserver(this);
   onSessionRejected=(){if(me!=null)unawaited(revalidate());};
-  timer=Timer.periodic(const Duration(seconds:30),(_){if(me!=null)unawaited(revalidate());});
+  timer=Timer.periodic(const Duration(seconds:30),(_){if(me!=null||recovering)unawaited(revalidate());});
   unawaited(start());
  }
  Future<void> start() async{
@@ -33,6 +34,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   try{
    final next=await session.get('/api/v1/me');
    if(!mounted||logoutPending)return;
+   if(connectionNotice||recovering){if(mounted)setState((){connectionNotice=false;recovering=false;error=null;});}
    final changed=me==null||me!['identity']!=next['identity']||me!['scope_revision']!=next['scope_revision']||me!['role']!=next['role'];
    if(changed){
     final meta=await session.get('/api/v1/meta');
@@ -44,7 +46,8 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   }catch(e){
    final hadSession=me!=null;
    final rejected=e is ApiFailure && (e.status==401||e.status==403);
-   if(hadSession&&!rejected){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Mất kết nối tạm thời. Giữ nguyên phiên, sẽ kiểm tra lại.')));return;}
+   if(!rejected){if(mounted){if(hadSession){if(!connectionNotice){connectionNotice=true;ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Mất kết nối tạm thời. Phiên vẫn được giữ.')));}}else{setState(()=>recovering=true);}}return;}
+   recovering=false;
    if(rejected) await session.clear();
    if(mounted){
     if(hadSession)Navigator.of(context).popUntil((r)=>r.isFirst);
@@ -68,13 +71,14 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
  }
  Future<void> logout() async{
   if(busy)return;
-  setState((){logoutPending=true;busy=true;me=null;catalog=null;});
+  setState((){logoutPending=true;busy=true;me=null;catalog=null;recovering=false;});
   try{await session.logout();if(!mounted)return;Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;error=null;logoutPending=false;});}
   catch(e){if(mounted){Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;error='Chưa xác nhận đăng xuất trên máy chủ. Hãy kết nối mạng và thử lại.';});}}
   finally{if(mounted)setState(()=>busy=false);}
  }
  @override void dispose(){timer?.cancel();onSessionRejected=null;WidgetsBinding.instance.removeObserver(this);email.dispose();password.dispose();super.dispose();}
  @override Widget build(BuildContext context){
+  if(recovering&&me==null)return Scaffold(body:Center(child:Column(mainAxisSize:MainAxisSize.min,children:[const CircularProgressIndicator(),const SizedBox(height:16),const Text('Đang khôi phục phiên. Kết nối mạng để tiếp tục.'),TextButton(onPressed:()=>unawaited(revalidate()),child:const Text('Thử lại')),TextButton(onPressed:logout,child:const Text('Đăng xuất'))])));
   if(me!=null&&catalog!=null)return SalesHome(key:ValueKey(me!['identity'].toString()+':'+me!['scope_revision'].toString()),session:session,me:me!,catalog:catalog!,onLogout:logout);
   return Scaffold(body:SafeArea(child:Center(child:SingleChildScrollView(padding:const EdgeInsets.all(24),child:ConstrainedBox(constraints:const BoxConstraints(maxWidth:420),child:Card(child:Padding(padding:const EdgeInsets.all(24),child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,mainAxisSize:MainAxisSize.min,children:[
    Image.asset('assets/fbmn-transparent-logo.webp',height:46,alignment:Alignment.centerLeft),const SizedBox(height:12),
