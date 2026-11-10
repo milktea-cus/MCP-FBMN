@@ -157,9 +157,12 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       return fail('Điểm bán chưa có tọa độ được phép sử dụng',409);
     const distance=distanceMeters(current.latitude,current.longitude,data.latitude as number,data.longitude as number);
     if(distance>200)return fail('Vị trí check-in ngoài bán kính 200m',422);
-    const rows=await db`INSERT INTO field_visits(customer_id,owner_sub,client_ref,latitude,longitude,accuracy_m,distance_m,note)
-      VALUES (${id}::uuid,${actor.sub},${String(data.client_ref)}::uuid,${data.latitude as number},${data.longitude as number},
-        ${data.accuracy_m},${distance},${optional(data.note,2000)})
+    const captured=typeof data.captured_at==='string'?Date.parse(data.captured_at):Date.now();
+    if(!Number.isFinite(captured)||captured>Date.now()+60000||captured<Date.now()-30*86400000)return fail('Thời gian ghi nhận GPS không hợp lệ',422);
+    const rows=await db`INSERT INTO field_visits(customer_id,owner_sub,client_ref,latitude,longitude,accuracy_m,distance_m,note,checkin_at)
+      SELECT ${id}::uuid,${actor.sub},${String(data.client_ref)}::uuid,${data.latitude as number},${data.longitude as number},
+        ${data.accuracy_m},${distance},${optional(data.note,2000)},${new Date(captured).toISOString()}::timestamptz
+      WHERE EXISTS(SELECT 1 FROM customers c WHERE c.id=${id}::uuid AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district))
       ON CONFLICT(owner_sub,client_ref) DO NOTHING RETURNING *`;
     const existing=rows.length?rows:await db`SELECT * FROM field_visits WHERE owner_sub=${actor.sub} AND client_ref=${String(data.client_ref)}::uuid AND customer_id=${id}::uuid`;
     if(!existing.length)return fail('client_ref đã dùng cho điểm bán khác',409);
@@ -199,10 +202,11 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       await env.PHOTOS_BUCKET.put(key,binary,{httpMetadata:{contentType:mime}});
       try {
         const rows=await db`INSERT INTO customer_photos(id,customer_id,owner_sub,object_key,mime_type,bytes)
-          VALUES (${uploadId}::uuid,${id}::uuid,${actor.sub},${key},${mime},${bytes.byteLength}) RETURNING id,mime_type,bytes,created_at`;
+          SELECT ${uploadId}::uuid,${id}::uuid,${actor.sub},${key},${mime},${bytes.byteLength} WHERE EXISTS(SELECT 1 FROM customers c WHERE c.id=${id}::uuid AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)) ON CONFLICT(id) DO NOTHING RETURNING id,mime_type,bytes,created_at`;
+        if(!rows.length){const existing=await db`SELECT id,mime_type,bytes FROM customer_photos WHERE id=${uploadId}::uuid AND customer_id=${id}::uuid AND owner_sub=${actor.sub}`;if(existing.length)return response({item:existing[0],idempotent:true});return fail('Không thể lưu ảnh',409);}
         await db`INSERT INTO field_audit_events(actor_sub,action,entity_type,entity_id) VALUES (${actor.sub},'upload','photo',${uploadId}::uuid)`;
         return response({item:rows[0]},201);
-      }catch(e){await env.PHOTOS_BUCKET.delete(key);throw e;}
+      }catch(e){throw e;}
     }
   }
   return fail('Method not allowed',405);

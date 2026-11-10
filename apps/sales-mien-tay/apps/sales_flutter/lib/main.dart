@@ -8,6 +8,7 @@ import 'session.dart';
 import 'auth_gate.dart';
 import 'staff_page.dart';
 import 'offline_queue.dart';
+import 'field_work.dart';
 import 'dart:async';
 
 void main() => runApp(const SalesApp());
@@ -49,11 +50,11 @@ class _SalesHomeState extends State<SalesHome> {
   int _selectedIndex = 0;
   String? _message;
 
-  List<String> get _sections => ['Tổng quan', 'Khách hàng / Điểm bán', ...moduleKinds.map((e) => moduleLabels[e]!)];
+  List<String> get _sections => ['Tổng quan', 'Khách hàng / Điểm bán', ...moduleKinds.map((e) => moduleLabels[e]!), 'Báo cáo tháng'];
   List<IconData> get _icons => const [
     Icons.dashboard_outlined, Icons.storefront_outlined, Icons.store_outlined, Icons.flag_outlined,
     Icons.payments_outlined, Icons.route_outlined, Icons.handshake_outlined,
-    Icons.policy_outlined, Icons.support_agent_outlined,
+    Icons.policy_outlined, Icons.support_agent_outlined, Icons.analytics_outlined,
   ];
 
   @override
@@ -200,6 +201,8 @@ class _SalesHomeState extends State<SalesHome> {
         subtitle: const Text('Ảnh • vị trí GPS • check-in • lịch sử'),
         trailing: const Icon(Icons.chevron_right),
         onTap: () => setState(() => _selectedIndex = 1))),
+      Card(child:ListTile(leading:const Icon(Icons.route_outlined),title:const Text('Tuyến đi hôm nay'),subtitle:const Text('Điểm ghé · GPS · lịch sử'),trailing:const Icon(Icons.chevron_right),onTap:()=>setState(()=>_selectedIndex=5))),
+      Card(child:ListTile(leading:const Icon(Icons.analytics_outlined),title:const Text('Báo cáo tháng'),subtitle:const Text('Chỉ tiêu · dự kiến · check-in theo nhân viên'),trailing:const Icon(Icons.chevron_right),onTap:()=>setState(()=>_selectedIndex=9))),
       const SizedBox(height: 20),
       _coverageTable(surveys),
       const SizedBox(height: 22),
@@ -260,6 +263,7 @@ class _SalesHomeState extends State<SalesHome> {
     ]);
   }
 
+  CustomerService get _customerService=>CustomerService(_apiUrl,_accessToken,province:_province,identity:_queue.identity,revision:_queue.revision);
   Widget _navItem(int i) => ListTile(
     leading: Icon(_icons[i]), title: Text(_sections[i]),
     selected: _selectedIndex == i,
@@ -282,9 +286,9 @@ class _SalesHomeState extends State<SalesHome> {
         ],
       ),
       bottomNavigationBar: narrow ? NavigationBar(
-        selectedIndex: const [0,1,2,5].contains(_selectedIndex)?const [0,1,2,5].indexOf(_selectedIndex):4,
-        onDestinationSelected:(i){if(i==4){_profile();}else{setState(()=>_selectedIndex=const [0,1,2,5][i]);}},
-        destinations:const [NavigationDestination(icon:Icon(Icons.dashboard_outlined),label:'Tổng quan'),NavigationDestination(icon:Icon(Icons.storefront_outlined),label:'Khách hàng'),NavigationDestination(icon:Icon(Icons.assignment_outlined),label:'Khảo sát'),NavigationDestination(icon:Icon(Icons.route_outlined),label:'Lịch trình'),NavigationDestination(icon:Icon(Icons.person_outline),label:'Tài khoản')],
+        selectedIndex: const [0,1,2,5,9].contains(_selectedIndex)?const [0,1,2,5,9].indexOf(_selectedIndex):0,
+        onDestinationSelected:(i)=>setState(()=>_selectedIndex=const [0,1,2,5,9][i]),
+        destinations:const [NavigationDestination(icon:Icon(Icons.dashboard_outlined),label:'Tổng quan'),NavigationDestination(icon:Icon(Icons.storefront_outlined),label:'Khách hàng'),NavigationDestination(icon:Icon(Icons.assignment_outlined),label:'Khảo sát'),NavigationDestination(icon:Icon(Icons.route_outlined),label:'Lịch trình'),NavigationDestination(icon:Icon(Icons.analytics_outlined),label:'Báo cáo')],
       ):null,
       drawer: narrow ? Drawer(child: SafeArea(child: ListView(children: [
         const ListTile(title: Text('PHÂN HỆ SALES')),
@@ -308,7 +312,7 @@ class _SalesHomeState extends State<SalesHome> {
             child: Padding(padding: const EdgeInsets.all(10), child: Text(_message!))),
           Expanded(child: _selectedIndex == 0 ? _overview() : _selectedIndex == 1
               ? CustomerDirectoryPage(key:ValueKey('$_province:${_queue.pending.length}'),service:CustomerService(_apiUrl,_accessToken,province:_province,identity:_queue.identity,revision:_queue.revision),regions:_catalog,queue:_queue)
-              : _records(moduleKinds[_selectedIndex - 2])),
+              : _selectedIndex==5||_selectedIndex==9?FieldWorkPage(key:ValueKey('field:$_selectedIndex:$_province'),queue:_queue,regions:_catalog,service:_customerService,report:_selectedIndex==9):_records(moduleKinds[_selectedIndex - 2])),
         ])),
       ]),
     );

@@ -66,7 +66,7 @@ class OfflineQueue extends ChangeNotifier {
  }
  Future<void> enqueue(String path,Map<String,dynamic> data,{Uint8List? photo,String? mime,String method='POST'}) async{
   if(_closed)throw StateError('Phiên đã đóng');
-  if(!['/api/v1/records','/api/v1/customers'].contains(path)&&!RegExp(r'^/api/v1/customers/[a-f0-9-]{36}(/visits)?$').hasMatch(path))throw ArgumentError('Unsupported offline operation');
+  if(!['/api/v1/records','/api/v1/customers'].contains(path)&&!RegExp(r'^/api/v1/customers/[a-f0-9-]{36}(/visits|/photos)?$').hasMatch(path))throw ArgumentError('Unsupported offline operation');
   final id=data['client_ref']?.toString()??const Uuid().v4();
   if(photo!=null&&(photo.isEmpty||photo.length>5*1024*1024))throw StateError('Ảnh phải nhỏ hơn 5 MB');
   await _put({'key':'$namespace:$id','namespace':namespace,'account':identity,'created':DateTime.now().millisecondsSinceEpoch,
@@ -96,6 +96,11 @@ class OfflineQueue extends ChangeNotifier {
      final payload=Map<String,dynamic>.from(row['payload'] as Map);
      final headers={...sessionHeaders(session.cookie),'X-Sync-Identity':identity,'X-Sync-Revision':revision};
      final uri=session.uri(row['path'] as String);
+     if((row['path'] as String).endsWith('/photos')){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      final upload=await http.post(uri,headers:{...headers,'Content-Type':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},body:bytes).timeout(const Duration(seconds:30));
+      decodeApi(upload);await _remove(row['key'] as String);continue;
+     }
      final response=await (row['method']=='PATCH'?http.patch(uri,headers:headers,body:jsonEncode(payload)):http.post(uri,headers:headers,body:jsonEncode(payload))).timeout(const Duration(seconds:30));
      final result=decodeApi(response);
      final item=result['item'] as Map;

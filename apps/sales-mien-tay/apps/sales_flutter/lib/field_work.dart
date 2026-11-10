@@ -17,7 +17,10 @@ class FieldWorkPage extends StatefulWidget{
 class _FieldWorkPageState extends State<FieldWorkPage>{
  DateTime day=DateTime.now();List<Map<String,dynamic>> rows=[];bool busy=false,cached=false;String? error;
  String get keyName=>widget.report?'report:${monthKey(day)}:${widget.service.province}':'routes:${dayKey(day)}:${widget.service.province}';
- @override void initState(){super.initState();load();}
+ int previousPending=0;
+ @override void initState(){super.initState();previousPending=widget.queue.pending.length;widget.queue.addListener(queueChanged);load();}
+ void queueChanged(){if(!mounted)return;final n=widget.queue.pending.length;if(n<previousPending&&!busy)load();previousPending=n;setState((){});}
+ @override void dispose(){widget.queue.removeListener(queueChanged);super.dispose();}
  Future<void> load()async{
   if(busy)return;
   setState((){busy=true;error=null;});

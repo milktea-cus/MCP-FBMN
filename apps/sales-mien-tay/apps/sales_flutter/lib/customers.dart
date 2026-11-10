@@ -47,9 +47,13 @@ class CustomerService {
     return data;
   }
   Future<List<FieldCustomer>> list() async {
-    final data = decode(await http.get(uri('/api/v1/customers',{'province':province}), headers: headers));
-    return (data['items'] as List<dynamic>)
-        .map((e) => FieldCustomer.fromJson(e as Map<String, dynamic>)).toList();
+    final items=<FieldCustomer>[];
+    for(var offset=0;offset<=10000;offset+=100){
+      final data=decode(await http.get(uri('/api/v1/customers',{'province':province,'limit':'100','offset':'$offset'}),headers:headers).timeout(const Duration(seconds:20)));
+      final page=(data['items'] as List).map((e)=>FieldCustomer.fromJson(Map<String,dynamic>.from(e as Map))).toList();
+      items.addAll(page);if(page.length<100)break;
+    }
+    return items;
   }
   Future<FieldCustomer> add(Map<String, dynamic> data) async {
     final res = await http.post(uri('/api/v1/customers'), headers: headers, body: jsonEncode(data));
@@ -74,6 +78,10 @@ class CustomerService {
     final res = await http.post(uri('/api/v1/customers/$customerId/photos'),
       headers: {...headers, 'Content-Type': mime, 'X-Upload-Id': const Uuid().v4()}, body: bytes);
     decode(res, 201);
+  }
+  Future<List<Map<String,dynamic>>> visits(String customerId) async {
+    final data=decode(await http.get(uri('/api/v1/customers/$customerId/visits'),headers:headers).timeout(const Duration(seconds:20)));
+    return (data['items'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
   }
   Future<List<String>> photos(String customerId) async {
     final data = decode(await http.get(uri('/api/v1/customers/$customerId/photos'), headers: headers));
@@ -264,16 +272,25 @@ class CustomerDetail extends StatefulWidget {
 }
 class _CustomerDetailState extends State<CustomerDetail> {
   List<String> photos=[];
+  List<Map<String,dynamic>> visits=[];
+  Future<void> addPhoto(ImageSource source) async {
+    if(busy)return;setState(()=>busy=true);
+    try{final photo=await ImagePicker().pickImage(source:source,maxWidth:1600,imageQuality:80);if(photo==null)return;
+      final filename=photo.name.toLowerCase();final mime=filename.endsWith('.png')?'image/png':filename.endsWith('.webp')?'image/webp':'image/jpeg';
+      if(widget.queue!=null){await widget.queue!.enqueue('/api/v1/customers/${widget.customer.id}/photos',{},photo:await photo.readAsBytes(),mime:mime);if(mounted)setState(()=>message='Ảnh đã lưu máy · chờ đồng bộ');}
+      else{await widget.service.uploadPhoto(widget.customer.id,photo);await load();}
+    }catch(e){if(mounted)setState(()=>message=e.toString());}finally{if(mounted)setState(()=>busy=false);}
+  }
   String? message;
   bool busy=false;
   @override void initState(){super.initState();load();}
-  Future<void> load() async {try {final v=await widget.service.photos(widget.customer.id);if(mounted)setState(()=>photos=v);}catch(e){if(mounted)setState(()=>message='$e');}}
+  Future<void> load() async {try {final v=await widget.service.photos(widget.customer.id);final h=await widget.service.visits(widget.customer.id);if(widget.queue!=null)await widget.queue!.cache('visits:${widget.customer.id}',h);if(mounted)setState((){photos=v;visits=h;});}catch(e){if(widget.queue!=null&&!(e is ApiFailure&&(e.status==401||e.status==403))){try{final h=await widget.queue!.cached('visits:${widget.customer.id}');if(mounted)setState(()=>visits=h);}catch(_) {}}if(mounted)setState(()=>message='$e');}}
   Future<void> checkin() async {
     if(busy)return;
     setState(()=>busy=true);
     try{final pos=await captureGps(context);
       if(pos.accuracy>100)throw StateError('Độ chính xác GPS lớn hơn 100m');
-      if(widget.queue!=null){await widget.queue!.enqueue('/api/v1/customers/${widget.customer.id}/visits',{'latitude':pos.latitude,'longitude':pos.longitude,'accuracy_m':pos.accuracy});if(mounted)setState(()=>message='Đã lưu check-in trên máy · chờ xác minh và đồng bộ');return;}
+      if(widget.queue!=null){await widget.queue!.enqueue('/api/v1/customers/${widget.customer.id}/visits',{'latitude':pos.latitude,'longitude':pos.longitude,'accuracy_m':pos.accuracy,'captured_at':pos.timestamp.toUtc().toIso8601String()});if(mounted)setState(()=>message='Đã lưu check-in trên máy · chờ xác minh và đồng bộ');return;}
       await widget.service.checkin(widget.customer.id,pos,const Uuid().v4());
       if(mounted)setState(()=>message='Check-in thành công. Vị trí đã được xác minh trên server.');
     }catch(e){if(mounted)setState(()=>message='$e');}
@@ -302,7 +319,12 @@ class _CustomerDetailState extends State<CustomerDetail> {
           ),
           if (message != null) Text(message!),
           const SizedBox(height: 24),
+          Text('Lịch sử check-in',style:Theme.of(context).textTheme.titleMedium),
+          if(visits.isEmpty)const Text('Chưa có lượt đã xác minh.'),
+          for(final v in visits)ListTile(leading:const Icon(Icons.verified_outlined),title:Text(DateTime.tryParse(v['checkin_at'].toString())?.toLocal().toString().substring(0,16)??v['checkin_at'].toString()),subtitle:Text('Khoảng cách: ${v['distance_m']} m · GPS: ${v['accuracy_m']} m')),
+          const SizedBox(height:16),
           Text('Ảnh điểm bán (${photos.length})', style: Theme.of(context).textTheme.titleMedium),
+          Wrap(spacing:8,children:[OutlinedButton.icon(onPressed:busy?null:()=>addPhoto(ImageSource.camera),icon:const Icon(Icons.camera_alt_outlined),label:const Text('Chụp ảnh')),OutlinedButton.icon(onPressed:busy?null:()=>addPhoto(ImageSource.gallery),icon:const Icon(Icons.photo_library_outlined),label:const Text('Chọn ảnh')),IconButton(onPressed:busy?null:load,tooltip:'Tải lại ảnh và lịch sử',icon:const Icon(Icons.sync))]),
           ...photos.map((photoId) => FutureBuilder<Uint8List>(
             future: widget.service.photoBytes(customer.id, photoId),
             builder: (ctx, snapshot) {
@@ -312,10 +334,8 @@ class _CustomerDetailState extends State<CustomerDetail> {
                   child: Image.memory(snapshot.data!, height: 180, fit: BoxFit.contain),
                 );
               }
-              return const Padding(
-                padding: EdgeInsets.all(10),
-                child: Text('Đang tải ảnh...'),
-              );
+              if(snapshot.hasError)return const Text('Không tải được ảnh. Kiểm tra kết nối.');
+              return const Padding(padding:EdgeInsets.all(10),child:Text('Đang tải ảnh...'));
             },
           )),
         ],
