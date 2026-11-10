@@ -1,4 +1,4 @@
-import {neon} from '@neondatabase/serverless';
+import {neon, type NeonQueryFunction} from '@neondatabase/serverless';
 import districts from './districts_old.json';
 
 export interface CustomerEnv {
@@ -12,7 +12,7 @@ const response = (body: unknown, status = 200) => new Response(JSON.stringify(bo
   status, headers: {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'},
 });
 const fail = (error: string, status = 400) => response({error}, status);
-type Db = ReturnType<typeof neon>;
+type Db = NeonQueryFunction<false, false>;
 type ObjectBody = Record<string, unknown>;
 
 function str(x: unknown, max = 240): string | null {
