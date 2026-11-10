@@ -1,0 +1,64 @@
+name: Sales Miền Tây CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/sales-mien-tay/**"
+      - ".github/workflows/sales-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/sales-mien-tay/**"
+      - ".github/workflows/sales-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  api-typecheck:
+    name: Cloudflare API / Typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/sales-mien-tay/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/sales-mien-tay/backend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+
+  flutter-web:
+    name: Flutter / Analyze + Web build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/sales-mien-tay/apps/sales_flutter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate missing web/android platform scaffolding
+        run: flutter create --platforms=web,android .
+      - run: flutter pub get
+      - run: flutter analyze --no-fatal-infos
+      - run: flutter build web --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sales-mien-tay-web
+          path: apps/sales-mien-tay/apps/sales_flutter/build/web
+          retention-days: 7
+
+  dependency-and-layout:
+    name: Source / Data & secret guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate inventory, district data and source restrictions
+        run: python3 apps/sales-mien-tay/scripts/verify_source.py
