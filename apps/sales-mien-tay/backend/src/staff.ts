@@ -25,5 +25,16 @@ export async function staffRoutes(req:Request,env:AuthEnv,actor:{sub:string;admi
  try{
   const result=await db`SELECT public.sales_save_staff(${actor.sub},${data.user_sub},${data.employee_code.trim()},${data.full_name.trim()},${String(data.phone??'')},${String(data.role)},${data.active},${manager as string|null},${JSON.stringify(canonical)}::jsonb,${String(data.scope_revision??'0')}::bigint) AS item`;
   return json({item:result[0].item});
- }catch{return json({error:'Không lưu được: kiểm tra identity đã được tạo, mã nhân viên, quản lý hoặc phiên bản quyền; không được khóa Admin cuối cùng.'},409);}
+ }catch(e){
+  const err=e as {message?:string;code?:string};
+  const msg=err.message??'';
+  if(msg.includes('stale revision'))return json({error:'Hồ sơ đã thay đổi. Hủy và mở lại nhân viên để lưu phiên bản mới nhất.'},409);
+  if(msg.includes('last admin'))return json({error:'Không được khóa hoặc hạ quyền Admin cuối cùng.'},409);
+  if(msg.includes('invalid manager'))return json({error:'Quản lý trực tiếp không hợp lệ hoặc đã bị khóa.'},400);
+  if(msg.includes('provisioned identity required'))return json({error:'Tài khoản xác thực chưa tồn tại hoặc đã bị khóa.'},409);
+  if(msg.includes('admin required'))return json({error:'Quyền Admin đã bị thu hồi.'},403);
+  if(err.code==='23505')return json({error:'Mã nhân viên hoặc email đã tồn tại.'},409);
+  if(err.code==='23514'||err.code==='23503'||err.code==='22P02')return json({error:'Thông tin nhân viên hoặc địa bàn không hợp lệ.'},400);
+  return json({error:'Không lưu được hồ sơ do lỗi hệ thống. Vui lòng thử lại.'},503);
+ }
 }
