@@ -17,9 +17,10 @@ jobs:
           base=https://field-sales-api.milktea-cus.workers.dev
           curl --fail --retry 3 --max-time 30 "$base/health" | tee health.json
           jq -e '.status=="ok" and .database=="ok"' health.json
-          test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/api/v1/me")" = 401
-          test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer fake.invalid.token' "$base/api/v1/me")" = 401
-          test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Cookie: __Host-sales-session=invalid-session' "$base/api/v1/me")" = 401
-          test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Origin: https://untrusted.invalid' -H 'Content-Type: application/json' -d '{}' "$base/api/auth/login")" = 403
+          check() { local expect="$1"; shift; local actual; actual=$(curl -sS -o /dev/null -w '%{http_code}' "$@"); echo "HTTP $actual expected $expect"; test "$actual" = "$expect"; }
+          check 401 "$base/api/v1/me"
+          check 401 -H 'Authorization: Bearer fake.invalid.token' "$base/api/v1/me"
+          check 401 -H 'Cookie: __Host-sales-session=invalid-session' "$base/api/v1/me"
+          check 403 -H 'Origin: https://untrusted.invalid' -H 'Content-Type: application/json' -d '{}' "$base/api/auth/login"
           curl --fail --max-time 30 -H 'Origin: https://sales-mien-tay.vercel.app' -H 'Content-Type: application/json' -d '{"email":"nobody-p1-smoke@example.invalid"}' "$base/api/auth/otp/request" | jq -e '.ok==true'
           echo 'PASS: DB health; anonymous, fake JWT, invalid session, untrusted origin; OTP allowlist'
