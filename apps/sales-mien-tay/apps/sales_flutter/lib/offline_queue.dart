@@ -91,6 +91,51 @@ class OfflineQueue extends ChangeNotifier {
   await t.completed;await reload();
   if(_timer!=null)unawaited(sync());
  }
+ /// Draft and operation share one transaction on both IndexedDB and native SQLite.
+ Future<void> saveSurveyDraft(Map<String,dynamic> draft,{String? path,Map<String,dynamic>? payload,String method='POST',Uint8List? photo,String? mime,List<String> dependsOn=const []})async{
+  if(_closed)throw StateError('Phiên đã đóng');
+  final id=draft['id'] as String;
+  if(path!=null&&!(path=='/api/v1/sessions'||path=='/api/v1/sessions/$id'||path=='/api/v1/sessions/$id/photos'))throw ArgumentError('Unsupported session operation');
+  if(photo!=null&&(photo.isEmpty||photo.length>5*1024*1024))throw StateError('Ảnh phải nhỏ hơn 5 MB');
+  final d=await db;if(_closed)throw StateError('Phiên đã đóng');
+  final t=d.transactionList(['cache','outbox'],idbModeReadWrite),cache=t.objectStore('cache');
+  final key='$namespace:survey-drafts';
+  final existing=await cache.getObject(key);
+  final items=existing==null?<Map<String,dynamic>>[]:((existing as Map)['items'] as List).map((r)=>Map<String,dynamic>.from(r as Map)).toList();
+  final old=items.where((r)=>r['id']==id).firstOrNull;
+  final next={...draft,if(old?['server_status']!=null)'server_status':old!['server_status'],if(old?['server_version']!=null)'server_version':old!['server_version']};
+  // Acknowledged photos must not revert to pending when the user edits a draft.
+  final known=(old?['photos'] as List?)??[];
+  if(next['photos'] is List)next['photos']=(next['photos'] as List).map((p){final prior=known.where((r)=>(r as Map)['id']==(p as Map)['id']).firstOrNull;return {...Map<String,dynamic>.from(p as Map),if(prior is Map&&prior['sync_status']=='ready')'sync_status':'ready'};}).toList();
+  items.removeWhere((r)=>r['id']==id);items.add(next);
+  await cache.put({'key':key,'items':items});
+  if(path!=null){
+   final data=payload!;final op=data['client_ref'] as String;
+   await t.objectStore('outbox').put({'key':'$namespace:$op','namespace':namespace,'account':identity,'created':DateTime.now().millisecondsSinceEpoch,'session_id':id,'depends_on':dependsOn,
+    'path':path,'method':method,'payload':data,'status':'pending','attempts':0,'upload_id':op,if(photo!=null)'photo':photo,if(mime!=null)'mime':mime});
+  }
+  await t.completed;await reload();if(path!=null&&_timer!=null)unawaited(sync());
+ }
+ Future<bool> _dependencyPending(Map<String,dynamic> row)async{
+  final deps=(row['depends_on'] as List?)??[];if(deps.isEmpty)return false;
+  final d=await db,t=d.transaction('outbox',idbModeReadOnly),s=t.objectStore('outbox');var pending=false;
+  for(final id in deps){if(await s.getObject('$namespace:$id')!=null)pending=true;}
+  await t.completed;return pending;
+ }
+ Future<void> _ackSurvey(Map<String,dynamic> row,Map item)async{
+  final d=await db,t=d.transactionList(['cache','outbox'],idbModeReadWrite),cache=t.objectStore('cache');
+  final key='$namespace:survey-drafts',stored=await cache.getObject(key);
+  if(stored!=null){
+   final items=((stored as Map)['items'] as List).map((v)=>Map<String,dynamic>.from(v as Map)).toList();
+   for(final draft in items.where((v)=>v['id']==row['session_id'])){
+    if((row['path'] as String).endsWith('/photos')){
+     draft['photos']=[for(final p in (draft['photos'] as List? ?? [])) {...Map<String,dynamic>.from(p as Map),if(p['id']==item['id'])'sync_status':'ready'}];
+    }else{draft['server_status']=item['status'];draft['server_version']=item['version'];}
+   }
+   await cache.put({'key':key,'items':items});
+  }
+  await t.objectStore('outbox').delete(row['key'] as String);await t.completed;
+ }
  Future<void> start() async{
   try{await reload();}catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
   if(_closed)return;
@@ -107,15 +152,16 @@ class OfflineQueue extends ChangeNotifier {
    if(_closed||me['identity']!=identity||me['scope_revision'].toString()!=revision){error='Quyền đã thay đổi. Dữ liệu cũ được cách ly.';return;}
    for(final row in List.of(pending)){
     if(_closed)break;
-    if(row['status']=='blocked')continue;
+    if(row['status']=='blocked'||await _dependencyPending(row))continue;
     try{
      final payload=Map<String,dynamic>.from(row['payload'] as Map);
      final headers={...sessionHeaders(session.cookie),'X-Sync-Identity':identity,'X-Sync-Revision':revision};
      final uri=session.uri(row['path'] as String);
      if((row['path'] as String).endsWith('/photos')){
       final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
-      final upload=await http.post(uri,headers:{...headers,'Content-Type':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},body:bytes).timeout(const Duration(seconds:30));
-      decodeApi(upload);await _remove(row['key'] as String);continue;
+      final upload=await http.post(uri,headers:{...headers,'Content-Type':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:bytes).timeout(const Duration(seconds:30));
+      final result=decodeApi(upload);
+      if(row['session_id']!=null){await _ackSurvey(row,result['item'] as Map);}else{await _remove(row['key'] as String);}continue;
      }
      final response=await (row['method']=='PATCH'?http.patch(uri,headers:headers,body:jsonEncode(payload)):http.post(uri,headers:headers,body:jsonEncode(payload))).timeout(const Duration(seconds:30));
      final result=decodeApi(response);
@@ -127,7 +173,7 @@ class OfflineQueue extends ChangeNotifier {
        headers:{...headers,'Content-Type':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},body:bytes).timeout(const Duration(seconds:30));
       decodeApi(upload);
      }
-     await _remove(row['key'] as String);
+     if(row['session_id']!=null){await _ackSurvey(row,item);}else{await _remove(row['key'] as String);}
     }catch(e){
      final blocked=e is ApiFailure&&[400,403,404,409,413,415,422].contains(e.status);
      await _updateIfPresent({...row,'status':blocked?'blocked':'pending','attempts':(row['attempts'] as int)+1,'error':e.toString()});

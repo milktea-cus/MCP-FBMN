@@ -9,6 +9,7 @@ import 'models.dart';
 import 'session.dart';
 import 'offline_queue.dart';
 import 'editor.dart';
+import 'surveys.dart';
 
 class FieldCustomer {
   final String id, name, address, province, district, category, status;
@@ -318,11 +319,11 @@ class _CustomerDetailState extends State<CustomerDetail> {
           Text('Số điện thoại: ${customer.phone ?? 'Chưa có'}'),
           Text('GPS: ${customer.latitude?.toStringAsFixed(6) ?? 'Chưa ghi'} / ${customer.longitude?.toStringAsFixed(6) ?? 'Chưa ghi'}'),
           const SizedBox(height: 16),
-          if(own&&widget.queue!=null)Wrap(spacing:8,children:[OutlinedButton.icon(onPressed:()=>addRecord('survey'),icon:const Icon(Icons.assignment_outlined),label:const Text('Khảo sát')),OutlinedButton.icon(onPressed:()=>addRecord('forecast'),icon:const Icon(Icons.payments_outlined),label:const Text('Dự kiến doanh thu'))]),
+          if(own&&widget.queue!=null)Wrap(spacing:8,children:[OutlinedButton.icon(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>Scaffold(appBar:AppBar(title:Text(customer.name)),body:SurveyPage(queue:widget.queue!,service:widget.service,regions:widget.regions,initialCustomer:customer.id)))),icon:const Icon(Icons.assignment_outlined),label:const Text('Phiên khảo sát')),OutlinedButton.icon(onPressed:()=>addRecord('forecast'),icon:const Icon(Icons.payments_outlined),label:const Text('Dự kiến doanh thu'))]),
           if(own)FilledButton.icon(
             onPressed: busy ? null : checkin,
             icon: const Icon(Icons.location_pin),
-            label: Text(busy ? 'Đang lấy vị trí' : 'Check-in điểm bán (200m)'),
+            label: Text(busy ? 'Đang lấy vị trí' : 'Check-in riêng (lịch sử)'),
           ),
           if(!own)const Text('Chế độ xem dữ liệu của nhân viên cấp dưới.'),
           if (message != null) Text(message!),

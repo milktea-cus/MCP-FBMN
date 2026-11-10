@@ -9,6 +9,7 @@ import 'auth_gate.dart';
 import 'staff_page.dart';
 import 'offline_queue.dart';
 import 'field_work.dart';
+import 'surveys.dart';
 import 'dart:async';
 
 void main() => runApp(const SalesApp());
@@ -228,7 +229,7 @@ class _SalesHomeState extends State<SalesHome> {
     ]);
   }
 
-  Widget _records(String kind) {
+  Widget _records(String kind,{bool readOnly=false}) {
     final items = _ofKind(kind);
     return Column(children: [
       Padding(padding: const EdgeInsets.fromLTRB(18, 16, 18, 6), child: Row(children: [
@@ -236,7 +237,7 @@ class _SalesHomeState extends State<SalesHome> {
           Text(moduleLabels[kind]!, style: Theme.of(context).textTheme.headlineSmall),
           Text('${items.length} bản ghi', style: Theme.of(context).textTheme.bodySmall),
         ])),
-        FilledButton.icon(onPressed: () => _addRecord(kind),
+        if(!readOnly)FilledButton.icon(onPressed: () => _addRecord(kind),
           icon: const Icon(Icons.add), label: const Text('Thêm mới')),
       ])),
       Expanded(child: items.isEmpty
@@ -246,7 +247,7 @@ class _SalesHomeState extends State<SalesHome> {
             const SizedBox(height: 12),
             const Text('Chưa có dữ liệu'),
             const SizedBox(height: 10),
-            FilledButton.tonal(onPressed: () => _addRecord(kind),
+            if(!readOnly)FilledButton.tonal(onPressed: () => _addRecord(kind),
               child: const Text('Nhập biểu mẫu đầu tiên')),
           ])))
         : ListView.builder(padding: const EdgeInsets.all(12), itemCount: items.length,
@@ -317,6 +318,7 @@ class _SalesHomeState extends State<SalesHome> {
             child: Padding(padding: const EdgeInsets.all(10), child: Text(_message!))),
           Expanded(child: _selectedIndex == 0 ? _overview() : _selectedIndex == 1
               ? CustomerDirectoryPage(key:ValueKey('$_province:${_queue.pending.length}'),service:CustomerService(_apiUrl,_accessToken,province:_province,identity:_queue.identity,revision:_queue.revision),regions:_catalog,queue:_queue)
+              : _selectedIndex==2?SurveyPage(key:ValueKey('survey:$_province'),queue:_queue,service:_customerService,regions:_catalog,admin:widget.me['role']=='admin',legacy:(_)=>Scaffold(appBar:AppBar(title:const Text('Biểu mẫu khảo sát cũ')),body:_records('survey',readOnly:true)))
               : _selectedIndex==5||_selectedIndex==9?FieldWorkPage(key:ValueKey('field:$_selectedIndex:$_province'),queue:_queue,regions:_catalog,service:_customerService,report:_selectedIndex==9):_records(moduleKinds[_selectedIndex - 2])),
         ])),
       ]),

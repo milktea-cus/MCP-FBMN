@@ -3,6 +3,7 @@ import {AuthError, authRoutes, userFromRequest, provisionIdentity} from './auth'
 import {staffRoutes} from './staff';
 import districts from './districts_old.json';
 import {customerRoutes} from './customers';
+import {surveyRoutes} from './surveys';
 
 interface Env {
   DATABASE_URL: string;
@@ -36,7 +37,7 @@ function cors(res: Response, origin: string | null, env: Env): Response {
   if (!allowedOrigin(origin, env)) return res;
   const h = new Headers(res.headers);
   h.set('Access-Control-Allow-Origin', origin!);
-  h.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Upload-Id, X-Sync-Identity, X-Sync-Revision');
+  h.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Upload-Id, X-Photo-Kind, X-Captured-At, X-Sync-Identity, X-Sync-Revision');
   h.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   h.set('Vary', 'Origin');
   return new Response(res.body, {status: res.status, headers: h});
@@ -103,6 +104,8 @@ export default {
       if (!env.DATABASE_URL) return bad('DATABASE_URL chưa được cấu hình', 503);
       const productResponse = await customerRoutes(req, env, user, url);
       if (productResponse) return productResponse;
+      const surveyResponse=await surveyRoutes(req,env,user,url);
+      if(surveyResponse)return surveyResponse;
       const sql = neon(env.DATABASE_URL);
       if(url.pathname==='/api/v1/routes'&&req.method==='GET'){
         const day=url.searchParams.get('day')??'';
@@ -130,7 +133,7 @@ export default {
         SELECT r.id,r.version,c.owner_sub,c.full_name,c.province,c.district,
           coalesce(r.data,'{}'::jsonb) AS data,c.id AS customer_id,c.name,c.address_line,c.latitude,c.longitude,
           r.id IS NOT NULL AS planned,
-          coalesce(v.visited,false) AS visited,coalesce(v.visited_week,false) AS visited_week,coalesce(v.visited_period,false) AS visited_period,v.last_visit,v.week_visits
+          coalesce(v.visited,false) AS visited,coalesce(v.visited_week,false) AS visited_week,coalesce(v.visited_period,false) AS visited_period,v.last_visit,v.week_visits,coalesce(s.completed_sessions,0) AS completed_sessions
         FROM eligible c LEFT JOIN planned r ON r.data->>'customerId'=c.id::text AND r.owner_sub=c.owner_sub
         LEFT JOIN LATERAL (
           SELECT bool_or(to_char(x.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh','YYYY-MM-DD')=coalesce(r.data->>'plannedDate',${day})) AS visited,
@@ -139,6 +142,11 @@ export default {
           max(x.checkin_at) AS last_visit,count(*) FILTER(WHERE (x.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN ${weekStart}::date AND ${weekEnd}::date) AS week_visits
           FROM field_visits x WHERE x.customer_id=c.id AND x.owner_sub=c.owner_sub
         ) v ON true
+        LEFT JOIN LATERAL (
+          SELECT count(*) AS completed_sessions FROM field_survey_sessions fs WHERE fs.customer_id=c.id AND fs.owner_sub=c.owner_sub AND fs.status='completed'
+          AND (fs.started_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN ${start}::date AND ${end}::date
+          AND public.sales_can_access(${user.sub},fs.owner_sub,fs.province,fs.district)
+        ) s ON true
         ORDER BY r.data->>'plannedDate' NULLS LAST,CASE WHEN r.data->>'sequence' ~ '^[0-9]{1,4}$' THEN (r.data->>'sequence')::int ELSE 9999 END,c.name,c.id`;
         return json({items,week_start:weekStart,week_end:weekEnd,period_start:start,period_end:end});
       }

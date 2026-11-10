@@ -147,6 +147,7 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
   final planned=filtered.where((r)=>r['planned']==true).toList();
   final done=planned.where((r)=>r['visited']==true).length;
   final visited=unique.values.where((r)=>r['visited_period']==true).length;
+  final completed=unique.values.fold<int>(0,(n,r)=>n+(int.tryParse(r['completed_sessions'].toString())??0));
   final visible=filtered.where((r)=>(!monthly||period==0||r['planned']!=true||planningPeriod(DateTime.parse((r['data'] as Map)['plannedDate'].toString()))==period)&&(status.isEmpty||status=='planned'&&r['planned']==true||status=='visited'&&r['visited_period']==true||status=='unvisited'&&r['visited_period']!=true)).toList();
   return ListView(padding:const EdgeInsets.only(bottom:12),children:[
    Padding(padding:const EdgeInsets.all(12),child:Row(children:[Expanded(child:Text(widget.report?'Báo cáo tháng':'Tuyến đi',style:Theme.of(context).textTheme.titleLarge)),IconButton(onPressed:busy?null:load,icon:const Icon(Icons.sync)),if(!widget.report)FilledButton.icon(onPressed:busy?null:addStop,icon:const Icon(Icons.add),label:const Text('Điểm ghé'))])),
@@ -164,7 +165,7 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
     Padding(padding:const EdgeInsets.all(8),child:Column(children:[
       if(people.length>1)DropdownButtonFormField<String>(initialValue:people.containsKey(employee)?employee:'',decoration:const InputDecoration(labelText:'Nhân viên'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả trong quyền')),for(final e in people.entries)DropdownMenuItem(value:e.key,child:Text(e.value))],onChanged:(v)=>setState(()=>employee=v??'')),
       Row(children:[Expanded(child:DropdownButtonFormField<String>(key:ValueKey(districts.join('|')),initialValue:districts.contains(district)?district:'',isExpanded:true,decoration:const InputDecoration(labelText:'Huyện'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả')),for(final d in districts)DropdownMenuItem(value:d,child:Text(d,overflow:TextOverflow.ellipsis))],onChanged:(v)=>setState(()=>district=v??''))),const SizedBox(width:8),Expanded(child:DropdownButtonFormField<String>(initialValue:status,decoration:const InputDecoration(labelText:'Trạng thái'),items:const [DropdownMenuItem(value:'',child:Text('Tất cả')),DropdownMenuItem(value:'planned',child:Text('Có lịch')),DropdownMenuItem(value:'visited',child:Text('Đã ghé trong kỳ')),DropdownMenuItem(value:'unvisited',child:Text('Chưa ghé trong kỳ'))],onChanged:(v)=>setState(()=>status=v??'')))]),
-      const SizedBox(height:8),Text('Toàn ${monthly?'tháng':weekly?'tuần':'ngày'}: điểm theo lịch đã ghé $done/${planned.length} · Khách duy nhất đã ghé $visited/${unique.length}'),
+      const SizedBox(height:8),Text('Toàn ${monthly?'tháng':weekly?'tuần':'ngày'}: điểm theo lịch đã ghé $done/${planned.length} · Khách duy nhất đã ghé $visited/${unique.length} · Phiên hoàn thành $completed'),
       if(planned.isNotEmpty)LinearProgressIndicator(value:done/planned.length),
     ])),
    ],

@@ -5,6 +5,13 @@ import 'package:sales_mien_tay/offline_factory.dart';
 import 'package:sales_mien_tay/session.dart';
 
 void main(){
+ test('real IndexedDB persists unified survey draft and outbox atomically',()async{
+  final owner=const Uuid().v4(),id=const Uuid().v4(),factory=offlineFactory();final a=OfflineQueue(SalesSession(),owner,'1',factory:factory);
+  await a.saveSurveyDraft({'id':id,'status':'in_progress','answers':{'npp':'test'},'photos':[]},path:'/api/v1/sessions',payload:{'client_ref':id});
+  (await a.db).close();a.dispose();final b=OfflineQueue(SalesSession(),owner,'1',factory:factory);await b.reload();expect(b.pending.single['session_id'],id);expect((await b.cached('survey-drafts')).single['answers']['npp'],'test');
+  final revised=OfflineQueue(SalesSession(),owner,'2',factory:factory);await revised.reload();expect(revised.pending,isEmpty);expect(await revised.cached('survey-drafts'),isEmpty);expect(revised.quarantined,1);
+  (await b.db).close();(await revised.db).close();b.dispose();revised.dispose();
+ });
  test('real browser IndexedDB persists draft after reopening and isolates accounts',() async{
   final id=const Uuid().v4();
   final factory=offlineFactory();
