@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import 'models.dart';
 import 'session.dart';
+import 'offline_queue.dart';
 
 class FieldCustomer {
   final String id, name, address, province, district, category, status;
@@ -104,7 +105,8 @@ Future<Position> captureGps(BuildContext context) async {
 class CustomerDirectoryPage extends StatefulWidget {
   final CustomerService service;
   final RegionCatalog regions;
-  const CustomerDirectoryPage({super.key, required this.service, required this.regions});
+  final OfflineQueue? queue;
+  const CustomerDirectoryPage({super.key, required this.service, required this.regions,this.queue});
   @override
   State<CustomerDirectoryPage> createState() => _CustomerDirectoryPageState();
 }
@@ -120,12 +122,12 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
     try {
       final items = await widget.service.list();
       if (mounted) setState(() {customers = items; error = null;});
-    } catch (e) {if (mounted) setState(() {customers=[];error = '$e';});}
+    } catch (e) {if (mounted) setState(() {error = '$e';});}
     finally {if (mounted) setState(() => loading = false);}
   }
   Future<void> add() async {
     final created = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) =>
-        CustomerEditor(service: widget.service, regions: widget.regions)));
+        CustomerEditor(service: widget.service, regions: widget.regions,queue:widget.queue)));
     if (created == true) refresh();
   }
   @override
@@ -157,7 +159,8 @@ class CustomerEditor extends StatefulWidget {
   final CustomerService service;
   final RegionCatalog regions;
   final FieldCustomer? customer;
-  const CustomerEditor({super.key, required this.service, required this.regions,this.customer});
+  final OfflineQueue? queue;
+  const CustomerEditor({super.key, required this.service, required this.regions,this.customer,this.queue});
   @override State<CustomerEditor> createState() => _CustomerEditorState();
 }
 class _CustomerEditorState extends State<CustomerEditor> {
@@ -194,6 +197,13 @@ class _CustomerEditorState extends State<CustomerEditor> {
         'phone':phone.text.trim().isEmpty?null:phone.text.trim(),'note':note.text.trim().isEmpty?null:note.text.trim(),
         'province':province,'district':district,'category':category,
         if(widget.customer==null||position!=null)...{'location_consent':position != null,'latitude':position?.latitude,'longitude':position?.longitude,'location_accuracy_m':position?.accuracy}};
+      if(widget.customer==null&&widget.queue!=null){
+        final bytes=await photo?.readAsBytes();
+        final filename=photo?.name.toLowerCase()??'';
+        final mime=filename.endsWith('.png')?'image/png':filename.endsWith('.webp')?'image/webp':'image/jpeg';
+        await widget.queue!.enqueue('/api/v1/customers',data,photo:bytes,mime:mime);
+        if(mounted){ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Đã lưu điểm bán trên máy · chờ đồng bộ')));Navigator.pop(context,true);}return;
+      }
       final created=widget.customer==null?await widget.service.add(data):await widget.service.update(widget.customer!,data);
       if (photo != null) {try{await widget.service.uploadPhoto(created.id, photo!);}catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Đã lưu điểm bán, nhưng chưa tải được ảnh: $e')));}}
       if (mounted) Navigator.pop(context, true);

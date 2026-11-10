@@ -17,6 +17,7 @@ const kinds: Kind[] = ['survey', 'target', 'forecast', 'visit', 'dealer', 'compe
 type Json = Record<string, unknown>;
 interface SalesRecordBody {
   kind?: Kind;
+  client_ref?: string;
   province?: string;
   district?: string;
   customer_name?: string;
@@ -119,6 +120,7 @@ export default {
         let body: SalesRecordBody;
         try { body = await readBody(req); } catch { return bad('JSON không hợp lệ'); }
         const error = validate(body, true);
+        if(body.client_ref!==undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(body.client_ref))return bad('client_ref không hợp lệ');
         if (error) return bad(error);
         if (body.province && !user.admin) {
           const scope = await sql`SELECT 1 FROM staff_scopes WHERE user_sub=${user.sub}
@@ -126,12 +128,13 @@ export default {
           if (!scope.length) return bad('Chưa được phân địa bàn này', 403);
         }
         const rows = await sql`
-          INSERT INTO sales_records (kind, owner_sub, province, district, customer_name, period_ym, data)
+          INSERT INTO sales_records (kind, owner_sub, province, district, customer_name, period_ym, data, client_ref)
           SELECT ${body.kind!}, ${user.sub}, ${body.province ?? null}, ${body.district ?? null},
-                  ${body.customer_name ?? null}, ${body.period_ym ?? null}, ${JSON.stringify(body.data ?? {})}::jsonb
-          WHERE public.sales_can_access(${user.sub},${user.sub},${body.province ?? null},${body.district ?? null}) RETURNING *`;
-        if(!rows.length)return bad('Không có quyền địa bàn',403);
-        return json({item: rows[0]}, 201);
+                  ${body.customer_name ?? null}, ${body.period_ym ?? null}, ${JSON.stringify(body.data ?? {})}::jsonb, ${body.client_ref??null}::uuid
+          WHERE public.sales_can_access(${user.sub},${user.sub},${body.province ?? null},${body.district ?? null}) ON CONFLICT DO NOTHING RETURNING *`;
+        if(rows.length)return json({item:rows[0]},201);
+        if(body.client_ref){const existing=await sql`SELECT * FROM sales_records WHERE owner_sub=${user.sub} AND client_ref=${body.client_ref}::uuid AND public.sales_can_access(${user.sub},owner_sub,province,district)`;if(existing.length)return json({item:existing[0],idempotent:true});}
+        return bad('Bản ghi đã tồn tại hoặc không có quyền địa bàn',409);
       }
       const match = /^\/api\/v1\/records\/([0-9a-f-]{36})$/i.exec(url.pathname);
       if (match && req.method === 'PATCH') {

@@ -7,6 +7,8 @@ import 'theme.dart';
 import 'session.dart';
 import 'auth_gate.dart';
 import 'staff_page.dart';
+import 'offline_queue.dart';
+import 'dart:async';
 
 void main() => runApp(const SalesApp());
 
@@ -35,6 +37,10 @@ class SalesHome extends StatefulWidget {
 
 class _SalesHomeState extends State<SalesHome> {
   final List<SalesRecord> _items = [];
+  late final OfflineQueue _queue;
+  int _lastPending=0;
+  void _queueChanged(){if(!mounted)return;final count=_queue.pending.length;if(_lastPending>count)unawaited(_refresh());_lastPending=count;setState((){});}
+  @override void dispose(){_queue.removeListener(_queueChanged);_queue.dispose();super.dispose();}
   RegionCatalog get _catalog => widget.catalog;
   String get _apiUrl => salesOrigin;
   String get _accessToken => widget.session.cookie;
@@ -53,6 +59,8 @@ class _SalesHomeState extends State<SalesHome> {
   @override
   void initState() {
     super.initState();
+    _queue=OfflineQueue(widget.session,widget.me['identity'].toString(),widget.me['scope_revision'].toString());
+    _queue.addListener(_queueChanged);unawaited(_queue.start());
     _refresh();
   }
 
@@ -85,8 +93,8 @@ class _SalesHomeState extends State<SalesHome> {
   Future<void> _addRecord(String kind) async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => RecordEditor(
       kind: kind, catalog: _catalog, onSave: (record) async {
-        final saved = await SalesApi(_apiUrl, _accessToken).create(record);
-        if (mounted) setState(() => _items.insert(0, saved));
+        await _queue.enqueue('/api/v1/records',record);
+        _notify('Đã lưu trên máy · chờ đồng bộ');
       },
     )));
   }
@@ -266,7 +274,7 @@ class _SalesHomeState extends State<SalesHome> {
         actions: [
           if (_loading) const Padding(padding: EdgeInsets.all(16),
             child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
-          IconButton(onPressed: _loading ? null : _refresh,
+          IconButton(onPressed: _loading ? null : (){unawaited(_queue.sync());_refresh();},
             tooltip: 'Tải lại dữ liệu', icon: const Icon(Icons.sync)),
           if(widget.me['role']=='admin') IconButton(tooltip:'Quản lý nhân viên',icon:const Icon(Icons.manage_accounts_outlined),onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>StaffPage(session:widget.session)))),
           IconButton(onPressed: _profile,tooltip:'Hồ sơ nhân viên',icon:const Icon(Icons.account_circle_outlined)),
@@ -294,10 +302,11 @@ class _SalesHomeState extends State<SalesHome> {
         ),
         Expanded(child: Column(children: [
           Padding(padding:const EdgeInsets.all(12),child:DropdownButtonFormField<String>(initialValue:_province,isExpanded:true,decoration:const InputDecoration(labelText:'Địa bàn'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả địa bàn của tôi')),for(final p in _catalog.provinces)DropdownMenuItem(value:p,child:Text(p))],onChanged:(p)=>setState(()=>_province=p??''))),
+          if(_queue.pending.isNotEmpty||_queue.quarantined>0||_queue.error!=null) Material(color:SalesTheme.tableHeader,child:ListTile(leading:const Icon(Icons.cloud_upload_outlined,color:SalesTheme.brand),title:Text('Chờ đồng bộ: ${_queue.pending.length} · Cách ly: ${_queue.quarantined}'),subtitle:Text(_queue.error??(_queue.syncing?'Đang đồng bộ':'Đã lưu trên máy')),trailing:IconButton(tooltip:'Đồng bộ ngay',onPressed:_queue.syncing?null:()=>unawaited(_queue.sync()),icon:const Icon(Icons.sync)),onTap:()=>showDialog<void>(context:context,builder:(c)=>AlertDialog(title:const Text('Hàng đợi đồng bộ'),content:SizedBox(width:420,child:ListView(shrinkWrap:true,children:[for(final r in _queue.pending)ListTile(title:Text((r['payload'] as Map)['name']?.toString()??(r['payload'] as Map)['customer_name']?.toString()??(r['payload'] as Map)['kind'].toString()),subtitle:Text(r['error']?.toString()??'Đã lưu máy · chờ đồng bộ'))])),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng'))])))),
           if (_message != null) Material(color: const Color(0xFFFBE8E7),
             child: Padding(padding: const EdgeInsets.all(10), child: Text(_message!))),
           Expanded(child: _selectedIndex == 0 ? _overview() : _selectedIndex == 1
-              ? CustomerDirectoryPage(key:ValueKey(_province),service:CustomerService(_apiUrl,_accessToken,province:_province),regions:_catalog)
+              ? CustomerDirectoryPage(key:ValueKey(_province),service:CustomerService(_apiUrl,_accessToken,province:_province),regions:_catalog,queue:_queue)
               : _records(moduleKinds[_selectedIndex - 2])),
         ])),
       ]),
