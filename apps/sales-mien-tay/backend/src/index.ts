@@ -146,7 +146,7 @@ export default {
         SELECT coalesce(t.owner_sub,v.owner_sub) AS owner_sub,coalesce(t.province,v.province) AS province,
           s.full_name,coalesce(t.target,0) AS target,coalesce(t.forecast,0) AS forecast,
           coalesce(t.forecasts,0) AS forecasts,coalesce(v.checkins,0) AS checkins
-        FROM totals t FULL JOIN visits v ON t.owner_sub=v.owner_sub AND t.province IS NOT DISTINCT FROM v.province
+        FROM totals t FULL JOIN visits v ON t.owner_sub=v.owner_sub AND coalesce(t.province,'')=coalesce(v.province,'')
         JOIN staff_members s ON s.user_sub=coalesce(t.owner_sub,v.owner_sub)
         ORDER BY s.full_name,coalesce(t.province,v.province) NULLS FIRST`;
         return json({month,items});
