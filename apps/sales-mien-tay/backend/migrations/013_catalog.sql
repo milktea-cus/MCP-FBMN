@@ -20,6 +20,8 @@ CREATE TABLE public.catalog_customer_mapping (
  last_op uuid NOT NULL
 );
 CREATE INDEX catalog_customer_company ON public.catalog_customer_mapping(company_code);
+REVOKE DELETE ON public.catalog_products,public.catalog_customer_mapping,public.catalog_edits FROM sales_api;
+REVOKE UPDATE ON public.catalog_edits FROM sales_api;
 GRANT SELECT,INSERT,UPDATE ON public.catalog_products,public.catalog_customer_mapping TO sales_api;
 GRANT SELECT,INSERT ON public.catalog_edits TO sales_api;
 COMMIT;
