@@ -11,6 +11,7 @@ import 'offline_queue.dart';
 import 'field_work.dart';
 import 'surveys.dart';
 import 'catalog.dart';
+import 'stock.dart';
 import 'dart:async';
 
 void main() => runApp(const SalesApp());
@@ -52,11 +53,11 @@ class _SalesHomeState extends State<SalesHome> {
   int _selectedIndex = 0;
   String? _message;
 
-  List<String> get _sections => ['Tổng quan', 'Khách hàng / Điểm bán', ...moduleKinds.map((e) => moduleLabels[e]!), 'Báo cáo tháng', 'Danh mục SKU'];
+  List<String> get _sections => ['Tổng quan', 'Khách hàng / Điểm bán', ...moduleKinds.map((e) => moduleLabels[e]!), 'Báo cáo tháng', 'Danh mục SKU', 'Tra tồn'];
   List<IconData> get _icons => const [
     Icons.dashboard_outlined, Icons.storefront_outlined, Icons.store_outlined, Icons.flag_outlined,
     Icons.payments_outlined, Icons.route_outlined, Icons.handshake_outlined,
-    Icons.policy_outlined, Icons.support_agent_outlined, Icons.analytics_outlined, Icons.inventory_2_outlined,
+    Icons.policy_outlined, Icons.support_agent_outlined, Icons.analytics_outlined, Icons.inventory_2_outlined, Icons.inventory_outlined,
   ];
 
   @override
@@ -284,6 +285,7 @@ class _SalesHomeState extends State<SalesHome> {
       appBar: AppBar(
         title: Row(mainAxisSize:MainAxisSize.min,children:[Image.asset('assets/fbmn-transparent-logo.webp',height:28),const SizedBox(width:8),const Text('Filed Work',style:TextStyle(fontWeight:FontWeight.w700))]),
         actions: [
+          IconButton(tooltip:'Tra tồn',icon:const Icon(Icons.inventory_outlined),onPressed:()=>setState(()=>_selectedIndex=11)),
           IconButton(tooltip:'Danh mục SKU',icon:const Icon(Icons.inventory_2_outlined),onPressed:()=>setState(()=>_selectedIndex=10)),
           if (_loading) const Padding(padding: EdgeInsets.all(16),
             child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
@@ -314,13 +316,14 @@ class _SalesHomeState extends State<SalesHome> {
             NavigationRailDestination(icon: Icon(_icons[i]), label: Text(_sections[i]))],
         ),
         Expanded(child: Column(children: [
-          if(_selectedIndex!=10)Padding(padding:const EdgeInsets.all(12),child:DropdownButtonFormField<String>(initialValue:_province,isExpanded:true,decoration:const InputDecoration(labelText:'Địa bàn'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả địa bàn của tôi')),for(final p in _catalog.provinces)DropdownMenuItem(value:p,child:Text(p))],onChanged:(p)=>setState(()=>_province=p??''))),
+          if(_selectedIndex!=10&&_selectedIndex!=11)Padding(padding:const EdgeInsets.all(12),child:DropdownButtonFormField<String>(initialValue:_province,isExpanded:true,decoration:const InputDecoration(labelText:'Địa bàn'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả địa bàn của tôi')),for(final p in _catalog.provinces)DropdownMenuItem(value:p,child:Text(p))],onChanged:(p)=>setState(()=>_province=p??''))),
           if(_queue.pending.isNotEmpty||_queue.quarantined>0||_queue.error!=null) Material(color:SalesTheme.tableHeader,child:ListTile(leading:const Icon(Icons.cloud_upload_outlined,color:SalesTheme.brand),title:Text('Chờ đồng bộ: ${_queue.pending.length} · Cách ly: ${_queue.quarantined}'),subtitle:Text(_queue.error??(_queue.syncing?'Đang đồng bộ':'Đã lưu trên máy')),trailing:IconButton(tooltip:'Đồng bộ ngay',onPressed:_queue.syncing?null:()=>unawaited(_queue.sync()),icon:const Icon(Icons.sync)),onTap:()=>showDialog<void>(context:context,builder:(c)=>AlertDialog(title:const Text('Hàng đợi đồng bộ'),content:SizedBox(width:420,child:ListView(shrinkWrap:true,children:[for(final r in _queue.pending)ListTile(title:Text((r['payload'] as Map)['name']?.toString()??(r['payload'] as Map)['customer_name']?.toString()??(r['payload'] as Map)['kind'].toString()),subtitle:Text(r['error']?.toString()??'Đã lưu máy · chờ đồng bộ'))])),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng'))])))),
           if (_message != null) Material(color: const Color(0xFFFBE8E7),
             child: Padding(padding: const EdgeInsets.all(10), child: Text(_message!))),
           Expanded(child: _selectedIndex == 0 ? _overview() : _selectedIndex == 1
               ? CustomerDirectoryPage(key:ValueKey('$_province:${_queue.pending.length}'),service:CustomerService(_apiUrl,_accessToken,province:_province,identity:_queue.identity,revision:_queue.revision),regions:_catalog,queue:_queue)
               : _selectedIndex==2?SurveyPage(key:ValueKey('survey:$_province'),queue:_queue,service:_customerService,regions:_catalog,admin:widget.me['role']=='admin',legacy:(_)=>Scaffold(appBar:AppBar(title:const Text('Biểu mẫu khảo sát cũ')),body:_records('survey',readOnly:true)))
+              : _selectedIndex==11?StockPage(key:ValueKey('stock:${_queue.namespace}'),queue:_queue,service:CustomerService(_apiUrl,_accessToken,identity:_queue.identity,revision:_queue.revision))
               : _selectedIndex==10?CatalogPage(queue:_queue,service:CustomerService(_apiUrl,_accessToken,identity:_queue.identity,revision:_queue.revision),admin:widget.me['role']=='admin')
               : _selectedIndex==5||_selectedIndex==9?FieldWorkPage(key:ValueKey('field:$_selectedIndex:$_province'),queue:_queue,regions:_catalog,service:_customerService,report:_selectedIndex==9):_records(moduleKinds[_selectedIndex - 2])),
         ])),

@@ -30,8 +30,26 @@ const contents=(rows:Row[])=>rows.map(r=>[r.company_code,r.quantity]);
 async function hash(v:unknown){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(v)))),x=>x.toString(16).padStart(2,'0')).join('');}
 export async function inventoryRoutes(req:Request,env:{DATABASE_URL:string},actor:Actor,url:URL):Promise<Response|null>{
  const path=url.pathname;if(!path.startsWith('/api/v1/inventory'))return null;
- if(!actor.admin)return bad('Chỉ Admin nhập và hoàn tác tồn kho',403);
  const db=neon(env.DATABASE_URL);
+ // Shared company stock is read-only for every active authenticated staff member.
+ if(path==='/api/v1/inventory/stock'&&req.method==='GET'){
+  const after=url.searchParams.get('after')??'',q=(url.searchParams.get('q')??'').trim(),limit=Number(url.searchParams.get('limit')??'200'),token=url.searchParams.get('snapshot')??'';
+  if(after.length>80||q.length>120||token.length>200||!Number.isInteger(limit)||limit<1||limit>500)return bad('Bộ lọc không hợp lệ');
+  const [row]=await db`WITH stamp AS (
+   SELECT st.revision::text||':'||count(p.id)::text||':'||coalesce(max(p.updated_at)::text,'empty') AS snapshot
+   FROM inventory_state st LEFT JOIN catalog_products p ON true WHERE st.id=1 GROUP BY st.revision
+  ), page AS (
+   SELECT p.company_code,p.sku,p.name,p.brand,p.category,p.unit,p.product_spec,p.needs_review,s.quantity,s.snapshot_at
+   FROM catalog_products p LEFT JOIN inventory_stock s ON s.product_id=p.id
+   WHERE p.active AND p.company_code>${after}
+   AND (${!q} OR strpos(lower(p.company_code),lower(${q}))>0 OR strpos(lower(p.name),lower(${q}))>0 OR strpos(lower(coalesce(p.sku,'')),lower(${q}))>0 OR strpos(lower(coalesce(p.brand,'')),lower(${q}))>0 OR strpos(lower(coalesce(p.category,'')),lower(${q}))>0)
+   ORDER BY p.company_code LIMIT ${limit+1}
+  ) SELECT stamp.snapshot,coalesce((SELECT jsonb_agg(to_jsonb(page) ORDER BY company_code) FROM page),'[]'::jsonb) AS items,now() AS synced_at FROM stamp`;
+  if(token&&token!==row.snapshot)return bad('Danh mục hoặc tồn đã đổi trong lúc tải; đồng bộ lại',409);
+  const rows=row.items as Record<string,unknown>[],items=rows.slice(0,limit);
+  return json({items,snapshot:row.snapshot,synced_at:row.synced_at,next_cursor:rows.length>limit?items[items.length-1].company_code:null});
+ }
+ if(!actor.admin)return bad('Chỉ Admin nhập và hoàn tác tồn kho',403);
  if(path==='/api/v1/inventory/batches'&&req.method==='GET'){
   const rows=await db`SELECT id,filename,sheet,actor_sub,row_count,status,applied_at,rolled_back_at,rolled_back_by FROM inventory_batches ORDER BY applied_revision DESC LIMIT 50`;
   const [state]=await db`SELECT revision,latest_batch FROM inventory_state WHERE id=1`;return json({items:rows,state});

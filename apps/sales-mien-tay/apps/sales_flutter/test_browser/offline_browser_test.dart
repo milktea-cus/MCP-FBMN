@@ -5,6 +5,17 @@ import 'package:sales_mien_tay/offline_factory.dart';
 import 'package:sales_mien_tay/session.dart';
 
 void main(){
+ test('stock snapshot persists across reopen and is scoped to account and revision',()async{
+  final owner=const Uuid().v4(),factory=offlineFactory(),a=OfflineQueue(SalesSession(),owner,'1',factory:factory);
+  await a.cache('stock-snapshot-v1',[{'items':[{'company_code':'000123','quantity':0},{'company_code':'000124','quantity':null}],'synced_at':'2026-11-10T00:00:00Z'}]);
+  (await a.db).close();a.dispose();
+  final b=OfflineQueue(SalesSession(),owner,'1',factory:factory);
+  final rows=(await b.cached('stock-snapshot-v1')).single['items'] as List;
+  expect(rows[0]['quantity'],0);expect(rows[1]['quantity'],isNull);
+  final other=OfflineQueue(SalesSession(),const Uuid().v4(),'1',factory:factory),revised=OfflineQueue(SalesSession(),owner,'2',factory:factory);
+  expect(await other.cached('stock-snapshot-v1'),isEmpty);expect(await revised.cached('stock-snapshot-v1'),isEmpty);
+  (await b.db).close();(await other.db).close();(await revised.db).close();b.dispose();other.dispose();revised.dispose();
+ });
  test('real IndexedDB persists unified survey draft and outbox atomically',()async{
   final owner=const Uuid().v4(),id=const Uuid().v4(),factory=offlineFactory();final a=OfflineQueue(SalesSession(),owner,'1',factory:factory);
   await a.saveSurveyDraft({'id':id,'status':'in_progress','answers':{'npp':'test'},'photos':[]},path:'/api/v1/sessions',payload:{'client_ref':id});
