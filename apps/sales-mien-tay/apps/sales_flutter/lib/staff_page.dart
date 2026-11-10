@@ -22,7 +22,7 @@ class _StaffPageState extends State<StaffPage>{
   final catalog=await RegionCatalog.load();
   if(!mounted)return;
   final saved=await showDialog<bool>(context:context,barrierDismissible:false,builder:(_)=>StaffEditor(session:widget.session,catalog:catalog,staff:row,managers:items.where((m)=>m['role']=='manager'&&m['active']==true).toList()));
-  if(saved==true&&mounted)await load();
+  if(saved==true&&mounted){await load();if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Đã lưu nhân viên và địa bàn.')));}
  }
  String description(Map<String,dynamic> m){
   final areas=(m['scopes'] as List).map((s)=>s['province'].toString()+' / '+(s['district']==''?'Toàn tỉnh':s['district'].toString())).join(' • ');
@@ -53,28 +53,32 @@ class _StaffEditorState extends State<StaffEditor>{
   for(final a in (s['scopes'] as List? ?? [])){scopes.putIfAbsent(a['province'].toString(),()=>{}).add(a['district'].toString());}
  }
  @override void dispose(){subject.dispose();email.dispose();code.dispose();name.dispose();phone.dispose();super.dispose();}
- Future<void> createIdentity() async{
-  if(email.text.trim().isEmpty||name.text.trim().isEmpty){setState(()=>error='Nhập email và họ tên trước.');return;}
-  setState((){busy=true;error=null;});
-  try{final r=await widget.session.post('/api/v1/admin/identity',{'email':email.text.trim(),'name':name.text.trim()});if(mounted)setState(()=>subject.text=r['user_sub'].toString());}
-  catch(e){if(mounted)setState(()=>error=e.toString());}
-  finally{if(mounted)setState(()=>busy=false);}
- }
  Future<void> save() async{
-  if(subject.text.trim().isEmpty||code.text.trim().isEmpty||name.text.trim().isEmpty){setState(()=>error='Vui lòng nhập identity, mã và họ tên.');return;}
+  if(busy)return;
+  if(code.text.trim().isEmpty||name.text.trim().isEmpty||email.text.trim().isEmpty){setState(()=>error='Vui lòng nhập họ tên, email và mã nhân viên.');return;}
+  if(!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email.text.trim())){setState(()=>error='Email không hợp lệ.');return;}
+  if(role!='admin'&&!scopes.values.any((v)=>v.isNotEmpty)){setState(()=>error='Chọn ít nhất một tỉnh hoặc huyện cho nhân viên.');return;}
   setState((){busy=true;error=null;});
-  try{await widget.session.post('/api/v1/admin/staff',{'user_sub':subject.text.trim(),'employee_code':code.text.trim(),'full_name':name.text.trim(),'phone':phone.text.trim(),'role':role,'active':active,'manager_sub':role=='sales'?manager:null,'scope_revision':widget.staff?['scope_revision']?.toString()??'0','scopes':[for(final e in scopes.entries)for(final d in e.value){'province':e.key,'district':d}]});if(mounted)Navigator.pop(context,true);}
-  catch(e){if(mounted)setState(()=>error=e.toString());}
+  try{
+   if(subject.text.trim().isEmpty){
+    final r=await widget.session.post('/api/v1/admin/identity',{'email':email.text.trim(),'name':name.text.trim()});
+    final id=r['user_sub']?.toString();
+    if(id==null||id.isEmpty)throw const ApiFailure(502,'Chưa nhận được tài khoản xác thực.');
+    if(!mounted)return;
+    setState(()=>subject.text=id);
+   }
+   await widget.session.post('/api/v1/admin/staff',{'user_sub':subject.text.trim(),'employee_code':code.text.trim(),'full_name':name.text.trim(),'phone':phone.text.trim(),'role':role,'active':active,'manager_sub':role=='sales'?manager:null,'scope_revision':widget.staff?['scope_revision']?.toString()??'0','scopes':[for(final e in scopes.entries)for(final d in e.value){'province':e.key,'district':d}]});
+   if(mounted)Navigator.pop(context,true);
+  }catch(e){if(mounted)setState(()=>error=e.toString());}
   finally{if(mounted)setState(()=>busy=false);}
  }
  Widget field(TextEditingController c,String label,{bool readOnly=false})=>Padding(padding:const EdgeInsets.only(bottom:12),child:TextField(controller:c,enabled:!busy,readOnly:readOnly,decoration:InputDecoration(labelText:label)));
  @override Widget build(BuildContext context)=>AlertDialog(
   title:Text(widget.staff==null?'Thêm nhân viên':'Sửa nhân viên'),
   content:SizedBox(width:560,child:SingleChildScrollView(child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-   const Text('Tạo identity riêng, sau đó lưu hồ sơ và địa bàn. Nhân viên xác minh email khi đăng nhập. Không cấp quyền theo email.'),const SizedBox(height:12),
+   const Text('Nhập thông tin, chọn vai trò và địa bàn rồi bấm Lưu. Tài khoản xác thực được tạo tự động; nhân viên đăng nhập bằng mã email.'),const SizedBox(height:12),
    field(name,'Họ tên'),field(email,'Email nhân viên',readOnly:widget.staff!=null||subject.text.isNotEmpty),
-   if(widget.staff==null&&subject.text.isEmpty)OutlinedButton(onPressed:busy?null:createIdentity,child:const Text('Tạo tài khoản Neon Auth')),
-   field(subject,'Identity subject',readOnly:widget.staff!=null),field(code,'Mã nhân viên'),field(phone,'Điện thoại'),
+   field(code,'Mã nhân viên'),field(phone,'Điện thoại'),
    DropdownButtonFormField<String>(initialValue:role,decoration:const InputDecoration(labelText:'Vai trò'),items:const [DropdownMenuItem(value:'admin',child:Text('Admin')),DropdownMenuItem(value:'manager',child:Text('Manager')),DropdownMenuItem(value:'sales',child:Text('Sales'))],onChanged:busy?null:(v)=>setState(()=>role=v??'sales')),
    if(role=='sales')DropdownButtonFormField<String>(initialValue:widget.managers.any((m)=>m['user_sub']==manager)?manager:'',decoration:const InputDecoration(labelText:'Quản lý trực tiếp'),items:[const DropdownMenuItem(value:'',child:Text('Chưa phân quản lý')),for(final m in widget.managers)DropdownMenuItem(value:m['user_sub'].toString(),child:Text(m['full_name'].toString()))],onChanged:busy?null:(v)=>setState(()=>manager=v==''?null:v)),
    SwitchListTile(title:const Text('Tài khoản hoạt động'),value:active,onChanged:busy?null:(v)=>setState(()=>active=v)),
@@ -83,7 +87,6 @@ class _StaffEditorState extends State<StaffEditor>{
     CheckboxListTile(title:const Text('Toàn tỉnh'),value:scopes[p]?.contains('')??false,onChanged:busy?null:(v)=>setState(()=>scopes[p]=v==true?{''}:<String>{})),
     for(final d in widget.catalog.districts[p]!)CheckboxListTile(title:Text(d),value:scopes[p]?.contains('')==true||scopes[p]?.contains(d)==true,onChanged:busy||scopes[p]?.contains('')==true?null:(v)=>setState((){final set=scopes.putIfAbsent(p,()=>{});if(v==true){set.add(d);}else{set.remove(d);}})),
    ]),
-   if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
   ]))),
-  actions:[TextButton(onPressed:busy?null:()=>Navigator.pop(context),child:const Text('Hủy')),FilledButton(onPressed:busy?null:save,child:Text(busy?'Đang lưu...':'Lưu nhân viên'))]);
+  actions:[if(error!=null) SizedBox(width:560,child:Padding(padding:const EdgeInsets.only(bottom:8),child:Semantics(liveRegion:true,child:Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error))))),TextButton(onPressed:busy?null:()=>Navigator.pop(context),child:const Text('Hủy')),FilledButton(onPressed:busy?null:save,child:Text(busy?'Đang lưu...':'Lưu nhân viên'))]);
 }
