@@ -60,7 +60,23 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze --no-fatal-infos
       - run: flutter test
-      - run: flutter build web --release
+      - run: flutter test --platform chrome test_browser/offline_browser_test.dart
+      - run: flutter build web --release --pwa-strategy=none --no-web-resources-cdn
+      - run: python3 scripts/build_offline_shell.py
+      - name: Export verified frontend source for production deployment
+        if: github.ref == 'refs/heads/main'
+        run: |
+          python3 - <<'PY'
+          import base64,json,subprocess,pathlib,hashlib
+          files=[]
+          for name in subprocess.check_output(['git','ls-files','-z','--','.']).decode().split('\0'):
+              if not name: continue
+              p=pathlib.Path(name)
+              files.append({'file':'apps/sales-mien-tay/apps/sales_flutter/'+name,'data':base64.b64encode(p.read_bytes()).decode(),'encoding':'base64'})
+          raw=json.dumps(files,separators=(',',':')).encode(); encoded=base64.b64encode(raw).decode()
+          print('P2_SOURCE_SHA256:'+hashlib.sha256(raw).hexdigest())
+          for i in range(0,len(encoded),12000): print('P2_SOURCE_CHUNK:'+encoded[i:i+12000])
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: sales-mien-tay-web

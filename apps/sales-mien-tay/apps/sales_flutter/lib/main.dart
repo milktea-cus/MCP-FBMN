@@ -72,13 +72,14 @@ class _SalesHomeState extends State<SalesHome> {
     setState(() => _loading = true);
     try {
       final api = SalesApi(_apiUrl, _accessToken,identity:_queue.identity,revision:_queue.revision);
-      final lists = await Future.wait(moduleKinds.map((kind) async {try{final items=await api.list(kind);await _queue.cache('records:$kind',items.map((r)=>r.toJson()).toList());return items;}catch(e){if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;return (await _queue.cached('records:$kind')).map(SalesRecord.fromJson).toList();}}));
+      bool cachedRead=false;
+      final lists = await Future.wait(moduleKinds.map((kind) async {try{final items=await api.list(kind);await _queue.cache('records:$kind',items.map((r)=>r.toJson()).toList());return items;}catch(e){if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;cachedRead=true;return (await _queue.cached('records:$kind')).map(SalesRecord.fromJson).toList();}}));
       if (!mounted) return;
       setState(() {
         _items..clear()..addAll(lists.expand((list) => list));
-        _message = null;
+        _message = cachedRead?'Đang dùng dữ liệu đã lưu trên máy. Chưa cập nhật từ máy chủ.':null;
       });
-      _notify('Đã đồng bộ ${_items.length} bản ghi');
+      if(!cachedRead)_notify('Đã đồng bộ ${_items.length} bản ghi');
     } catch (error) {
       if (mounted) setState(() { _message = 'Lỗi đồng bộ: $error'; });
     } finally {

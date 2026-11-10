@@ -11,4 +11,6 @@ flutter create --platforms=web,android .
 flutter pub get
 flutter analyze --no-fatal-infos
 flutter test
-flutter build web --release --dart-define=API_BASE_URL=https://field-sales-api.milktea-cus.workers.dev
+flutter build web --release --pwa-strategy=none --no-web-resources-cdn --dart-define=API_BASE_URL=https://field-sales-api.milktea-cus.workers.dev
+
+python3 scripts/build_offline_shell.py

@@ -55,6 +55,10 @@ class OfflineQueue extends ChangeNotifier {
   final t=d.transaction('outbox',idbModeReadWrite);
   await t.objectStore('outbox').put(row);await t.completed;
  }
+ Future<void> _updateIfPresent(Map<String,dynamic> row) async{
+  final d=await db;final t=d.transaction('outbox',idbModeReadWrite);final store=t.objectStore('outbox');
+  if(await store.getObject(row['key'] as String)!=null)await store.put(row);await t.completed;
+ }
  Future<void> _remove(String key) async{
   final d=await db;
   final t=d.transaction('outbox',idbModeReadWrite);
@@ -105,7 +109,7 @@ class OfflineQueue extends ChangeNotifier {
      await _remove(row['key'] as String);
     }catch(e){
      final blocked=e is ApiFailure&&[400,403,404,409,413,415,422].contains(e.status);
-     await _put({...row,'status':blocked?'blocked':'pending','attempts':(row['attempts'] as int)+1,'error':e.toString()});
+     await _updateIfPresent({...row,'status':blocked?'blocked':'pending','attempts':(row['attempts'] as int)+1,'error':e.toString()});
      error=e.toString();
      if(!blocked)break;
     }
