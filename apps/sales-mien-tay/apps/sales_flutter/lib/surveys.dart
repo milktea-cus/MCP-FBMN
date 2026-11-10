@@ -19,7 +19,7 @@ List<Map<String,dynamic>> asRows(dynamic v)=>(v as List? ?? []).map(asMap).toLis
 String surveyStatus(Map<String,dynamic> s){
  if(s['server_status']=='completed'||s['status']=='completed')return 'Hoàn thành';
  if(s['status']=='completed_pending')return 'Chờ xác minh hoàn thành';
- if(s['server_status']=='in_progress'||s['status']=='in_progress'&&s['start_op']==null)return s['location_initialized']==true||s['initialize_location']==true?'Đang khảo sát · tọa độ lần đầu đã ghi nhận':'Đang khảo sát · GPS đã xác minh';
+ if(s['server_status']=='in_progress'||s['status']=='in_progress'&&s['start_op']==null)return s['location_initialized']==true?'Đang khảo sát · tọa độ lần đầu đã ghi nhận':'Đang khảo sát · GPS đã xác minh';
  return 'Đang khảo sát · GPS chờ đồng bộ';
 }
 String? checklistError(List<Map<String,dynamic>> qs,Map<String,dynamic> answers){
@@ -63,7 +63,7 @@ class _SurveyPageState extends State<SurveyPage>{
  void notify(String msg){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(msg)));}
  List<Map<String,dynamic>> mergeSessions(List<Map<String,dynamic>> server,List<Map<String,dynamic>> local){
   final m=<String,Map<String,dynamic>>{for(final s in server)s['id'].toString():s};
-  for(final d in local){final id=d['id'].toString(),s=m[id];if(s?['status']=='completed'){m[id]=s!;}else{m[id]={...?s,...d,if(s?['status']!=null)'server_status':s!['status']};}}
+  for(final d in local){final id=d['id'].toString(),s=m[id];if(s?['status']=='completed'){m[id]=s!;}else{m[id]={...?s,...d,if(s?['status']!=null)'server_status':s!['status'],if(s?['location_initialized']!=null)'location_initialized':s!['location_initialized']};}}
   final out=m.values.toList();out.sort((a,b)=>b['started_at'].toString().compareTo(a['started_at'].toString()));return out;
  }
  bool isToday(Map<String,dynamic> row)=>row['planned']==true?(row['data'] as Map)['plannedDate']==dayKey(vnToday()):dayKey(day)==dayKey(vnToday());
@@ -171,7 +171,7 @@ class _SurveyDetailState extends State<SurveyDetail>{
  void changed(){if(mounted)unawaited(acks());}
  Future<void> acks()async{
   try{final local=(await widget.queue.cached('survey-drafts')).where((s)=>s['id']==id).firstOrNull;
-   if(local!=null&&mounted)setState((){draft['server_status']=local['server_status'];draft['server_version']=local['server_version'];final ready=asRows(local['photos']).where((p)=>p['sync_status']=='ready').map((p)=>p['id']).toSet();draft['photos']=[for(final p in photos){...p,if(ready.contains(p['id']))'sync_status':'ready'}];});
+   if(local!=null&&mounted)setState((){draft['server_status']=local['server_status'];draft['server_version']=local['server_version'];if(local['location_initialized']!=null)draft['location_initialized']=local['location_initialized'];final ready=asRows(local['photos']).where((p)=>p['sync_status']=='ready').map((p)=>p['id']).toSet();draft['photos']=[for(final p in photos){...p,if(ready.contains(p['id']))'sync_status':'ready'}];});
   }catch(_){}
  }
  Future<void> load()async{
@@ -185,7 +185,7 @@ class _SurveyDetailState extends State<SurveyDetail>{
     await widget.queue.cache('survey-detail:$id',[{...server,'photos':serverPhotos}]);
     if(mounted)setState((){
      if(server['status']=='completed'||local==null){draft={...server,'photos':serverPhotos,'server_status':server['status']};}
-     else{final media=<String,Map<String,dynamic>>{for(final p in photos)p['id'].toString():p,for(final p in serverPhotos)p['id'].toString():p};draft={...draft,'server_status':server['status'],'server_version':server['version'],'photos':media.values.toList()};}
+     else{final media=<String,Map<String,dynamic>>{for(final p in photos)p['id'].toString():p,for(final p in serverPhotos)p['id'].toString():p};draft={...draft,'server_status':server['status'],'server_version':server['version'],'location_initialized':server['location_initialized'],'photos':media.values.toList()};}
     });
    }catch(e){
     if(e is ApiFailure&&(e.status==401||e.status==403||e.status==404&&(local==null||local['server_status']!=null)))rethrow;
@@ -262,7 +262,7 @@ class _SurveyDetailState extends State<SurveyDetail>{
     Text(draft['route_stop_id']==null?'Ngoài tuyến':'Theo tuyến'),Text(surveyStatus(draft),style:Theme.of(context).textTheme.titleMedium),
     Text('Bắt đầu: ${draft['started_at']}'),if(draft['ended_at']!=null)Text('Kết thúc: ${draft['ended_at']}'),
     Text('GPS: ${draft['latitude']}, ${draft['longitude']} · Sai số ${draft['accuracy_m']} m'),
-    if(draft['location_initialized']==true)const Text('Ghi nhận tọa độ lần đầu · chưa có mốc để đối chiếu.'),
+    if(draft['location_initialized']==true)Text(draft['server_status']==null?'Tọa độ lần đầu chờ ghi nhận trên server.':'Ghi nhận tọa độ lần đầu · chưa có mốc để đối chiếu.'),
     if(!own)const Text('Chế độ xem của quản lý · không được sửa phiên người khác.'),
     if(busy)const LinearProgressIndicator(),if(message!=null)Text(message!),
     for(final p in pending)ListTile(contentPadding:EdgeInsets.zero,leading:const Icon(Icons.cloud_upload_outlined),title:Text(p['status']=='blocked'?'Cần xử lý lỗi đồng bộ':'Đang chờ đồng bộ'),subtitle:Text(p['error']?.toString()??p['path'].toString()),trailing:p['status']=='blocked'&&own?TextButton(onPressed:busy||widget.queue.syncing?null:()=>widget.queue.retrySurveyOperation(p['upload_id'].toString()),child:const Text('Thử lại')):null),

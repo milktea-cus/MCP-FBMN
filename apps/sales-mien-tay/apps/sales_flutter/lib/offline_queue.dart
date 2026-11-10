@@ -103,7 +103,7 @@ class OfflineQueue extends ChangeNotifier {
   final existing=await cache.getObject(key);
   final items=existing==null?<Map<String,dynamic>>[]:((existing as Map)['items'] as List).map((r)=>Map<String,dynamic>.from(r as Map)).toList();
   final old=items.where((r)=>r['id']==id).firstOrNull;
-  final next={...draft,if(old?['server_status']!=null)'server_status':old!['server_status'],if(old?['server_version']!=null)'server_version':old!['server_version']};
+  final next={...draft,if(old?['server_status']!=null)'server_status':old!['server_status'],if(old?['server_version']!=null)'server_version':old!['server_version'],if(old?['server_status']!=null&&old?['location_initialized']!=null)'location_initialized':old!['location_initialized']};
   // Acknowledged photos must not revert to pending when the user edits a draft.
   final known=(old?['photos'] as List?)??[];
   if(next['photos'] is List)next['photos']=(next['photos'] as List).map((p){final prior=known.where((r)=>(r as Map)['id']==(p as Map)['id']).firstOrNull;return {...Map<String,dynamic>.from(p as Map),if(prior is Map&&prior['sync_status']=='ready')'sync_status':'ready'};}).toList();
@@ -130,7 +130,7 @@ class OfflineQueue extends ChangeNotifier {
    for(final draft in items.where((v)=>v['id']==row['session_id'])){
     if((row['path'] as String).endsWith('/photos')){
      draft['photos']=[for(final p in (draft['photos'] as List? ?? [])) {...Map<String,dynamic>.from(p as Map),if(p['id']==item['id'])'sync_status':'ready'}];
-    }else{draft['server_status']=item['status'];draft['server_version']=item['version'];}
+    }else{draft['server_status']=item['status'];draft['server_version']=item['version'];if(item['location_initialized']!=null)draft['location_initialized']=item['location_initialized'];}
    }
    await cache.put({'key':key,'items':items});
   }
