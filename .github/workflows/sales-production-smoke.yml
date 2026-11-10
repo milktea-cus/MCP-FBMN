@@ -20,6 +20,7 @@ jobs:
           check() { local expect="$1"; shift; local actual; actual=$(curl -sS -o /dev/null -w '%{http_code}' "$@"); echo "HTTP $actual expected $expect"; test "$actual" = "$expect"; }
           check 401 "$base/api/v1/me"
           check 401 -H 'Authorization: Bearer fake.invalid.token' "$base/api/v1/me"
+          curl -sS --max-time 20 -o /tmp/auth-body -w 'Neon Auth GET session HTTP %{http_code}\n' -H 'Origin: https://sales-mien-tay.vercel.app' 'https://ep-bitter-bar-bd8r5813.neonauth.c-8.us-east-2.aws.neon.tech/neondb/auth/get-session?disableCookieCache=true'
           check 401 -H 'Cookie: __Host-sales-session=invalid-session' "$base/api/v1/me"
           check 403 -H 'Origin: https://untrusted.invalid' -H 'Content-Type: application/json' -d '{}' "$base/api/auth/login"
           curl --fail --max-time 30 -H 'Origin: https://sales-mien-tay.vercel.app' -H 'Content-Type: application/json' -d '{"email":"nobody-p1-smoke@example.invalid"}' "$base/api/auth/otp/request" | jq -e '.ok==true'
