@@ -209,7 +209,7 @@ export default {
           if(typeof body.client_ref!=='string'||!/^[0-9a-f-]{36}$/i.test(body.client_ref)||!Number.isInteger(body.version))return bad('Thiếu phiên bản hoặc mã thao tác');
           if(old.last_mutation_ref===body.client_ref)return json({item:old,idempotent:true});
           if(Number(old.version)!==body.version)return bad('Kế hoạch đã thay đổi, tải lại trước khi sửa',409);
-          const data={...body.data, ...(old.data?.customerId?{customerId:old.data.customerId}:{})};
+          const data:Json={...body.data, ...(old.data?.customerId?{customerId:old.data.customerId}:{})};
           const error=validate({kind:old.kind,province:old.province,district:old.district,customer_name:old.customer_name,period_ym:old.period_ym,data},true);
           if(error)return bad(error);
           if(old.kind==='target'&&(typeof data.monthlyTarget!=='number'||!Number.isFinite(data.monthlyTarget)||data.monthlyTarget<0))return bad('Chỉ tiêu không hợp lệ');
