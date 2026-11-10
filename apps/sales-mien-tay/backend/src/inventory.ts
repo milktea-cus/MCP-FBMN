@@ -36,7 +36,7 @@ export async function inventoryRoutes(req:Request,env:{DATABASE_URL:string},acto
   const after=url.searchParams.get('after')??'',q=(url.searchParams.get('q')??'').trim(),limit=Number(url.searchParams.get('limit')??'200'),token=url.searchParams.get('snapshot')??'';
   if(after.length>80||q.length>120||token.length>200||!Number.isInteger(limit)||limit<1||limit>500)return bad('Bộ lọc không hợp lệ');
   const [row]=await db`WITH stamp AS (
-   SELECT st.revision::text||':'||count(p.id)::text||':'||coalesce(max(p.updated_at)::text,'empty') AS snapshot
+   SELECT st.revision::text||':'||count(p.id)::text||':'||coalesce(sum(p.version),0)::text||':'||coalesce(max(p.updated_at)::text,'empty') AS snapshot
    FROM inventory_state st LEFT JOIN catalog_products p ON true WHERE st.id=1 GROUP BY st.revision
   ), page AS (
    SELECT p.company_code,p.sku,p.name,p.brand,p.category,p.unit,p.product_spec,p.needs_review,s.quantity,s.snapshot_at
