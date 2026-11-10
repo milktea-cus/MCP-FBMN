@@ -1,6 +1,7 @@
 import { neon } from '@neondatabase/serverless';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import districts from './districts_old.json';
+import {customerRoutes} from './customers';
 
 interface Env {
   DATABASE_URL: string;
@@ -8,6 +9,7 @@ interface Env {
   AUTH_AUDIENCE: string;
   AUTH_JWKS_URL: string;
   ALLOWED_ORIGINS: string;
+  PHOTOS_BUCKET?: R2Bucket;
 }
 type Kind = 'survey' | 'target' | 'forecast' | 'visit' | 'dealer' | 'competitor' | 'support';
 const kinds: Kind[] = ['survey', 'target', 'forecast', 'visit', 'dealer', 'competitor', 'support'];
@@ -31,7 +33,7 @@ function cors(res: Response, origin: string | null, env: Env): Response {
   if (!allowedOrigin(origin, env)) return res;
   const h = new Headers(res.headers);
   h.set('Access-Control-Allow-Origin', origin!);
-  h.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  h.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Upload-Id');
   h.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   h.set('Vary', 'Origin');
   return new Response(res.body, {status: res.status, headers: h});
@@ -90,12 +92,14 @@ export default {
     if (origin && !allowedOrigin(origin, env)) return bad('Origin không được cho phép', 403);
     const answer = async (): Promise<Response> => {
       const url = new URL(req.url);
-      if (url.pathname === '/health' && req.method === 'GET') return json({status: 'ok'});
+      if (url.pathname === '/health' && req.method === 'GET') return json({status: 'worker_alive', database: 'not_checked'});
       let user: Awaited<ReturnType<typeof userFromRequest>>;
       try { user = await userFromRequest(req, env); } catch { return bad('Chưa xác thực hoặc token không hợp lệ', 401); }
       if (url.pathname === '/api/v1/meta' && req.method === 'GET')
         return json({districts: locationMap, kinds});
       if (!env.DATABASE_URL) return bad('DATABASE_URL chưa được cấu hình', 503);
+      const productResponse = await customerRoutes(req, env, user, url);
+      if (productResponse) return productResponse;
       const sql = neon(env.DATABASE_URL);
       if (url.pathname === '/api/v1/records' && req.method === 'GET') {
         const kind = url.searchParams.get('kind') ?? '';
@@ -106,7 +110,10 @@ export default {
           SELECT id, kind, owner_sub, province, district, customer_name, period_ym,
                  data, created_at, updated_at
           FROM sales_records
-          WHERE kind = ${kind} AND (${user.manager} OR owner_sub = ${user.sub})
+          WHERE kind = ${kind} AND (owner_sub = ${user.sub} OR ${user.admin} OR
+            (${user.manager} AND EXISTS (SELECT 1 FROM staff_scopes s
+              WHERE s.user_sub=${user.sub} AND s.province=sales_records.province
+                AND (s.district='' OR s.district=sales_records.district))))
             AND (${!province} OR province = ${province})
             AND (${!period} OR period_ym = ${period})
           ORDER BY updated_at DESC LIMIT 200`;
@@ -117,6 +124,11 @@ export default {
         try { body = await readBody(req); } catch { return bad('JSON không hợp lệ'); }
         const error = validate(body, true);
         if (error) return bad(error);
+        if (body.province && !user.admin) {
+          const scope = await sql`SELECT 1 FROM staff_scopes WHERE user_sub=${user.sub}
+            AND province=${body.province} AND (district='' OR district=${body.district ?? ''}) LIMIT 1`;
+          if (!scope.length) return bad('Chưa được phân địa bàn này', 403);
+        }
         const rows = await sql`
           INSERT INTO sales_records (kind, owner_sub, province, district, customer_name, period_ym, data)
           VALUES (${body.kind!}, ${user.sub}, ${body.province ?? null}, ${body.district ?? null},
@@ -128,16 +140,24 @@ export default {
       if (match && req.method === 'PATCH') {
         let body: SalesRecordBody;
         try { body = await readBody(req); } catch { return bad('JSON không hợp lệ'); }
-        // PATCH thay toàn bộ data, giữ nguyên kind/owner, tránh leo thang phân quyền.
         if (body.kind || !body.data) return bad('PATCH chỉ hỗ trợ data cùng trường địa bàn');
-        const error = validate(body, false); if (error) return bad(error);
+        const current = await sql`SELECT province,district,owner_sub FROM sales_records WHERE id=${match[1]}::uuid
+          AND (owner_sub=${user.sub} OR ${user.admin}) LIMIT 1`;
+        if (!current.length) return bad('Không tìm thấy hoặc không có quyền', 404);
+        const province = body.province ?? current[0].province;
+        const district = body.district ?? current[0].district;
+        if (province && !locationMap[province]) return bad('Tỉnh không hợp lệ');
+        if (district && (!province || !locationMap[province]?.includes(district)))
+          return bad('Huyện không khớp tỉnh; phải chọn lại huyện', 400);
+        if (province && !user.admin) {
+          const scope = await sql`SELECT 1 FROM staff_scopes WHERE user_sub=${user.sub}
+            AND province=${province} AND (district='' OR district=${district ?? ''}) LIMIT 1`;
+          if (!scope.length) return bad('Chưa được phân địa bàn này', 403);
+        }
         const rows = await sql`
-          UPDATE sales_records SET
-            province = COALESCE(${body.province ?? null}, province),
-            district = COALESCE(${body.district ?? null}, district),
-            data = ${JSON.stringify(body.data)}::jsonb, updated_at = now()
-          WHERE id = ${match[1]}::uuid AND (${user.manager} OR owner_sub = ${user.sub})
-          RETURNING *`;
+          UPDATE sales_records SET province=${province}, district=${district},
+            data=${JSON.stringify(body.data)}::jsonb, updated_at=now()
+          WHERE id=${match[1]}::uuid AND (owner_sub=${user.sub} OR ${user.admin}) RETURNING *`;
         return rows.length ? json({item: rows[0]}) : bad('Không tìm thấy hoặc không có quyền', 404);
       }
       if (match && req.method === 'DELETE') {
