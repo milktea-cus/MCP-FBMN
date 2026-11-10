@@ -146,9 +146,9 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
         return Card(child: ListTile(
           leading: const CircleAvatar(child: Icon(Icons.storefront)),
           title: Text(c.name), subtitle: Text('${c.district}, ${c.province} · ${c.address}'),
-          trailing: IconButton(tooltip:'Sửa thông tin',icon:const Icon(Icons.edit_outlined),onPressed:() async {final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>CustomerEditor(service:widget.service,regions:widget.regions,customer:c)));if(changed==true&&mounted)refresh();}),
+          trailing: IconButton(tooltip:'Sửa thông tin',icon:const Icon(Icons.edit_outlined),onPressed:() async {final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>CustomerEditor(service:widget.service,regions:widget.regions,customer:c,queue:widget.queue)));if(changed==true&&mounted)refresh();}),
           onTap: () async {final changed=await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) =>
-            CustomerDetail(service: widget.service, customer: c,regions:widget.regions)));if(changed==true&&mounted)refresh();},
+            CustomerDetail(service: widget.service, customer: c,regions:widget.regions,queue:widget.queue)));if(changed==true&&mounted)refresh();},
         ));
       })),
     ]);
@@ -197,11 +197,11 @@ class _CustomerEditorState extends State<CustomerEditor> {
         'phone':phone.text.trim().isEmpty?null:phone.text.trim(),'note':note.text.trim().isEmpty?null:note.text.trim(),
         'province':province,'district':district,'category':category,
         if(widget.customer==null||position!=null)...{'location_consent':position != null,'latitude':position?.latitude,'longitude':position?.longitude,'location_accuracy_m':position?.accuracy}};
-      if(widget.customer==null&&widget.queue!=null){
+      if(widget.queue!=null){
         final bytes=await photo?.readAsBytes();
         final filename=photo?.name.toLowerCase()??'';
         final mime=filename.endsWith('.png')?'image/png':filename.endsWith('.webp')?'image/webp':'image/jpeg';
-        await widget.queue!.enqueue('/api/v1/customers',data,photo:bytes,mime:mime);
+        await widget.queue!.enqueue(widget.customer==null?'/api/v1/customers':'/api/v1/customers/${widget.customer!.id}',{...data,if(widget.customer!=null)'version':widget.customer!.version,'client_ref':clientRef},photo:bytes,mime:mime,method:widget.customer==null?'POST':'PATCH');
         if(mounted){ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Đã lưu điểm bán trên máy · chờ đồng bộ')));Navigator.pop(context,true);}return;
       }
       final created=widget.customer==null?await widget.service.add(data):await widget.service.update(widget.customer!,data);
@@ -255,7 +255,8 @@ class CustomerDetail extends StatefulWidget {
   final CustomerService service;
   final FieldCustomer customer;
   final RegionCatalog regions;
-  const CustomerDetail({super.key,required this.service,required this.customer,required this.regions});
+  final OfflineQueue? queue;
+  const CustomerDetail({super.key,required this.service,required this.customer,required this.regions,this.queue});
   @override State<CustomerDetail> createState()=>_CustomerDetailState();
 }
 class _CustomerDetailState extends State<CustomerDetail> {
@@ -269,6 +270,7 @@ class _CustomerDetailState extends State<CustomerDetail> {
     setState(()=>busy=true);
     try{final pos=await captureGps(context);
       if(pos.accuracy>100)throw StateError('Độ chính xác GPS lớn hơn 100m');
+      if(widget.queue!=null){await widget.queue!.enqueue('/api/v1/customers/${widget.customer.id}/visits',{'latitude':pos.latitude,'longitude':pos.longitude,'accuracy_m':pos.accuracy});if(mounted)setState(()=>message='Đã lưu check-in trên máy · chờ xác minh và đồng bộ');return;}
       await widget.service.checkin(widget.customer.id,pos,const Uuid().v4());
       if(mounted)setState(()=>message='Check-in thành công. Vị trí đã được xác minh trên server.');
     }catch(e){if(mounted)setState(()=>message='$e');}
@@ -278,7 +280,7 @@ class _CustomerDetailState extends State<CustomerDetail> {
   Widget build(BuildContext context) {
     final customer = widget.customer;
     return Scaffold(
-      appBar: AppBar(title: Text(customer.name),actions:[IconButton(tooltip:'Sửa thông tin',icon:const Icon(Icons.edit_outlined),onPressed:() async {final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>CustomerEditor(service:widget.service,regions:widget.regions,customer:customer)));if(changed==true&&context.mounted)Navigator.pop(context,true);})]),
+      appBar: AppBar(title: Text(customer.name),actions:[IconButton(tooltip:'Sửa thông tin',icon:const Icon(Icons.edit_outlined),onPressed:() async {final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>CustomerEditor(service:widget.service,regions:widget.regions,customer:customer,queue:widget.queue)));if(changed==true&&context.mounted)Navigator.pop(context,true);})]),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[

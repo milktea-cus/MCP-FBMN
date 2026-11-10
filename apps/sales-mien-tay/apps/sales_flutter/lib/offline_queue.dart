@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'package:idb_shim/idb_shim.dart';
 import 'package:uuid/uuid.dart';
 import 'offline_factory.dart';
@@ -49,9 +49,62 @@ class OfflineQueue extends ChangeNotifier {
   final t=d.transaction('outbox',idbModeReadWrite);
   await t.objectStore('outbox').delete(key);await t.completed;
  }
- Future<void> enqueue(String path,Map<String,dynamic> data,{Uint8List? photo,String? mime}) async{
+ Future<void> enqueue(String path,Map<String,dynamic> data,{Uint8List? photo,String? mime,String method='POST'}) async{
   if(_closed)throw StateError('Phiên đã đóng');
-  if(!['/api/v1/records','/api/v1/customers'].contains(path))throw ArgumentError('Unsupported offline operation');
+  if(!['/api/v1/records','/api/v1/customers'].contains(path)&&!RegExp(r'^/api/v1/customers/[a-f0-9-]{36}(/visits)?
+  final id=data['client_ref']?.toString()??const Uuid().v4();
+  if(photo!=null&&(photo.isEmpty||photo.length>5*1024*1024))throw StateError('Ảnh phải nhỏ hơn 5 MB');
+  await _put({'key':'$namespace:$id','namespace':namespace,'account':identity,'created':DateTime.now().millisecondsSinceEpoch,
+    'path':path,'method':method,'payload':{...data,'client_ref':id},'status':'pending','attempts':0,
+    if(photo!=null)'photo':photo,if(mime!=null)'mime':mime,'upload_id':const Uuid().v4()});
+  await reload();
+  unawaited(sync());
+ }
+ Future<void> start() async{
+  try{await reload();}catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
+  if(_closed)return;
+  _timer=Timer.periodic(const Duration(seconds:30),(_)=>unawaited(sync()));
+  unawaited(sync());
+ }
+ Future<void> sync() async{
+  if(_closed||syncing)return;
+  syncing=true;error=null;_notify();
+  try{
+   await reload();
+   if(pending.isEmpty)return;
+   final me=await session.get('/api/v1/me');
+   if(_closed||me['identity']!=identity||me['scope_revision'].toString()!=revision){error='Quyền đã thay đổi. Dữ liệu cũ được cách ly.';return;}
+   for(final row in List.of(pending)){
+    if(_closed)break;
+    if(row['status']=='blocked')continue;
+    try{
+     final payload=Map<String,dynamic>.from(row['payload'] as Map);
+     final headers={...sessionHeaders(session.cookie),'X-Sync-Identity':identity,'X-Sync-Revision':revision};
+     final uri=session.uri(row['path'] as String);
+     final response=await (row['method']=='PATCH'?http.patch(uri,headers:headers,body:jsonEncode(payload)):http.post(uri,headers:headers,body:jsonEncode(payload))).timeout(const Duration(seconds:30));
+     final result=decodeApi(response);
+     final item=result['item'] as Map;
+     if(row['photo']!=null){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      if(_closed)break;
+      final upload=await http.post(session.uri('/api/v1/customers/${item['id']}/photos'),
+       headers:{...headers,'Content-Type':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},body:bytes).timeout(const Duration(seconds:30));
+      decodeApi(upload);
+     }
+     await _remove(row['key'] as String);
+    }catch(e){
+     final blocked=e is ApiFailure&&[400,403,404,409,413,415,422].contains(e.status);
+     await _put({...row,'status':blocked?'blocked':'pending','attempts':(row['attempts'] as int)+1,'error':e.toString()});
+     error=e.toString();
+     if(!blocked)break;
+    }
+   }
+  }catch(e){error=e.toString();}
+  finally{try{await reload();}catch(e){error=e.toString();}syncing=false;_notify();}
+ }
+ @override void dispose(){_closed=true;_timer?.cancel();super.dispose();}
+}
+).hasMatch(path))throw ArgumentError('Unsupported offline operation');
   final id=data['client_ref']?.toString()??const Uuid().v4();
   if(photo!=null&&(photo.isEmpty||photo.length>5*1024*1024))throw StateError('Ảnh phải nhỏ hơn 5 MB');
   await _put({'key':'$namespace:$id','namespace':namespace,'account':identity,'created':DateTime.now().millisecondsSinceEpoch,

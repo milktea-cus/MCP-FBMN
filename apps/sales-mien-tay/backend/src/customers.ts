@@ -125,6 +125,8 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
   if (!match[2] && req.method==='PATCH') {
     if (current.owner_sub!==actor.sub && !actor.admin && !actor.manager) return fail('Không được sửa khách hàng của người khác',403);
     let data: ObjectBody;try{data=await input(req);}catch{return fail('JSON không hợp lệ');}
+    if(data.client_ref!==undefined&&!uuid.test(String(data.client_ref)))return fail('client_ref không hợp lệ');
+    if(data.client_ref&&current.last_mutation_ref===data.client_ref)return response({item:current,idempotent:true});
     if (!Number.isInteger(data.version) || Number(data.version)!==Number(current.version)) return fail('Dữ liệu đã thay đổi, vui lòng tải lại',409);
     const merged:ObjectBody={...current,...data};
     const error=dataError(merged);if(error)return fail(error);
@@ -134,7 +136,7 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
         contact_name=${optional(merged.contact_name)},phone=${optional(merged.phone,20)},address_line=${str(merged.address_line,500)!},
         province=${province},district=${district},latitude=${merged.latitude??null},longitude=${merged.longitude??null},
         location_accuracy_m=${merged.location_accuracy_m??null},location_consent=${merged.location_consent===true},
-        note=${optional(merged.note,2000)},status=${merged.status},version=version+1,updated_at=now()
+        note=${optional(merged.note,2000)},status=${merged.status},last_mutation_ref=${data.client_ref??null}::uuid,version=version+1,updated_at=now()
       WHERE id=${id}::uuid AND version=${data.version as number} AND public.sales_can_access(${actor.sub},owner_sub,province,district) AND public.sales_can_access(${actor.sub},owner_sub,${province},${district}) RETURNING *`;
     if(!rows.length)return fail('Xung đột phiên bản',409);
     await db`INSERT INTO field_audit_events(actor_sub,action,entity_type,entity_id) VALUES (${actor.sub},'update','customer',${id}::uuid)`;

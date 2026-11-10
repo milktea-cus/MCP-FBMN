@@ -35,7 +35,7 @@ function cors(res: Response, origin: string | null, env: Env): Response {
   if (!allowedOrigin(origin, env)) return res;
   const h = new Headers(res.headers);
   h.set('Access-Control-Allow-Origin', origin!);
-  h.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Upload-Id');
+  h.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Upload-Id, X-Sync-Identity, X-Sync-Revision');
   h.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   h.set('Vary', 'Origin');
   return new Response(res.body, {status: res.status, headers: h});
@@ -89,6 +89,8 @@ export default {
       if (authResponse) return authResponse;
       let user: Awaited<ReturnType<typeof userFromRequest>>;
       user = await userFromRequest(req, env);
+      const syncIdentity=req.headers.get('X-Sync-Identity');
+      if(syncIdentity!==null&&(syncIdentity!==user.sub||req.headers.get('X-Sync-Revision')!==String(user.staff.scope_revision)))return bad('Phiên hoặc địa bàn đồng bộ đã thay đổi',403);
       if (url.pathname === '/api/v1/me' && req.method === 'GET') return json({identity: user.sub, role: user.staff.role, employee_code: user.staff.employee_code, full_name: user.staff.full_name, email: user.staff.email, scope_revision: String(user.staff.scope_revision), scopes: user.scopes, permissions: user.admin ? ['staff:manage','records:all'] : user.manager ? ['records:team','records:own'] : ['records:own']});
       if(url.pathname==='/api/v1/admin/identity')return provisionIdentity(req,env,user);
       const staffResponse = await staffRoutes(req, env, user, url);
