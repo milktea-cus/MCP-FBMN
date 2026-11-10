@@ -2,11 +2,12 @@
 
 ## Hiện trạng (2026-11-10)
 
-- GitHub `milktea-cus/MCP-FBMN` `main`: P0 starter merged, CI Flutter Web + TS typecheck + source guard đã xanh.
-- Neon `raspy-bar-51596929` / branch `br-super-mountain-bdije4mj` (`production`): kết nối read-only thành công, lúc kiểm tra ban đầu `public` chưa có bảng ứng dụng.
-- Cloudflare account `e29ec156139b3750d875a9c45ed477ec`: chỉ thấy Worker `qr-app-api-preview`; chưa có `field-sales-api` production.
-- Vercel connected team hiện mới có `qr-app`, `qr-app-step11-smoke`; chưa có project Sales.
-- **UI FBMN rules chưa được xác thực**. Tham chiếu từ ảnh `mcp-mobi` chỉ thể hiện 5 màn hình, không chứa source/giá trị tokens.
+- GitHub `main`: source Sales, API và Flutter đã tích hợp; CI trước chuẩn hóa UI xanh. Commit `725752ec` đưa tài liệu FBMN gốc và theme vào main; kiểm tra CI commit mới riêng.
+- Neon `raspy-bar-51596929` / `br-super-mountain-bdije4mj` (`production`), database `neondb`: migration 001/002 đã áp dụng, 6 bảng nghiệp vụ; khách hàng và staff scopes hiện 0.
+- Cloudflare account `e29ec156139b3750d875a9c45ed477ec`: bucket private `sales-mien-tay-customer-media` đã tạo, binding đã thêm vào wrangler.toml; Worker chưa deploy; đích dự kiến `field-sales-api.milktea-cus.workers.dev`.
+- Vercel project production `sales-mien-tay`, domain đã gắn `sales-mien-tay.vercel.app`; chưa deploy. Script CMD `scripts/deploy-vercel.cmd` đã tạo.
+- UI FBMN chính thức đã xác thực và lưu ở `standards/ui-fbmn/source/` theo commit nguồn `1ad3970a3c7f133932b47fb81d27c104c12deb5d`; theme và token test đã áp dụng. Modal/drawer/toast/motion đầy đủ và UAT chưa hoàn tất.
+- Xem `PRODUCTION_SETUP.md` cho phần cấu hình còn thiếu; không nhập credential vào repo.
 
 ## Kế hoạch theo đường production, không tạo preview branch
 
