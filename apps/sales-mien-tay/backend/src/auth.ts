@@ -27,11 +27,12 @@ async function provider(path: string, method: string, value?: string, body?: str
  ...(value?{Cookie:sessionHeader(value)}:{}),...(body?{'Content-Type':'application/json'}:{})},body});
 }
 async function sessionSubject(value: string) {
- const res=await provider('/get-session?disableCookieCache=true','GET',value);
+ if(value.length<32||value.length>4096||! /^[A-Za-z0-9%._~+\/=:-]+$/.test(value))throw new AuthError(401,'Phiên đăng nhập không hợp lệ');
+ let res:Response;try{res=await provider('/get-session?disableCookieCache=true','GET',value);}catch{throw new AuthError(503,'Dịch vụ xác thực chưa sẵn sàng');}
  if(!res.ok) throw new AuthError(res.status>=500?503:401,'Phiên đăng nhập không hợp lệ');
- const data=await res.json() as {user?:{id?:string;emailVerified?:boolean};session?:{expiresAt?:string}};
+ let data:{user?:{id?:string;emailVerified?:boolean};session?:{expiresAt?:string}};try{data=await res.json();}catch{throw new AuthError(401,'Phiên đăng nhập không hợp lệ');}
  if(!data?.user?.id || !data.session || !data.user.emailVerified ||
- !data.session.expiresAt || Date.parse(data.session.expiresAt)<=Date.now()) throw new AuthError(401,'Phiên hết hạn hoặc email chưa xác minh');
+ !data.session.expiresAt || !Number.isFinite(Date.parse(data.session.expiresAt)) || Date.parse(data.session.expiresAt)<=Date.now()) throw new AuthError(401,'Phiên hết hạn hoặc email chưa xác minh');
  return data.user.id;
 }
 export async function principal(env: AuthEnv, sub: string) {
