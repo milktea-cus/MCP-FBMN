@@ -60,7 +60,11 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze --no-fatal-infos
       - run: flutter test
-      - run: flutter test --platform chrome test_browser/offline_browser_test.dart
+      - name: Test real Chrome IndexedDB
+        run: |
+          cp test_browser/offline_browser_test.dart test/offline_browser_test.dart
+          flutter test --platform chrome test/offline_browser_test.dart
+          rm test/offline_browser_test.dart
       - run: flutter build web --release --pwa-strategy=none --no-web-resources-cdn
       - run: python3 scripts/build_offline_shell.py
       - name: Export verified frontend source for production deployment
