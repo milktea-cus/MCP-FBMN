@@ -26,6 +26,7 @@ export function validateRows(v:Obj,confirm:boolean):Row[]{
   seen.add(code);out.push({company_code:code,quantity:q,row_number:Number(n),product_version:confirm?Number(r.product_version):0});
  }return out.sort((a,b)=>a.company_code.localeCompare(b.company_code));
 }
+const contents=(rows:Row[])=>rows.map(r=>[r.company_code,r.quantity]);
 async function hash(v:unknown){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(v)))),x=>x.toString(16).padStart(2,'0')).join('');}
 export async function inventoryRoutes(req:Request,env:{DATABASE_URL:string},actor:Actor,url:URL):Promise<Response|null>{
  const path=url.pathname;if(!path.startsWith('/api/v1/inventory'))return null;
@@ -43,17 +44,17 @@ export async function inventoryRoutes(req:Request,env:{DATABASE_URL:string},acto
  let v:Obj;try{v=await read(req);}catch(e){return bad(e instanceof Error?e.message:'JSON không hợp lệ');}
  try{
   if(path==='/api/v1/inventory/preview'){
-   const rows=validateRows(v,false);
-   const result=await db`SELECT st.revision,x.company_code,x.quantity,x.row_number,coalesce(p.version,0) AS product_version,p.name,p.unit,p.active,s.quantity AS old_quantity,s.snapshot_at AS old_snapshot_at
+   const rows=validateRows(v,false),fingerprint=await hash(contents(rows));
+   const result=await db`SELECT st.revision,EXISTS(SELECT 1 FROM inventory_batches b WHERE b.id=st.latest_batch AND b.content_hash=${fingerprint} AND b.status='applied') AS duplicate,x.company_code,x.quantity,x.row_number,coalesce(p.version,0) AS product_version,p.name,p.unit,p.active,s.quantity AS old_quantity,s.snapshot_at AS old_snapshot_at
     FROM inventory_state st CROSS JOIN jsonb_to_recordset(${JSON.stringify(rows)}::jsonb) AS x(company_code text,quantity bigint,row_number integer)
     LEFT JOIN catalog_products p ON p.company_code=x.company_code LEFT JOIN inventory_stock s ON s.product_id=p.id WHERE st.id=1 ORDER BY x.row_number`;
-   return json({revision:result[0].revision,items:result,can_confirm:result.every(x=>x.active!==false)});
+   return json({revision:result[0].revision,items:result,can_confirm:result.every(x=>x.active!==false)&&!result[0].duplicate,duplicate:result[0].duplicate});
   }
   if(path==='/api/v1/inventory/confirm'){
    const rows=validateRows(v,true);
    if(!isId(v.client_ref)||typeof v.revision!=='string'&&!Number.isSafeInteger(v.revision)||!/^\d+$/.test(String(v.revision)))return bad('Thiếu UUID hoặc revision');
-   const digest=await hash({filename:v.filename,sheet:v.sheet,revision:String(v.revision),rows});
-   const [x]=await db`SELECT public.inventory_apply(${actor.sub},${v.client_ref}::uuid,${String(v.filename)},${String(v.sheet)},${digest},${String(v.revision)}::bigint,${JSON.stringify(rows)}::jsonb) AS item`;return json({item:x.item});
+   const digest=await hash({filename:v.filename,sheet:v.sheet,revision:String(v.revision),rows}),fingerprint=await hash(contents(rows));
+   const [x]=await db`SELECT public.inventory_apply(${actor.sub},${v.client_ref}::uuid,${String(v.filename)},${String(v.sheet)},${digest},${fingerprint},${String(v.revision)}::bigint,${JSON.stringify(rows)}::jsonb) AS item`;return json({item:x.item});
   }
   if(path==='/api/v1/inventory/rollback'){
    if(!isId(v.batch_id)||!isId(v.client_ref))return bad('UUID không hợp lệ');
@@ -64,6 +65,7 @@ export async function inventoryRoutes(req:Request,env:{DATABASE_URL:string},acto
   if(m.includes('inventory_forbidden'))return bad('Không có quyền Admin',403);
   if(m.includes('inventory_missing'))return bad('Không tìm thấy lần nhập',404);
   if(m.includes('inventory_edited'))return bad('Mã tạm đã được chỉnh sửa; không hoàn tác để tránh ghi đè',409);
+  if(m.includes('inventory_duplicate'))return bad('Nội dung giống lần nhập tồn gần nhất; không nhập trùng',409);
   if(m.includes('inventory_stale')||m.includes('inventory_conflict')||m.includes('duplicate key'))return bad('Danh mục/tồn đã đổi hoặc thao tác trùng; xem trước lại',409);
   if(m.includes('inventory_invalid'))return bad('Dữ liệu nhập không hợp lệ');
   if(m.includes('Dòng ')||m.includes('File/sheet')||m.includes('Mỗi lần nhập')||m.includes('Số dòng')||m.includes('Thiếu phiên bản'))return bad(m);

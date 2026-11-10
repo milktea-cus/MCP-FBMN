@@ -5,7 +5,7 @@ CREATE TABLE public.inventory_state(id integer PRIMARY KEY CHECK(id=1), revision
 INSERT INTO public.inventory_state(id) VALUES(1);
 CREATE TABLE public.inventory_batches(
  id uuid PRIMARY KEY, actor_sub text NOT NULL, filename text NOT NULL, sheet text NOT NULL,
- request_hash text NOT NULL, applied_revision bigint NOT NULL UNIQUE, previous_batch uuid REFERENCES public.inventory_batches(id),
+ request_hash text NOT NULL, content_hash text NOT NULL, applied_revision bigint NOT NULL UNIQUE, previous_batch uuid REFERENCES public.inventory_batches(id),
  row_count integer NOT NULL CHECK(row_count>0), status text NOT NULL DEFAULT 'applied' CHECK(status IN ('applied','rolled_back')),
  applied_at timestamptz NOT NULL DEFAULT now(), rolled_back_at timestamptz, rolled_back_by text, rollback_op uuid UNIQUE
 );
@@ -27,7 +27,7 @@ REVOKE UPDATE ON public.inventory_batch_rows FROM sales_api;
 GRANT SELECT,INSERT,UPDATE ON public.inventory_state,public.inventory_batches,public.inventory_stock TO sales_api;
 GRANT SELECT,INSERT ON public.inventory_batch_rows TO sales_api;
 -- SQL function is invoker, checks active admin again in DB, serializes imports, all writes atomic.
-CREATE FUNCTION public.inventory_apply(p_actor text,p_id uuid,p_file text,p_sheet text,p_hash text,p_revision bigint,p_rows jsonb)
+CREATE FUNCTION public.inventory_apply(p_actor text,p_id uuid,p_file text,p_sheet text,p_hash text,p_content_hash text,p_revision bigint,p_rows jsonb)
 RETURNS jsonb LANGUAGE plpgsql SET search_path=public,pg_temp AS $fn$
 DECLARE st inventory_state%ROWTYPE; prior inventory_batches%ROWTYPE; rec record; prod catalog_products%ROWTYPE; old_stock inventory_stock%ROWTYPE; created boolean; stamp timestamptz:=now(); cnt integer;
 BEGIN
@@ -39,11 +39,12 @@ BEGIN
   RETURN to_jsonb(prior);
  END IF;
  IF st.revision<>p_revision THEN RAISE EXCEPTION 'inventory_stale'; END IF;
+ IF EXISTS(SELECT 1 FROM inventory_batches WHERE id=st.latest_batch AND content_hash=p_content_hash AND status='applied') THEN RAISE EXCEPTION 'inventory_duplicate'; END IF;
  IF jsonb_typeof(p_rows)<>'array' OR jsonb_array_length(p_rows) NOT BETWEEN 1 AND 2000 THEN RAISE EXCEPTION 'inventory_invalid'; END IF;
  SELECT count(DISTINCT x.company_code) INTO cnt FROM jsonb_to_recordset(p_rows) AS x(company_code text);
  IF cnt<>jsonb_array_length(p_rows) THEN RAISE EXCEPTION 'inventory_invalid'; END IF;
- INSERT INTO inventory_batches(id,actor_sub,filename,sheet,request_hash,applied_revision,previous_batch,row_count,applied_at)
- VALUES(p_id,p_actor,p_file,p_sheet,p_hash,st.revision+1,st.latest_batch,jsonb_array_length(p_rows),stamp);
+ INSERT INTO inventory_batches(id,actor_sub,filename,sheet,request_hash,content_hash,applied_revision,previous_batch,row_count,applied_at)
+ VALUES(p_id,p_actor,p_file,p_sheet,p_hash,p_content_hash,st.revision+1,st.latest_batch,jsonb_array_length(p_rows),stamp);
  FOR rec IN SELECT * FROM jsonb_to_recordset(p_rows) AS x(company_code text,quantity bigint,row_number integer,product_version integer) ORDER BY company_code LOOP
   IF rec.company_code IS NULL OR length(rec.company_code) NOT BETWEEN 1 AND 80 OR rec.quantity IS NULL OR rec.quantity NOT BETWEEN 0 AND 2147483647 OR rec.row_number IS NULL OR rec.row_number<1 OR rec.product_version IS NULL OR rec.product_version<0 THEN RAISE EXCEPTION 'inventory_invalid'; END IF;
   SELECT * INTO prod FROM catalog_products WHERE company_code=rec.company_code FOR UPDATE;
@@ -87,6 +88,6 @@ BEGIN
  UPDATE inventory_state SET revision=st.revision+1,latest_batch=b.previous_batch WHERE id=1;
  RETURN to_jsonb(b);
 END $fn$;
-REVOKE ALL ON FUNCTION public.inventory_apply(text,uuid,text,text,text,bigint,jsonb),public.inventory_rollback(text,uuid,uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.inventory_apply(text,uuid,text,text,text,bigint,jsonb),public.inventory_rollback(text,uuid,uuid) TO sales_api;
+REVOKE ALL ON FUNCTION public.inventory_apply(text,uuid,text,text,text,text,bigint,jsonb),public.inventory_rollback(text,uuid,uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.inventory_apply(text,uuid,text,text,text,text,bigint,jsonb),public.inventory_rollback(text,uuid,uuid) TO sales_api;
 COMMIT;

@@ -50,9 +50,9 @@ class InventoryImportPage extends StatefulWidget{
  @override State<InventoryImportPage> createState()=>_InventoryImportPageState();
 }
 class _InventoryImportPageState extends State<InventoryImportPage>{
- XlsxBook? book;String filename='',sheetName='';int header=0;int? code,qty;bool busy=false;String? message;List<String> errors=[];List<Map<String,dynamic>> preview=[];String? revision;String op=const Uuid().v4();bool canConfirm=false;
+ XlsxBook? book;String filename='',sheetName='';int header=0;int? code,qty;bool busy=false;String? message;List<String> errors=[];List<Map<String,dynamic>> preview=[];String? revision;String op=const Uuid().v4();bool canConfirm=false,duplicate=false;int fileGeneration=0;
  XlsxSheet? get sheet=>book?.tables[sheetName];
- void invalidate(){preview=[];revision=null;errors=[];canConfirm=false;op=const Uuid().v4();}
+ void invalidate(){preview=[];revision=null;errors=[];canConfirm=false;duplicate=false;op=const Uuid().v4();}
  Future<Map<String,dynamic>> post(String path,Map<String,dynamic> data)async=>decodeApi(await http.post(widget.service.uri(path),headers:widget.service.headers,body:jsonEncode(data)).timeout(const Duration(seconds:60)));
  Future<void> pick()async{
   if(busy)return;setState(()=>busy=true);
@@ -63,7 +63,7 @@ class _InventoryImportPageState extends State<InventoryImportPage>{
    if(f.bytes==null||f.size>5*1024*1024||!f.name.toLowerCase().endsWith('.xlsx'))throw StateError('Chỉ nhận .xlsx tối đa 5 MB');
    final decoded=decodeInventoryWorkbook(f.bytes!);
    if(decoded.tables.isEmpty)throw StateError('File không có sheet');
-   if(mounted)setState((){book=decoded;filename=f.name;sheetName=decoded.tables.keys.first;header=0;code=null;qty=null;invalidate();message=null;});
+   if(mounted)setState((){book=decoded;fileGeneration++;filename=f.name;sheetName=decoded.tables.keys.first;header=0;code=null;qty=null;invalidate();message=null;});
   }catch(e){if(mounted)setState(()=>message='Không đọc được Excel: $e');}
   finally{if(mounted)setState(()=>busy=false);}
  }
@@ -75,7 +75,7 @@ class _InventoryImportPageState extends State<InventoryImportPage>{
   setState(()=>busy=true);
   try{
    final data=await post('/api/v1/inventory/preview',{'filename':filename,'sheet':sheetName,'rows':parsed.rows});
-   if(mounted)setState((){preview=_rows(data['items']);revision=data['revision'].toString();canConfirm=data['can_confirm']==true;});
+   if(mounted)setState((){preview=_rows(data['items']);revision=data['revision'].toString();canConfirm=data['can_confirm']==true;duplicate=data['duplicate']==true;});
   }catch(e){if(mounted)setState(()=>message=e.toString());}
   finally{if(mounted)setState(()=>busy=false);}
  }
@@ -99,19 +99,19 @@ class _InventoryImportPageState extends State<InventoryImportPage>{
    if(filename.isNotEmpty)Text(filename),if(busy)const LinearProgressIndicator(),if(message!=null)Padding(padding:const EdgeInsets.all(8),child:Text(message!)),
    if(s!=null)...[
     const SizedBox(height:12),
-    DropdownButtonFormField<String>(key:ValueKey(filename),initialValue:sheetName,isExpanded:true,decoration:const InputDecoration(labelText:'Sheet'),items:[for(final name in book!.tables.keys)DropdownMenuItem(value:name,child:Text(name))],onChanged:busy?null:(v)=>setState((){sheetName=v!;header=0;code=null;qty=null;invalidate();})),
+    DropdownButtonFormField<String>(key:ValueKey(fileGeneration),initialValue:sheetName,isExpanded:true,decoration:const InputDecoration(labelText:'Sheet'),items:[for(final name in book!.tables.keys)DropdownMenuItem(value:name,child:Text(name))],onChanged:busy?null:(v)=>setState((){sheetName=v!;header=0;code=null;qty=null;invalidate();})),
     const SizedBox(height:12),
-    DropdownButtonFormField<int>(key:ValueKey('$filename:$sheetName'),initialValue:headerRows>0?header:null,decoration:const InputDecoration(labelText:'Dòng tiêu đề'),items:[for(var i=0;i<headerRows;i++)DropdownMenuItem(value:i,child:Text('Dòng ${i+1}'))],onChanged:busy?null:(v)=>setState((){header=v!;code=null;qty=null;invalidate();})),
+    DropdownButtonFormField<int>(key:ValueKey('$fileGeneration:$sheetName'),initialValue:headerRows>0?header:null,decoration:const InputDecoration(labelText:'Dòng tiêu đề'),items:[for(var i=0;i<headerRows;i++)DropdownMenuItem(value:i,child:Text('Dòng ${i+1}'))],onChanged:busy?null:(v)=>setState((){header=v!;code=null;qty=null;invalidate();})),
     const SizedBox(height:12),
-    DropdownButtonFormField<int>(key:ValueKey('code:$filename:$sheetName:$header'),initialValue:code,isExpanded:true,decoration:const InputDecoration(labelText:'Cột mã CTY (text)'),items:choices,onChanged:busy?null:(v)=>setState((){code=v;invalidate();})),
+    DropdownButtonFormField<int>(key:ValueKey('code:$fileGeneration:$sheetName:$header'),initialValue:code,isExpanded:true,decoration:const InputDecoration(labelText:'Cột mã CTY (text)'),items:choices,onChanged:busy?null:(v)=>setState((){code=v;invalidate();})),
     const SizedBox(height:12),
-    DropdownButtonFormField<int>(key:ValueKey('qty:$filename:$sheetName:$header'),initialValue:qty,isExpanded:true,decoration:const InputDecoration(labelText:'Cột tồn kho'),items:choices,onChanged:busy?null:(v)=>setState((){qty=v;invalidate();})),
+    DropdownButtonFormField<int>(key:ValueKey('qty:$fileGeneration:$sheetName:$header'),initialValue:qty,isExpanded:true,decoration:const InputDecoration(labelText:'Cột tồn kho'),items:choices,onChanged:busy?null:(v)=>setState((){qty=v;invalidate();})),
     const SizedBox(height:12),FilledButton(onPressed:busy||code==null||qty==null||code==qty?null:inspect,child:const Text('Xem trước')),
    ],
    if(errors.isNotEmpty)...[Text('${errors.length} lỗi · chưa thể nhập',style:Theme.of(context).textTheme.titleMedium),for(final e in errors.take(50))Text(e),if(errors.length>50)const Text('Còn lỗi khác; sửa file rồi chọn lại.')],
    if(preview.isNotEmpty)...[
     Text('Xem trước ${preview.length} mã · ${preview.where((r)=>r['product_version']==0).length} mã mới',style:Theme.of(context).textTheme.titleMedium),
-    if(!canConfirm)const Text('Có mã ngừng sử dụng; Admin cần kiểm tra danh mục trước khi nhập.'),
+    if(duplicate)const Text('Nội dung trùng lần nhập gần nhất; không nhập lại.')else if(!canConfirm)const Text('Có mã ngừng sử dụng; Admin cần kiểm tra danh mục trước khi nhập.'),
     SizedBox(height:400,child:ListView.builder(itemCount:preview.length,itemBuilder:(c,i){final r=preview[i];return Card(child:ListTile(title:Text('${r['company_code']} · ${r['name']??"Mã mới, chưa xác minh"}'),subtitle:Text('Dòng ${r['row_number']} · ĐVT: ${r['unit']??"Chưa xác minh"}${r['active']==false?" · Ngừng sử dụng":""}\nTồn cũ: ${r['old_quantity']??"Chưa cập nhật"} → Mới: ${r['quantity']}')));})),
     FilledButton(onPressed:busy||!canConfirm?null:confirm,child:const Text('Xác nhận nhập tồn')),
    ]
