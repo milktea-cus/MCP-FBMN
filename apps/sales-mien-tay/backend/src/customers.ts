@@ -51,9 +51,7 @@ async function inScope(db: Db, actor: Actor, province: string, district: string)
 }
 async function fetchCustomer(db: Db, actor: Actor, id: string) {
   const rows = await db`SELECT c.* FROM customers c WHERE c.id=${id}::uuid AND
-    (c.owner_sub=${actor.sub} OR ${actor.admin} OR (${actor.manager} AND EXISTS (
-      SELECT 1 FROM staff_scopes s WHERE s.user_sub=${actor.sub} AND s.province=c.province
-        AND (s.district='' OR s.district=c.district)))) LIMIT 1`;
+    public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district) LIMIT 1`;
   return rows[0] ?? null;
 }
 function dataError(data: ObjectBody) {
@@ -82,27 +80,9 @@ function distanceMeters(a: number, b: number, c: number, d: number) {
 
 /** Authenticated routes. Return null for a non-customer path. No data is shared by default. */
 export async function customerRoutes(req: Request, env: CustomerEnv, actor: Actor, url: URL): Promise<Response | null> {
-  if (!url.pathname.startsWith('/api/v1/customers') && !url.pathname.startsWith('/api/v1/admin/scopes')) return null;
+  if (!url.pathname.startsWith('/api/v1/customers')) return null;
   if (!env.DATABASE_URL) return fail('Database chưa được cấu hình', 503);
   const db = neon(env.DATABASE_URL);
-  if (url.pathname === '/api/v1/admin/scopes') {
-    if (!actor.admin) return fail('Không có quyền quản trị địa bàn', 403);
-    if (req.method === 'GET') {
-      const userSub = url.searchParams.get('user_sub');
-      if (!str(userSub, 256)) return fail('Thiếu user_sub');
-      const rows = await db`SELECT user_sub, province, district FROM staff_scopes WHERE user_sub=${userSub!} ORDER BY province,district`;
-      return response({items: rows});
-    }
-    if (req.method === 'POST') {
-      let data: ObjectBody; try { data = await input(req); } catch {return fail('JSON không hợp lệ');}
-      const userSub = str(data.user_sub, 256), province = str(data.province), district = data.district === '' ? '' : str(data.district);
-      if (!userSub || !province || !areas[province] || district === null || (district && !areas[province].includes(district)))
-        return fail('Thông tin phân quyền địa bàn không hợp lệ');
-      await db`INSERT INTO staff_scopes(user_sub, province, district) VALUES (${userSub},${province},${district}) ON CONFLICT DO NOTHING`;
-      return response({ok:true}, 201);
-    }
-    return fail('Method not allowed', 405);
-  }
   if (url.pathname === '/api/v1/customers') {
     if (req.method === 'GET') {
       const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')||30)));
@@ -111,9 +91,8 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       const rows = await db`SELECT c.id,c.client_ref,c.owner_sub,c.name,c.code,c.category,
           c.contact_name,c.phone,c.address_line,c.province,c.district,c.latitude,c.longitude,
           c.location_accuracy_m,c.location_consent,c.note,c.status,c.version,c.created_at,c.updated_at
-        FROM customers c WHERE c.owner_sub=${actor.sub} OR ${actor.admin} OR
-          (${actor.manager} AND EXISTS (SELECT 1 FROM staff_scopes s
-            WHERE s.user_sub=${actor.sub} AND s.province=c.province AND (s.district='' OR s.district=c.district)))
+        FROM customers c WHERE public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)
+          AND (${!url.searchParams.get('province')} OR c.province=${url.searchParams.get('province')??''})
         ORDER BY c.updated_at DESC,c.id DESC LIMIT ${limit} OFFSET ${offset}`;
       return response({items:rows,limit,offset});
     }
@@ -132,7 +111,8 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
         VALUES (${String(data.client_ref)}::uuid,${actor.sub},${name},${code},${data.category??'tap_hoa'},${contact},${phone},
           ${address},${province},${district},${lat??null},${lon??null},${acc??null},${consent},${note},${data.status??'active'})
         ON CONFLICT(owner_sub,client_ref) DO NOTHING RETURNING *`;
-      const existing=rows.length?rows:await db`SELECT * FROM customers WHERE owner_sub=${actor.sub} AND client_ref=${String(data.client_ref)}::uuid`;
+      const existing=rows.length?rows:await db`SELECT * FROM customers WHERE owner_sub=${actor.sub} AND client_ref=${String(data.client_ref)}::uuid AND public.sales_can_access(${actor.sub},owner_sub,province,district)`;
+      if(!existing.length) return fail('Không có quyền với bản ghi đã tồn tại',403);
       if(rows.length) await db`INSERT INTO field_audit_events(actor_sub,action,entity_type,entity_id) VALUES (${actor.sub},'create','customer',${rows[0].id}::uuid)`;
       return response({item:existing[0],idempotent:rows.length===0},rows.length?201:200);
     }
@@ -157,7 +137,7 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
         province=${province},district=${district},latitude=${merged.latitude??null},longitude=${merged.longitude??null},
         location_accuracy_m=${merged.location_accuracy_m??null},location_consent=${merged.location_consent===true},
         note=${optional(merged.note,2000)},status=${merged.status},version=version+1,updated_at=now()
-      WHERE id=${id}::uuid AND version=${data.version as number} RETURNING *`;
+      WHERE id=${id}::uuid AND version=${data.version as number} AND public.sales_can_access(${actor.sub},owner_sub,province,district) RETURNING *`;
     if(!rows.length)return fail('Xung đột phiên bản',409);
     await db`INSERT INTO field_audit_events(actor_sub,action,entity_type,entity_id) VALUES (${actor.sub},'update','customer',${id}::uuid)`;
     return response({item:rows[0]});
@@ -181,7 +161,8 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       VALUES (${id}::uuid,${actor.sub},${String(data.client_ref)}::uuid,${data.latitude as number},${data.longitude as number},
         ${data.accuracy_m},${distance},${optional(data.note,2000)})
       ON CONFLICT(owner_sub,client_ref) DO NOTHING RETURNING *`;
-    const existing=rows.length?rows:await db`SELECT * FROM field_visits WHERE owner_sub=${actor.sub} AND client_ref=${String(data.client_ref)}::uuid`;
+    const existing=rows.length?rows:await db`SELECT * FROM field_visits WHERE owner_sub=${actor.sub} AND client_ref=${String(data.client_ref)}::uuid AND customer_id=${id}::uuid`;
+    if(!existing.length)return fail('client_ref đã dùng cho điểm bán khác',409);
     if(rows.length)await db`INSERT INTO field_audit_events(actor_sub,action,entity_type,entity_id) VALUES (${actor.sub},'checkin','visit',${rows[0].id}::uuid)`;
     return response({item:existing[0],idempotent:rows.length===0},rows.length?201:200);
   }
