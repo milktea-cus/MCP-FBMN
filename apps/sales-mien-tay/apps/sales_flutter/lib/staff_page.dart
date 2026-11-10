@@ -57,7 +57,7 @@ class _StaffEditorState extends State<StaffEditor>{
   if(busy)return;
   if(code.text.trim().isEmpty||name.text.trim().isEmpty||email.text.trim().isEmpty){setState(()=>error='Vui lòng nhập họ tên, email và mã nhân viên.');return;}
   if(!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email.text.trim())){setState(()=>error='Email không hợp lệ.');return;}
-  if(role!='admin'&&!scopes.values.any((v)=>v.isNotEmpty)){setState(()=>error='Chọn ít nhất một tỉnh hoặc huyện cho nhân viên.');return;}
+  if(widget.staff==null&&active&&role!='admin'&&!scopes.values.any((v)=>v.isNotEmpty)){setState(()=>error='Chọn ít nhất một tỉnh hoặc huyện cho nhân viên.');return;}
   setState((){busy=true;error=null;});
   try{
    if(subject.text.trim().isEmpty){
