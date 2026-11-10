@@ -166,7 +166,7 @@ class OfflineQueue extends ChangeNotifier {
      if((row['path'] as String).endsWith('/photos')){
       final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
       final thumb=row['thumbnail'];final modern=thumb is List;
-      final upload=await http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode((thumb as List).cast<int>()),'sha256':payload['sha256'],'thumbnail_sha256':payload['thumbnail_sha256']}):bytes).timeout(const Duration(seconds:30));
+      final upload=await http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':payload['sha256'],'thumbnail_sha256':payload['thumbnail_sha256']}):bytes).timeout(const Duration(seconds:30));
       final result=decodeApi(upload);
       if(row['session_id']!=null){await _ackSurvey(row,result['item'] as Map);}else{await _remove(row['key'] as String);}continue;
      }
