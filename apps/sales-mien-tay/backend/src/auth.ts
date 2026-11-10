@@ -121,3 +121,15 @@ export async function provisionIdentity(req:Request,env:AuthEnv,actor:{admin:boo
  if(!sub||!/^[0-9a-f-]{36}$/i.test(sub))return json({error:'Identity chưa được đồng bộ'},502);
  return json({user_sub:sub,email},201);
 }
+
+/** Admin-only identity change. Require a real admin session, revoke previous sessions
+ * and require new email verification; never set emailVerified=true. */
+export async function changeStaffEmail(req:Request, subject:string,email:string) {
+ const value=cookie(req);
+ if(!value)throw new AuthError(401,'Cần phiên Admin để đổi email');
+ const r=await provider('/admin/update-user','POST',value,JSON.stringify({userId:subject,data:{email,emailVerified:false}}));
+ if(!r.ok)throw new AuthError(r.status===429?429:r.status>=500?503:409,'Không đổi được email xác thực. Kiểm tra email đã tồn tại hoặc quyền Admin.');
+ // A self-change may invalidate the caller immediately; verification still fails closed.
+ const revoke=await provider('/admin/revoke-user-sessions','POST',value,JSON.stringify({userId:subject}));
+ if(!revoke.ok)throw new AuthError(503,'Email xác thực đã đổi nhưng chưa xác nhận thu hồi phiên. Vui lòng lưu lại để đồng bộ.');
+}

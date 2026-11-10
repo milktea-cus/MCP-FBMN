@@ -1,6 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import districts from './districts_old.json';
-import type { AuthEnv } from './auth';
+import {AuthError,changeStaffEmail,type AuthEnv} from './auth';
 const areas=districts as Record<string,string[]>;
 const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}});
 export async function staffRoutes(req:Request,env:AuthEnv,actor:{sub:string;admin:boolean},url:URL):Promise<Response|null>{
@@ -23,9 +23,20 @@ export async function staffRoutes(req:Request,env:AuthEnv,actor:{sub:string;admi
  const manager=data.manager_sub??null;
  if(manager!==null&&(typeof manager!=='string'||manager===data.user_sub||data.role!=='sales'))return json({error:'Quản lý trực tiếp không hợp lệ'},400);
  try{
+  const email=typeof data.email==='string'?data.email.trim().toLowerCase():null;
+  if(email!==null&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return json({error:'Email không hợp lệ'},400);
+  const old=(await db`SELECT email,scope_revision,role,active FROM staff_members WHERE user_sub=${data.user_sub}`)[0];
+  if(old&&email&&email!==String(old.email).toLowerCase()){
+   if(actor.sub===data.user_sub)return json({error:'Không đổi email của chính Admin đang đăng nhập tại đây. Dùng một Admin khác để đổi an toàn.'},409);
+   if(String(old.scope_revision)!==String(data.scope_revision??'0'))return json({error:'Hồ sơ đã thay đổi, mở lại trước khi lưu.'},409);
+   if((await db`SELECT 1 FROM staff_members WHERE lower(email)=${email} AND user_sub<>${data.user_sub}`).length)return json({error:'Email đã được sử dụng.'},409);
+   if((await db`SELECT 1 FROM staff_members WHERE employee_code=${data.employee_code.trim()} AND user_sub<>${data.user_sub}`).length)return json({error:'Mã nhân viên đã tồn tại.'},409);
+   await changeStaffEmail(req,data.user_sub,email);
+  }
   const result=await db`SELECT public.sales_save_staff(${actor.sub},${data.user_sub},${data.employee_code.trim()},${data.full_name.trim()},${String(data.phone??'')},${String(data.role)},${data.active},${manager as string|null},${JSON.stringify(canonical)}::jsonb,${String(data.scope_revision??'0')}::bigint) AS item`;
   return json({item:result[0].item});
  }catch(e){
+  if(e instanceof AuthError)return json({error:e.message},e.status);
   const err=e as {message?:string;code?:string};
   const msg=err.message??'';
   if(msg.includes('stale revision'))return json({error:'Hồ sơ đã thay đổi. Hủy và mở lại nhân viên để lưu phiên bản mới nhất.'},409);
