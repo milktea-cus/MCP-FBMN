@@ -136,11 +136,11 @@ export default {
           coalesce(v.visited,false) AS visited,coalesce(v.visited_week,false) AS visited_week,coalesce(v.visited_period,false) AS visited_period,v.last_visit,v.week_visits,coalesce(s.completed_sessions,0) AS completed_sessions
         FROM eligible c LEFT JOIN planned r ON r.data->>'customerId'=c.id::text AND r.owner_sub=c.owner_sub
         LEFT JOIN LATERAL (
-          SELECT bool_or(to_char(x.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh','YYYY-MM-DD')=coalesce(r.data->>'plannedDate',${day})) AS visited,
+          SELECT bool_or(to_char(x.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh','YYYY-MM-DD')=coalesce(r.data->>'plannedDate',${day}) AND (fs.id IS NULL OR fs.route_stop_id IS NOT DISTINCT FROM r.id)) AS visited,
           bool_or((x.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN ${weekStart}::date AND ${weekEnd}::date) AS visited_week,
           bool_or((x.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN ${start}::date AND ${end}::date) AS visited_period,
           max(x.checkin_at) AS last_visit,count(*) FILTER(WHERE (x.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN ${weekStart}::date AND ${weekEnd}::date) AS week_visits
-          FROM field_visits x WHERE x.customer_id=c.id AND x.owner_sub=c.owner_sub
+          FROM field_visits x LEFT JOIN field_survey_sessions fs ON fs.id=x.client_ref AND fs.customer_id=x.customer_id AND fs.owner_sub=x.owner_sub WHERE x.customer_id=c.id AND x.owner_sub=c.owner_sub
         ) v ON true
         LEFT JOIN LATERAL (
           SELECT count(*) AS completed_sessions FROM field_survey_sessions fs WHERE fs.customer_id=c.id AND fs.owner_sub=c.owner_sub AND fs.status='completed'

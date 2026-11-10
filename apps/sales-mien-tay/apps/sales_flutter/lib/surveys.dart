@@ -10,6 +10,7 @@ import 'field_work.dart';
 import 'models.dart';
 import 'offline_queue.dart';
 import 'session.dart';
+import 'survey_media.dart';
 
 const photoLabels={'front':'Mặt tiền','shelf':'Quầy kệ','goods':'Hàng hóa','other':'Ảnh khác'};
 DateTime vnToday()=>DateTime.now().toUtc().add(const Duration(hours:7));
@@ -125,7 +126,7 @@ class _SurveyPageState extends State<SurveyPage>{
   final visible=candidates.where((r)=>(all||r['planned']==true)&&(district.isEmpty||r['district']==district)&&(employee.isEmpty||r['owner_sub']==employee)&&(widget.initialCustomer==null||r['customer_id']==widget.initialCustomer)).toList();
   return ListView(padding:const EdgeInsets.all(12),children:[
    Row(children:[Expanded(child:Text('Khảo sát theo tuyến',style:Theme.of(context).textTheme.titleLarge)),IconButton(onPressed:busy?null:load,tooltip:'Đồng bộ',icon:const Icon(Icons.sync))]),
-   Wrap(spacing:8,runSpacing:8,children:[OutlinedButton.icon(onPressed:busy?null:pickDay,icon:const Icon(Icons.calendar_today),label:Text(dayKey(day))),if(widget.admin)OutlinedButton(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>SurveyTemplateAdmin(service:widget.service,regions:widget.regions))),child:const Text('Mẫu khảo sát')),if(widget.legacy!=null)TextButton(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:widget.legacy!)),child:const Text('Biểu mẫu cũ'))]),
+   Wrap(spacing:8,runSpacing:8,children:[OutlinedButton.icon(onPressed:busy?null:pickDay,icon:const Icon(Icons.calendar_today),label:Text(dayKey(day))),if(widget.admin)OutlinedButton(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>SurveyTemplateAdmin(service:widget.service,regions:widget.regions))),child:const Text('Mẫu khảo sát')),if(widget.admin)OutlinedButton(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>MediaUsagePage(service:widget.service))),child:const Text('Dung lượng R2')),if(widget.legacy!=null)TextButton(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:widget.legacy!)),child:const Text('Biểu mẫu cũ'))]),
    const SizedBox(height:8),
    SegmentedButton<bool>(segments:const [ButtonSegment(value:false,label:Text('Ngày')),ButtonSegment(value:true,label:Text('Tuần'))],selected:{weekly},onSelectionChanged:busy?null:(v){setState(()=>weekly=v.first);load();}),
    if(weekly)Text('${dayKey(weekMonday(day))} – ${dayKey(weekMonday(day).add(const Duration(days:6)))}'),
@@ -145,7 +146,7 @@ class SurveyDetail extends StatefulWidget{
  @override State<SurveyDetail> createState()=>_SurveyDetailState();
 }
 class _SurveyDetailState extends State<SurveyDetail>{
- late Map<String,dynamic> draft;bool busy=false;String? message;
+ late Map<String,dynamic> draft;bool busy=false,denied=false;String? message;
  final images=<String,Future<Uint8List>>{};
  String get id=>draft['id'].toString();
  bool get own=>draft['owner_sub']==widget.queue.identity;
@@ -176,11 +177,11 @@ class _SurveyDetailState extends State<SurveyDetail>{
      else{final media=<String,Map<String,dynamic>>{for(final p in photos)p['id'].toString():p,for(final p in serverPhotos)p['id'].toString():p};draft={...draft,'server_status':server['status'],'server_version':server['version'],'photos':media.values.toList()};}
     });
    }catch(e){
-    if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;
+    if(e is ApiFailure&&(e.status==401||e.status==403||e.status==404&&(local==null||local['server_status']!=null)))rethrow;
     final saved=await widget.queue.cached('survey-detail:$id');if(local==null&&saved.isNotEmpty&&mounted)setState(()=>draft=saved.first);
     if(mounted)setState(()=>message='Phiên lưu máy · chưa cập nhật');
    }
-  }catch(e){if(mounted)setState(()=>message=e.toString());}
+  }catch(e){if(mounted)setState((){message=e.toString();if(e is ApiFailure&&(e.status==401||e.status==403||e.status==404))denied=true;});}
   finally{if(mounted)setState(()=>busy=false);}
  }
  Map<String,dynamic> snapshot()=>{...draft,'answers':answers,'photos':photos};
@@ -191,13 +192,12 @@ class _SurveyDetailState extends State<SurveyDetail>{
   setState(()=>busy=true);
   try{
    final f=await ImagePicker().pickImage(source:source,maxWidth:1600,maxHeight:1600,imageQuality:80);if(f==null)return;
-   final bytes=await f.readAsBytes();if(bytes.length<4||bytes.length>5*1024*1024)throw StateError('Ảnh cần nhỏ hơn 5 MB');
-   final mime=bytes[0]==255&&bytes[1]==216?'image/jpeg':bytes[0]==137&&bytes[1]==80?'image/png':bytes.length>12&&String.fromCharCodes(bytes.sublist(0,4))=='RIFF'?'image/webp':null;
-   if(mime==null)throw StateError('Chỉ nhận JPG/PNG/WebP');
+   final compressed=compressSurveyMedia(await f.readAsBytes()),bytes=compressed.image;
+   const mime='image/jpeg';
    final op=const Uuid().v4(),captured=DateTime.now().toUtc().toIso8601String();
    final p=<String,dynamic>{'id':op,'kind':kind,'captured_at':captured,'bytes':bytes.length,'sync_status':'pending','created_by':widget.queue.identity};
    final next={...snapshot(),'photos':[...photos,p]};
-   await widget.queue.saveSurveyDraft(next,path:'/api/v1/sessions/$id/photos',payload:{'client_ref':op,'kind':kind,'captured_at':captured},photo:bytes,mime:mime,dependsOn:parent);
+   await widget.queue.saveSurveyDraft(next,path:'/api/v1/sessions/$id/photos',payload:{'client_ref':op,'kind':kind,'captured_at':captured,'sha256':compressed.hash,'thumbnail_sha256':compressed.thumbnailHash},photo:bytes,thumbnail:compressed.thumbnail,mime:mime,dependsOn:parent);
    if(mounted)setState(()=>draft=next);await acks();
   }catch(e){if(mounted)setState(()=>message=e.toString());}
   finally{if(mounted)setState(()=>busy=false);}
@@ -213,22 +213,22 @@ class _SurveyDetailState extends State<SurveyDetail>{
   try{
    final op=const Uuid().v4(),end=DateTime.now().toUtc().toIso8601String(),next={...snapshot(),'status':'completed_pending','ended_at':end,'finish_op':op};
    await widget.queue.saveSurveyDraft(next,path:'/api/v1/sessions/$id',method:'PATCH',payload:{'client_ref':op,'version':draft['server_version']??draft['version']??1,'answers':answers,'note':draft['note']??'','ended_at':end},dependsOn:[...parent,...photos.map((p)=>p['id'].toString())]);
-   if(mounted)setState(()=>draft=next);
+   if(mounted)setState(()=>draft=next);await acks();
   }catch(e){if(mounted)setState(()=>message=e.toString());}
   finally{if(mounted)setState(()=>busy=false);}
  }
- Future<Uint8List> remoteImage(String photoId)async{
-  final r=await http.get(widget.service.uri('/api/v1/sessions/$id/photos/$photoId'),headers:widget.service.headers).timeout(const Duration(seconds:20));
+ Future<Uint8List> remoteImage(String photoId,{bool thumbnail=true})async{
+  final r=await http.get(widget.service.uri('/api/v1/sessions/$id/photos/$photoId',thumbnail?{'thumbnail':'1'}:null),headers:widget.service.headers).timeout(const Duration(seconds:20));
   if(r.statusCode!=200){checkSessionStatus(r);throw StateError('Không tải được ảnh');}return r.bodyBytes;
  }
  Widget media(Map<String,dynamic> p){
   final pid=p['id'].toString(),pending=widget.queue.pending.where((r)=>r['upload_id']==pid&&r['session_id']==id).firstOrNull;
-  final bytes=pending?['photo'];
+  final bytes=pending?['thumbnail']??pending?['photo'];
   return Card(child:Padding(padding:const EdgeInsets.all(8),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
    Text('${photoLabels[p['kind']]??p['kind']} · ${p['sync_status']=='ready'?'Đã đồng bộ':'Chờ đồng bộ'}'),
    Text('${p['captured_at']} · ${p['created_by']??''}',style:Theme.of(context).textTheme.bodySmall),
    if(bytes is List)Image.memory(Uint8List.fromList(bytes.cast<int>()),height:140,fit:BoxFit.contain)
-   else if(p['sync_status']=='ready')FutureBuilder<Uint8List>(future:images.putIfAbsent(pid,()=>remoteImage(pid)),builder:(c,s)=>s.hasData?Image.memory(s.data!,height:140,fit:BoxFit.contain):Text(s.hasError?'Không tải được ảnh khi offline':'Đang tải ảnh…')),
+   else if(p['sync_status']=='ready')FutureBuilder<Uint8List>(future:images.putIfAbsent(pid,()=>remoteImage(pid)),builder:(c,s)=>s.hasData?InkWell(onTap:()=>showDialog<void>(context:context,builder:(c)=>AlertDialog(title:const Text('Ảnh khảo sát'),content:FutureBuilder<Uint8List>(future:remoteImage(pid,thumbnail:false),builder:(c,v)=>v.hasData?Image.memory(v.data!):Text(v.hasError?'Không tải được ảnh':'Đang tải…')),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng'))])),child:Image.memory(s.data!,height:140,fit:BoxFit.contain)):Text(s.hasError?'Không tải được ảnh khi offline':'Đang tải ảnh…')),
   ])));
  }
  Widget question(Map<String,dynamic> q){
@@ -240,6 +240,7 @@ class _SurveyDetailState extends State<SurveyDetail>{
  }
  @override Widget build(BuildContext context){
   final pending=widget.queue.pending.where((r)=>r['session_id']==id).toList();
+  if(denied)return Scaffold(appBar:AppBar(title:const Text('Phiên khảo sát')),body:const Center(child:Text('Không còn quyền truy cập phiên này.')));
   return Scaffold(appBar:AppBar(title:const Text('Phiên khảo sát'),actions:[IconButton(onPressed:busy?null:load,tooltip:'Tải lại phiên',icon:const Icon(Icons.sync))]),
    body:ListView(padding:const EdgeInsets.all(16),children:[
     Text(draft['customer_name'].toString(),style:Theme.of(context).textTheme.titleLarge),Text('${draft['district']}, ${draft['province']} · Mẫu v${draft['template_version']}'),
@@ -248,11 +249,11 @@ class _SurveyDetailState extends State<SurveyDetail>{
     Text('GPS: ${draft['latitude']}, ${draft['longitude']} · Sai số ${draft['accuracy_m']} m'),
     if(!own)const Text('Chế độ xem của quản lý · không được sửa phiên người khác.'),
     if(busy)const LinearProgressIndicator(),if(message!=null)Text(message!),
-    for(final p in pending)ListTile(contentPadding:EdgeInsets.zero,leading:const Icon(Icons.cloud_upload_outlined),title:Text(p['status']=='blocked'?'Cần xử lý lỗi đồng bộ':'Đang chờ đồng bộ'),subtitle:Text(p['error']?.toString()??p['path'].toString())),
+    for(final p in pending)ListTile(contentPadding:EdgeInsets.zero,leading:const Icon(Icons.cloud_upload_outlined),title:Text(p['status']=='blocked'?'Cần xử lý lỗi đồng bộ':'Đang chờ đồng bộ'),subtitle:Text(p['error']?.toString()??p['path'].toString()),trailing:p['status']=='blocked'&&own?TextButton(onPressed:busy||widget.queue.syncing?null:()=>widget.queue.retrySurveyOperation(p['upload_id'].toString()),child:const Text('Thử lại')):null),
     const SizedBox(height:16),Text('Checklist',style:Theme.of(context).textTheme.titleMedium),
     for(final q in qs)Padding(padding:const EdgeInsets.only(top:12),child:question(q)),
     const SizedBox(height:12),
-    if(locked)Text('Ghi chú: ${draft['note']??''}')else TextFormField(initialValue:draft['note']?.toString()??'',maxLines:3,decoration:const InputDecoration(labelText:'Ghi chú phiên'),onChanged:(v){draft['note']=v;unawaited(persist());}),
+    if(locked)Text('Ghi chú: ${draft['note']??''}')else TextFormField(enabled:!busy,initialValue:draft['note']?.toString()??'',maxLines:3,decoration:const InputDecoration(labelText:'Ghi chú phiên'),onChanged:(v){draft['note']=v;unawaited(persist());}),
     const SizedBox(height:16),Text('Ảnh phiên (${photos.length}/12)',style:Theme.of(context).textTheme.titleMedium),
     const Text('Bắt buộc: mặt tiền, quầy kệ và hàng hóa.'),
     if(!locked)Wrap(spacing:8,runSpacing:8,children:[for(final k in photoLabels.entries)OutlinedButton.icon(onPressed:busy?null:()=>photo(k.key,ImageSource.camera),icon:const Icon(Icons.camera_alt_outlined),label:Text(k.value))]),
@@ -301,4 +302,20 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
    Wrap(spacing:8,children:[OutlinedButton(onPressed:busy||qs.length>=50?null:()=>setState(()=>qs.add({'id':'q_${const Uuid().v4().replaceAll('-','').substring(0,16)}','label':'','type':'text','required':false})),child:const Text('Thêm câu hỏi')),FilledButton(onPressed:busy?null:publish,child:const Text('Phát hành phiên bản'))]),
   ]
  ]));
+}
+
+class MediaUsagePage extends StatefulWidget{
+ final CustomerService service;
+ const MediaUsagePage({super.key,required this.service});
+ @override State<MediaUsagePage> createState()=>_MediaUsagePageState();
+}
+class _MediaUsagePageState extends State<MediaUsagePage>{
+ late Future<Map<String,dynamic>> data;
+ @override void initState(){super.initState();data=surveyGet(widget.service,'/api/v1/admin/media-usage');}
+ String gb(dynamic v)=>'${((v as num)/1000000000).toStringAsFixed(3)} GB';
+ @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Ngân sách R2'),actions:[IconButton(onPressed:()=>setState(()=>data=surveyGet(widget.service,'/api/v1/admin/media-usage')),icon:const Icon(Icons.refresh))]),body:FutureBuilder<Map<String,dynamic>>(future:data,builder:(c,s){
+ if(s.hasError)return Center(child:Text(s.error.toString()));if(!s.hasData)return const Center(child:CircularProgressIndicator());
+ final d=s.data!,pct=(d['percent'] as num).toDouble(),warn=d['warning'] as num;
+ return ListView(padding:const EdgeInsets.all(16),children:[Text('Đã dùng ${gb(d['used_bytes'])} / 10 GB',style:Theme.of(context).textTheme.titleLarge),LinearProgressIndicator(value:(pct/100).clamp(0,1).toDouble()),Text('${pct.toStringAsFixed(2)}% · ${d['objects']} đối tượng'),if(d['complete']!=true)const Text('Chưa quét hết kho: số liệu là mức tối thiểu.'),if(warn>0)Text('Cảnh báo: vượt ngưỡng $warn%',style:TextStyle(color:Theme.of(context).colorScheme.error)),ListTile(title:const Text('Ảnh'),trailing:Text(gb(d['photo_bytes']))),ListTile(title:const Text('APK'),trailing:Text(gb(d['apk_bytes']))),ListTile(title:const Text('Khác'),trailing:Text(gb(d['other_bytes']))),const Text('Ngưỡng 70% / 85% / 95%. Không tự xóa ảnh hoặc APK. Đề xuất giữ ảnh gốc 180 ngày, thumbnail lâu hơn; chỉ áp dụng sau Owner duyệt và backup.')]);
+ }));
 }

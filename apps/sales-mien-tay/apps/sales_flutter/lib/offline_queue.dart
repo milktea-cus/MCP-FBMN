@@ -92,7 +92,7 @@ class OfflineQueue extends ChangeNotifier {
   if(_timer!=null)unawaited(sync());
  }
  /// Draft and operation share one transaction on both IndexedDB and native SQLite.
- Future<void> saveSurveyDraft(Map<String,dynamic> draft,{String? path,Map<String,dynamic>? payload,String method='POST',Uint8List? photo,String? mime,List<String> dependsOn=const []})async{
+ Future<void> saveSurveyDraft(Map<String,dynamic> draft,{String? path,Map<String,dynamic>? payload,String method='POST',Uint8List? photo,Uint8List? thumbnail,String? mime,List<String> dependsOn=const []})async{
   if(_closed)throw StateError('Phiên đã đóng');
   final id=draft['id'] as String;
   if(path!=null&&!(path=='/api/v1/sessions'||path=='/api/v1/sessions/$id'||path=='/api/v1/sessions/$id/photos'))throw ArgumentError('Unsupported session operation');
@@ -112,7 +112,7 @@ class OfflineQueue extends ChangeNotifier {
   if(path!=null){
    final data=payload!;final op=data['client_ref'] as String;
    await t.objectStore('outbox').put({'key':'$namespace:$op','namespace':namespace,'account':identity,'created':DateTime.now().millisecondsSinceEpoch,'session_id':id,'depends_on':dependsOn,
-    'path':path,'method':method,'payload':data,'status':'pending','attempts':0,'upload_id':op,if(photo!=null)'photo':photo,if(mime!=null)'mime':mime});
+    'path':path,'method':method,'payload':data,'status':'pending','attempts':0,'upload_id':op,if(photo!=null)'photo':photo,if(thumbnail!=null)'thumbnail':thumbnail,if(mime!=null)'mime':mime});
   }
   await t.completed;await reload();if(path!=null&&_timer!=null)unawaited(sync());
  }
@@ -135,6 +135,12 @@ class OfflineQueue extends ChangeNotifier {
    await cache.put({'key':key,'items':items});
   }
   await t.objectStore('outbox').delete(row['key'] as String);await t.completed;
+ }
+ Future<void> retrySurveyOperation(String op)async{
+  if(_closed||syncing)return;
+  final d=await db,t=d.transaction('outbox',idbModeReadWrite),store=t.objectStore('outbox');final raw=await store.getObject('$namespace:$op');
+  if(raw is Map&&raw['session_id']!=null&&raw['status']=='blocked')await store.put({...Map<String,dynamic>.from(raw),'status':'pending','error':null});
+  await t.completed;await reload();await sync();
  }
  Future<void> start() async{
   try{await reload();}catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
@@ -159,7 +165,8 @@ class OfflineQueue extends ChangeNotifier {
      final uri=session.uri(row['path'] as String);
      if((row['path'] as String).endsWith('/photos')){
       final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
-      final upload=await http.post(uri,headers:{...headers,'Content-Type':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:bytes).timeout(const Duration(seconds:30));
+      final thumb=row['thumbnail'];final modern=thumb is List;
+      final upload=await http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode((thumb as List).cast<int>()),'sha256':payload['sha256'],'thumbnail_sha256':payload['thumbnail_sha256']}):bytes).timeout(const Duration(seconds:30));
       final result=decodeApi(upload);
       if(row['session_id']!=null){await _ackSurvey(row,result['item'] as Map);}else{await _remove(row['key'] as String);}continue;
      }

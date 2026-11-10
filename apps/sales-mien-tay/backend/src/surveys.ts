@@ -65,8 +65,25 @@ async function getSession(db:Db,actor:Actor,id:string){
  WHERE s.id=${id}::uuid AND public.sales_can_access(${actor.sub},s.owner_sub,s.province,s.district) AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)`;
  return rows[0]??null;
 }
-async function sessionPhotos(db:Db,id:string){
- return db`SELECT id,kind,mime_type,bytes,sha256,captured_at,created_by,status FROM field_survey_photos WHERE session_id=${id}::uuid ORDER BY captured_at,id`;
+async function sessionPhotos(db:Db,id:string,actor:Actor){
+ return db`SELECT p.id,p.kind,p.mime_type,p.bytes,p.sha256,p.thumbnail_bytes,p.thumbnail_sha256,p.captured_at,p.created_by,p.status FROM field_survey_photos p JOIN field_survey_sessions s ON s.id=p.session_id JOIN customers c ON c.id=s.customer_id WHERE p.session_id=${id}::uuid AND public.sales_can_access(${actor.sub},s.owner_sub,s.province,s.district) AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district) ORDER BY p.captured_at,p.id`;
+}
+// Inspect JPEG marker segments before SOS; reject metadata and oversized dimensions.
+export function cleanJpeg(b:Uint8Array,max:number):boolean{
+ if(b.length<12||b[0]!==255||b[1]!==216||b[b.length-2]!==255||b[b.length-1]!==217)return false;
+ let i=2,dimensions=false;
+ while(i+3<b.length){
+  if(b[i++]!==255)return false;while(b[i]===255)i++;
+  const m=b[i++];if(m===0xda)return dimensions;
+  if(m===0xd9||m===0x00||m===0xe1||m===0xed||m===0xfe)return false;
+  if(i+2>b.length)return false;const n=(b[i]<<8)|b[i+1];if(n<2||i+n>b.length)return false;
+  if([0xc0,0xc1,0xc2].includes(m)){if(n<8)return false;const h=(b[i+3]<<8)|b[i+4],w=(b[i+5]<<8)|b[i+6];if(!w||!h||w>max||h>max)return false;dimensions=true;}
+  i+=n;
+ }return false;
+}
+function base64(v:unknown,max:number):ArrayBuffer{
+ if(typeof v!=='string'||v.length>Math.ceil(max/3)*4||!/^[A-Za-z0-9+/]+={0,2}$/.test(v))throw Error('base64');
+ const bytes=Uint8Array.from(atob(v),c=>c.charCodeAt(0));if(!bytes.length||bytes.length>max)throw Error('size');return bytes.buffer;
 }
 function signature(mime:string,b:Uint8Array){
  return mime==='image/jpeg'&&b[0]===255&&b[1]===216&&b[b.length-2]===255&&b[b.length-1]===217||
@@ -76,6 +93,17 @@ function signature(mime:string,b:Uint8Array){
 async function digest(b:ArrayBuffer){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',b)),v=>v.toString(16).padStart(2,'0')).join('');}
 export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Promise<Response|null>{
  const path=url.pathname;
+ if(path==='/api/v1/admin/media-usage'){
+  if(req.method!=='GET')return bad('Method not allowed',405);
+  if(!actor.admin)return bad('Chỉ Admin xem kho ảnh',403);
+  if(!env.PHOTOS_BUCKET)return bad('Kho ảnh chưa cấu hình',503);
+  let cursor:string|undefined,used=0,photo=0,apk=0,other=0,objects=0,complete=false;
+  for(let n=0;n<30;n++){const page=await env.PHOTOS_BUCKET.list({limit:1000,cursor});for(const o of page.objects){used+=o.size;objects++;if(/^(apk|releases)\//.test(o.key)||o.key.endsWith('.apk'))apk+=o.size;else if(/^(sessions|customers)\//.test(o.key))photo+=o.size;else other+=o.size;}
+   if(!page.truncated){complete=true;break;}cursor=page.cursor;
+  }
+  const budget=10000000000,percent=used/budget*100;
+  return json({used_bytes:used,photo_bytes:photo,apk_bytes:apk,other_bytes:other,objects,budget_bytes:budget,percent,complete,warning:percent>=95?95:percent>=85?85:percent>=70?70:0,retention:'manual approval only'});
+ }
  if(path!=='/api/v1/survey-templates'&&path!=='/api/v1/sessions'&&!path.startsWith('/api/v1/sessions/'))return null;
  const db=neon(env.DATABASE_URL);
  if(path==='/api/v1/survey-templates'){
@@ -133,7 +161,7 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   const rows=await db`WITH created AS (
    INSERT INTO field_survey_sessions(id,customer_id,owner_sub,province,district,route_stop_id,template_id,started_at,latitude,longitude,accuracy_m,distance_m)
    SELECT ${id}::uuid,c.id,${actor.sub},c.province,c.district,${rid}::uuid,${tid}::uuid,${started}::timestamptz,${v.latitude as number},${v.longitude as number},${v.accuracy_m as number},${distance}
-   FROM customers c WHERE c.id=${cid}::uuid AND c.owner_sub=${actor.sub} AND c.province=${c.province} AND c.district=${c.district}
+   FROM customers c WHERE c.id=${cid}::uuid AND c.owner_sub=${actor.sub} AND c.province=${c.province} AND c.district=${c.district} AND c.location_consent AND c.latitude=${c.latitude} AND c.longitude=${c.longitude}
    AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)
    AND (${rid===null} OR EXISTS(SELECT 1 FROM sales_records r WHERE r.id=${rid}::uuid AND r.kind='visit' AND r.owner_sub=${actor.sub} AND r.data->>'customerId'=${cid} AND r.data->>'plannedDate'=${vnDay(started)}))
    ON CONFLICT(id) DO NOTHING RETURNING *
@@ -149,7 +177,7 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
  if(!m||!isUuid(m[1])||m[3]&&!isUuid(m[3]))return bad('Endpoint không tồn tại',404);
  const id=m[1],s=await getSession(db,actor,id);
  if(!s)return bad('Không tìm thấy phiên hoặc không có quyền',404);
- if(!m[2]&&req.method==='GET')return json({item:s,photos:await sessionPhotos(db,id)});
+ if(!m[2]&&req.method==='GET')return json({item:s,photos:await sessionPhotos(db,id,actor)});
  if(!m[2]&&req.method==='PATCH'){
   if(s.owner_sub!==actor.sub)return bad('Chỉ chủ phiên được sửa',403);
   let v:Body;try{v=await body(req);}catch{return bad('JSON không hợp lệ');}
@@ -171,39 +199,48 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   return json({item:rows[0]});
  }
  if(m[2]==='photos'){
-  if(req.method==='GET'&&!m[3])return json({items:await sessionPhotos(db,id)});
+  if(req.method==='GET'&&!m[3])return json({items:await sessionPhotos(db,id,actor)});
   if(req.method==='GET'&&m[3]){
    if(!env.PHOTOS_BUCKET)return bad('Kho ảnh chưa cấu hình',503);
-   const rows=await db`SELECT object_key,mime_type FROM field_survey_photos WHERE id=${m[3]}::uuid AND session_id=${id}::uuid AND status='ready'`;
+   const rows=await db`SELECT p.object_key,p.mime_type,p.thumbnail_key FROM field_survey_photos p JOIN field_survey_sessions s ON s.id=p.session_id JOIN customers c ON c.id=s.customer_id WHERE p.id=${m[3]}::uuid AND p.session_id=${id}::uuid AND p.status='ready' AND public.sales_can_access(${actor.sub},s.owner_sub,s.province,s.district) AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)`;
    if(!rows.length)return bad('Không tìm thấy ảnh',404);
-   const blob=await env.PHOTOS_BUCKET.get(rows[0].object_key);if(!blob)return bad('Ảnh không còn trên kho',404);
-   return new Response(blob.body,{headers:{'Content-Type':rows[0].mime_type,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
+   const thumb=url.searchParams.get('thumbnail')==='1'&&rows[0].thumbnail_key;const blob=await env.PHOTOS_BUCKET.get(thumb||rows[0].object_key);if(!blob)return bad('Ảnh không còn trên kho',404);
+   return new Response(blob.body,{headers:{'Content-Type':thumb?'image/jpeg':rows[0].mime_type,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
   }
   if(req.method!=='POST'||m[3])return bad('Method not allowed',405);
   if(s.owner_sub!==actor.sub)return bad('Chỉ chủ phiên thêm ảnh',403);
   if(!env.PHOTOS_BUCKET)return bad('Kho ảnh chưa cấu hình',503);
-  const photoId=req.headers.get('X-Upload-Id'),kind=req.headers.get('X-Photo-Kind')??'',captured=captureTime(req.headers.get('X-Captured-At')),mime=req.headers.get('content-type')??'';
+  const photoId=req.headers.get('X-Upload-Id'),kind=req.headers.get('X-Photo-Kind')??'',captured=captureTime(req.headers.get('X-Captured-At')),contentType=req.headers.get('content-type')??'',modern=contentType.includes('application/json'),mime=modern?'image/jpeg':contentType;
   if(!isUuid(photoId)||!photoKinds.includes(kind)||!captured||Date.parse(captured)<Date.parse(s.started_at)-60000||!['image/jpeg','image/png','image/webp'].includes(mime))return bad('Metadata ảnh không hợp lệ');
   if(Number(req.headers.get('content-length')??0)>5242880)return bad('Ảnh quá 5MB',413);
-  const raw=await req.arrayBuffer();if(raw.byteLength<4||raw.byteLength>5242880)return bad('Ảnh quá giới hạn',413);
-  if(!signature(mime,new Uint8Array(raw)))return bad('Nội dung ảnh sai định dạng',415);
-  const sha=await digest(raw),key='sessions/'+id+'/'+photoId+'/'+sha;
+  let raw:ArrayBuffer,thumbnail:ArrayBuffer|null=null,thash:string|null=null;
+  if(modern){try{const body=await req.text();if(body.length>3200000)return bad('Ảnh quá giới hạn',413);const v=JSON.parse(body);
+   raw=base64(v.image,2097152);thumbnail=base64(v.thumbnail,153600);
+   if(!cleanJpeg(new Uint8Array(raw),1600)||!cleanJpeg(new Uint8Array(thumbnail),320))return bad('JPEG có metadata hoặc kích thước không hợp lệ',415);
+   thash=await digest(thumbnail);if(v.sha256!==await digest(raw)||v.thumbnail_sha256!==thash)return bad('Checksum không khớp',422);
+  }catch{return bad('Dữ liệu ảnh không hợp lệ',422);}}
+  else{raw=await req.arrayBuffer();if(raw.byteLength<4||raw.byteLength>5242880)return bad('Ảnh quá giới hạn',413);if(!signature(mime,new Uint8Array(raw)))return bad('Nội dung ảnh sai định dạng',415);}
+  const sha=await digest(raw),key='sessions/'+id+'/'+photoId+'/'+sha,thumbkey=thumbnail?key+'/thumb-'+thash:null;
   // Reserve a DB row first. Serialize reserve/complete on the session row; never delete an object on retry.
   const [,reserved,existing]=await db.transaction([
    db`SELECT id FROM field_survey_sessions WHERE id=${id}::uuid FOR UPDATE`,
-   db`INSERT INTO field_survey_photos(id,session_id,kind,mime_type,bytes,sha256,object_key,captured_at,created_by)
-   SELECT ${photoId}::uuid,s.id,${kind},${mime},${raw.byteLength},${sha},${key},${captured}::timestamptz,${actor.sub}
+   db`INSERT INTO field_survey_photos(id,session_id,kind,mime_type,bytes,sha256,object_key,captured_at,created_by,thumbnail_key,thumbnail_bytes,thumbnail_sha256)
+   SELECT ${photoId}::uuid,s.id,${kind},${mime},${raw.byteLength},${sha},${key},${captured}::timestamptz,${actor.sub},${thumbkey},${thumbnail?.byteLength??null},${thash}
    FROM field_survey_sessions s JOIN customers c ON c.id=s.customer_id WHERE s.id=${id}::uuid AND s.owner_sub=${actor.sub} AND s.status='in_progress'
    AND public.sales_can_access(${actor.sub},s.owner_sub,s.province,s.district) AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)
    AND (SELECT count(*) FROM field_survey_photos p WHERE p.session_id=s.id)<12 ON CONFLICT(id) DO NOTHING RETURNING *`,
    db`SELECT * FROM field_survey_photos WHERE id=${photoId}::uuid AND session_id=${id}::uuid AND created_by=${actor.sub}`
   ]);
   const row=reserved[0]??existing[0];
-  if(!row||row.sha256!==sha||row.kind!==kind||row.mime_type!==mime)return bad('Ảnh trùng UUID khác nội dung, phiên đã đóng hoặc quá 12 ảnh',409);
+  if(!row||row.sha256!==sha||row.kind!==kind||row.mime_type!==mime||(row.thumbnail_sha256??null)!==thash)return bad('Ảnh trùng UUID khác nội dung, phiên đã đóng hoặc quá 12 ảnh',409);
   if(row.status==='ready')return json({item:{id:photoId,kind,sha256:sha},idempotent:true});
   await env.PHOTOS_BUCKET.put(key,raw,{onlyIf:{etagDoesNotMatch:'*'},httpMetadata:{contentType:mime},customMetadata:{sha256:sha}});
   const head=await env.PHOTOS_BUCKET.head(key);
   if(!head||head.size!==raw.byteLength||head.customMetadata?.sha256!==sha)return bad('Kho ảnh chưa xác nhận; thử lại',503);
+  if(thumbnail&&thumbkey&&thash){
+   await env.PHOTOS_BUCKET.put(thumbkey,thumbnail,{onlyIf:{etagDoesNotMatch:'*'},httpMetadata:{contentType:'image/jpeg'},customMetadata:{sha256:thash}});
+   const h=await env.PHOTOS_BUCKET.head(thumbkey);if(!h||h.size!==thumbnail.byteLength||h.customMetadata?.sha256!==thash)return bad('Thumbnail chưa xác nhận; thử lại',503);
+  }
   const ready=await db`UPDATE field_survey_photos p SET status='ready' WHERE p.id=${photoId}::uuid AND p.session_id=${id}::uuid AND p.sha256=${sha}
    AND EXISTS(SELECT 1 FROM field_survey_sessions s JOIN customers c ON c.id=s.customer_id WHERE s.id=p.session_id AND s.owner_sub=${actor.sub} AND public.sales_can_access(${actor.sub},s.owner_sub,s.province,s.district) AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)) RETURNING id,kind,sha256`;
   return ready.length?json({item:ready[0]},201):bad('Quyền đã thay đổi',403);
