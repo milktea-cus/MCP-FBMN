@@ -21,3 +21,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/districts_old.json
+    - assets/fbmn-transparent-logo.webp

@@ -54,7 +54,8 @@ class SalesTheme {
         headingRowColor: WidgetStatePropertyAll(tableHeader),
         headingTextStyle: TextStyle(color: tableInk, fontWeight: FontWeight.w700, fontSize: 13),
       ),
-      appBarTheme: const AppBarTheme(backgroundColor: canvas, foregroundColor: ink, scrolledUnderElevation: 0),
+      appBarTheme: const AppBarTheme(backgroundColor: tableHeader, foregroundColor: tableInk, scrolledUnderElevation: 0),
+      navigationBarTheme: const NavigationBarThemeData(backgroundColor: Colors.white,indicatorColor: tableHeader, labelTextStyle: WidgetStatePropertyAll(TextStyle(fontSize:12,fontWeight:FontWeight.w600))),
     );
   }
 }

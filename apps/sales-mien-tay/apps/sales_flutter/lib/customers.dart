@@ -52,6 +52,10 @@ class CustomerService {
     final res = await http.post(uri('/api/v1/customers'), headers: headers, body: jsonEncode(data));
     return FieldCustomer.fromJson(decode(res, 201)['item'] as Map<String, dynamic>);
   }
+  Future<FieldCustomer> update(FieldCustomer customer, Map<String,dynamic> data) async {
+    final res=await http.patch(uri('/api/v1/customers/${customer.id}'),headers:headers,body:jsonEncode({...data,'version':customer.version})).timeout(const Duration(seconds:30));
+    return FieldCustomer.fromJson(decode(res)['item'] as Map<String,dynamic>);
+  }
   Future<void> checkin(String customerId, Position pos, String ref) async {
     final data = {'client_ref': ref, 'latitude': pos.latitude, 'longitude': pos.longitude,
       'accuracy_m': pos.accuracy};
@@ -140,9 +144,9 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
         return Card(child: ListTile(
           leading: const CircleAvatar(child: Icon(Icons.storefront)),
           title: Text(c.name), subtitle: Text('${c.district}, ${c.province} · ${c.address}'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) =>
-            CustomerDetail(service: widget.service, customer: c))),
+          trailing: IconButton(tooltip:'Sửa thông tin',icon:const Icon(Icons.edit_outlined),onPressed:() async {final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>CustomerEditor(service:widget.service,regions:widget.regions,customer:c)));if(changed==true&&mounted)refresh();}),
+          onTap: () async {final changed=await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) =>
+            CustomerDetail(service: widget.service, customer: c,regions:widget.regions)));if(changed==true&&mounted)refresh();},
         ));
       })),
     ]);
@@ -152,7 +156,8 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
 class CustomerEditor extends StatefulWidget {
   final CustomerService service;
   final RegionCatalog regions;
-  const CustomerEditor({super.key, required this.service, required this.regions});
+  final FieldCustomer? customer;
+  const CustomerEditor({super.key, required this.service, required this.regions,this.customer});
   @override State<CustomerEditor> createState() => _CustomerEditorState();
 }
 class _CustomerEditorState extends State<CustomerEditor> {
@@ -166,6 +171,7 @@ class _CustomerEditorState extends State<CustomerEditor> {
   XFile? photo;
   bool saving = false;
   String? error;
+  @override void initState(){super.initState();final c=widget.customer;if(c!=null){name.text=c.name;address.text=c.address;contact.text=c.contact??'';phone.text=c.phone??'';note.text=c.note??'';province=c.province;district=c.district;category=c.category;}}
   @override void dispose() {name.dispose(); address.dispose();contact.dispose();phone.dispose();note.dispose();super.dispose();}
   Future<void> gps() async {
     try {final p = await captureGps(context); if (mounted) setState(() {position = p; error = null;});}
@@ -182,18 +188,18 @@ class _CustomerEditorState extends State<CustomerEditor> {
     }
     setState(() => saving = true);
     try {
-      final created = await widget.service.add({'client_ref':clientRef,'name':name.text.trim(),
+      final data=<String,dynamic>{'client_ref':clientRef,'name':name.text.trim(),
         'address_line':address.text.trim(),'contact_name':contact.text.trim().isEmpty?null:contact.text.trim(),
         'phone':phone.text.trim().isEmpty?null:phone.text.trim(),'note':note.text.trim().isEmpty?null:note.text.trim(),
         'province':province,'district':district,'category':category,
-        'location_consent':position != null,'latitude':position?.latitude,'longitude':position?.longitude,
-        'location_accuracy_m':position?.accuracy});
+        if(widget.customer==null||position!=null)...{'location_consent':position != null,'latitude':position?.latitude,'longitude':position?.longitude,'location_accuracy_m':position?.accuracy}};
+      final created=widget.customer==null?await widget.service.add(data):await widget.service.update(widget.customer!,data);
       if (photo != null) await widget.service.uploadPhoto(created.id, photo!);
       if (mounted) Navigator.pop(context, true);
     } catch(e){if(mounted)setState(()=>error='$e');}
     finally {if(mounted)setState(()=>saving=false);}
   }
-  @override Widget build(BuildContext context) => Scaffold(appBar:AppBar(title:const Text('Hồ sơ điểm bán')),
+  @override Widget build(BuildContext context) => Scaffold(appBar:AppBar(title:Text(widget.customer==null?'Thêm điểm bán':'Sửa điểm bán')),
     body: Form(key:key, child:ListView(padding:const EdgeInsets.all(16),children:[
       TextFormField(controller:name,decoration:const InputDecoration(labelText:'Tên điểm bán *'),
         validator:(v)=>(v??'').trim().length<2?'Tên ít nhất 2 ký tự':null),
@@ -237,7 +243,8 @@ class _CustomerEditorState extends State<CustomerEditor> {
 class CustomerDetail extends StatefulWidget {
   final CustomerService service;
   final FieldCustomer customer;
-  const CustomerDetail({super.key,required this.service,required this.customer});
+  final RegionCatalog regions;
+  const CustomerDetail({super.key,required this.service,required this.customer,required this.regions});
   @override State<CustomerDetail> createState()=>_CustomerDetailState();
 }
 class _CustomerDetailState extends State<CustomerDetail> {
@@ -260,7 +267,7 @@ class _CustomerDetailState extends State<CustomerDetail> {
   Widget build(BuildContext context) {
     final customer = widget.customer;
     return Scaffold(
-      appBar: AppBar(title: Text(customer.name)),
+      appBar: AppBar(title: Text(customer.name),actions:[IconButton(tooltip:'Sửa thông tin',icon:const Icon(Icons.edit_outlined),onPressed:() async {final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>CustomerEditor(service:widget.service,regions:widget.regions,customer:customer)));if(changed==true&&context.mounted)Navigator.pop(context,true);})]),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[

@@ -16,7 +16,7 @@ class SalesApp extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) => MaterialApp(
     debugShowCheckedModeBanner: false,
-    title: 'Sales Miền Tây',
+    title: 'Filed Work',
     theme: SalesTheme.build(width: constraints.maxWidth),
     home: const AuthGate(),
     ),
@@ -72,7 +72,7 @@ class _SalesHomeState extends State<SalesHome> {
       });
       _notify('Đã đồng bộ ${_items.length} bản ghi');
     } catch (error) {
-      if (mounted) setState(() { _items.clear(); _message = 'Lỗi đồng bộ: $error'; });
+      if (mounted) setState(() { _message = 'Lỗi đồng bộ: $error'; });
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -262,7 +262,7 @@ class _SalesHomeState extends State<SalesHome> {
     final narrow = MediaQuery.of(context).size.width < 850;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Sales Miền Tây', style: TextStyle(fontWeight: FontWeight.w700)),
+        title: Row(mainAxisSize:MainAxisSize.min,children:[Image.asset('assets/fbmn-transparent-logo.webp',height:28),const SizedBox(width:8),const Text('Filed Work',style:TextStyle(fontWeight:FontWeight.w700))]),
         actions: [
           if (_loading) const Padding(padding: EdgeInsets.all(16),
             child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
@@ -272,6 +272,11 @@ class _SalesHomeState extends State<SalesHome> {
           IconButton(onPressed: _profile,tooltip:'Hồ sơ nhân viên',icon:const Icon(Icons.account_circle_outlined)),
         ],
       ),
+      bottomNavigationBar: narrow ? NavigationBar(
+        selectedIndex: const [0,1,2,5].contains(_selectedIndex)?const [0,1,2,5].indexOf(_selectedIndex):4,
+        onDestinationSelected:(i){if(i==4){_profile();}else{setState(()=>_selectedIndex=const [0,1,2,5][i]);}},
+        destinations:const [NavigationDestination(icon:Icon(Icons.dashboard_outlined),label:'Tổng quan'),NavigationDestination(icon:Icon(Icons.storefront_outlined),label:'Khách hàng'),NavigationDestination(icon:Icon(Icons.assignment_outlined),label:'Khảo sát'),NavigationDestination(icon:Icon(Icons.route_outlined),label:'Lịch trình'),NavigationDestination(icon:Icon(Icons.person_outline),label:'Tài khoản')],
+      ):null,
       drawer: narrow ? Drawer(child: SafeArea(child: ListView(children: [
         const ListTile(title: Text('PHÂN HỆ SALES')),
         for (var i = 0; i < _sections.length; i++) _navItem(i),

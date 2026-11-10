@@ -43,7 +43,9 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
    }
   }catch(e){
    final hadSession=me!=null;
-   if(e is ApiFailure && (e.status==401||e.status==403)) await session.clear();
+   final rejected=e is ApiFailure && (e.status==401||e.status==403);
+   if(hadSession&&!rejected){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Mất kết nối tạm thời. Giữ nguyên phiên, sẽ kiểm tra lại.')));return;}
+   if(rejected) await session.clear();
    if(mounted){
     if(hadSession)Navigator.of(context).popUntil((r)=>r.isFirst);
     setState((){me=null;catalog=null;error=hadSession||!(e is ApiFailure&&e.status==401)?e.toString():null;});
@@ -75,7 +77,8 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
  @override Widget build(BuildContext context){
   if(me!=null&&catalog!=null)return SalesHome(key:ValueKey(me!['identity'].toString()+':'+me!['scope_revision'].toString()),session:session,me:me!,catalog:catalog!,onLogout:logout);
   return Scaffold(body:SafeArea(child:Center(child:SingleChildScrollView(padding:const EdgeInsets.all(24),child:ConstrainedBox(constraints:const BoxConstraints(maxWidth:420),child:Card(child:Padding(padding:const EdgeInsets.all(24),child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,mainAxisSize:MainAxisSize.min,children:[
-   Text('Sales Miền Tây',style:Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight:FontWeight.bold)),
+   Image.asset('assets/fbmn-transparent-logo.webp',height:46,alignment:Alignment.centerLeft),const SizedBox(height:12),
+   Text('Filed Work',style:Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight:FontWeight.bold)),
    const SizedBox(height:8),const Text('Đăng nhập bằng tài khoản nhân viên được cấp.'),
    const SizedBox(height:24),
    const Text('Email',style:TextStyle(fontSize:13)),const SizedBox(height:6),
