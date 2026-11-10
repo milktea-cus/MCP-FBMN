@@ -10,11 +10,13 @@ void main() => runApp(const SalesApp());
 class SalesApp extends StatelessWidget {
   const SalesApp({super.key});
   @override
-  Widget build(BuildContext context) => MaterialApp(
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) => MaterialApp(
     debugShowCheckedModeBanner: false,
     title: 'Sales Miền Tây',
-    theme: SalesTheme.build(),
+    theme: SalesTheme.build(width: constraints.maxWidth),
     home: const SalesHome(),
+    ),
   );
 }
 

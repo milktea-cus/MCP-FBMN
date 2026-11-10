@@ -9,3 +9,8 @@ compatibility_date = "2026-10-01"
 # AUTH_AUDIENCE: audience của API
 # AUTH_JWKS_URL: URL HTTPS tới JWKS của issuer
 # ALLOWED_ORIGINS: các origin phân tách dấu phẩy (ví dụ https://sales.example.vn)
+
+# Production media (private, no public bucket URL).
+[[r2_buckets]]
+binding = "PHOTOS_BUCKET"
+bucket_name = "sales-mien-tay-customer-media"
