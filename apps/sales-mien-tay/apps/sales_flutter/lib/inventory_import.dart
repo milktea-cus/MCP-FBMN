@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'package:excel/excel.dart' as xls;
+import 'xlsx_reader.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -9,19 +9,17 @@ import 'session.dart';
 
 Map<String,dynamic> _map(dynamic v)=>Map<String,dynamic>.from(v as Map);
 List<Map<String,dynamic>> _rows(dynamic v)=>(v as List).map(_map).toList();
-String cellText(xls.Data? cell)=>cell?.value?.toString()??'';
-String? textCode(xls.Data? cell){
- final v=cell?.value;
- if(v is! xls.TextCellValue)return null;
- final s=v.value.toString().replaceAll(RegExp(r'[\u200B-\u200D\uFEFF]'),'').trim();
+String cellText(XlsxCell? cell)=>cell?.text??'';
+String? textCode(XlsxCell? cell){
+ if(cell?.type!='text')return null;
+ final s=cell!.text.replaceAll(RegExp(r'[\u200B-\u200D\uFEFF]'),'').trim();
  return s.isEmpty||s.length>80?null:s;
 }
-int? stockQuantity(xls.Data? cell){
- final v=cell?.value;
+int? stockQuantity(XlsxCell? cell){
+ if(cell==null)return null;
  num? n;
- if(v is xls.IntCellValue){n=v.value;}
- else if(v is xls.DoubleCellValue){n=v.value;}
- else if(v is xls.TextCellValue){final s=v.value.toString().trim();if(!RegExp(r'^(?:\d+|\d{1,3}(?:[.,]\d{3})+)$').hasMatch(s))return null;n=int.tryParse(s.replaceAll(RegExp(r'[.,]'),''));}
+ if(cell.type=='number'){n=num.tryParse(cell.text);}
+ else if(cell.type=='text'){final s=cell.text.trim();if(!RegExp(r'^(?:\d+|\d{1,3}(?:[.,]\d{3})+)$').hasMatch(s))return null;n=int.tryParse(s.replaceAll(RegExp(r'[.,]'),''));}
  if(n==null||!n.isFinite||n<0||n>2147483647||n!=n.truncate())return null;
  return n.toInt();
 }
@@ -29,10 +27,10 @@ class InventoryParse{
  final List<Map<String,dynamic>> rows;final List<String> errors;
  InventoryParse(this.rows,this.errors);
 }
-InventoryParse parseInventory(xls.Sheet sheet,int header,int code,int qty){
+InventoryParse parseInventory(XlsxSheet sheet,int header,int code,int qty){
  final rows=<Map<String,dynamic>>[],errors=<String>[],seen=<String>{};
  final all=sheet.rows;
- xls.Data? at(List<xls.Data?> r,int i)=>i<r.length?r[i]:null;
+ XlsxCell? at(List<XlsxCell?> r,int i)=>i<r.length?r[i]:null;
  for(var i=header+1;i<all.length;i++){
   final row=all[i],c=at(row,code),q=at(row,qty);
   if(row.every((v)=>cellText(v).trim().isEmpty))continue;
@@ -52,8 +50,8 @@ class InventoryImportPage extends StatefulWidget{
  @override State<InventoryImportPage> createState()=>_InventoryImportPageState();
 }
 class _InventoryImportPageState extends State<InventoryImportPage>{
- xls.Excel? book;String filename='',sheetName='';int header=0;int? code,qty;bool busy=false;String? message;List<String> errors=[];List<Map<String,dynamic>> preview=[];String? revision;String op=const Uuid().v4();bool canConfirm=false;
- xls.Sheet? get sheet=>book?.tables[sheetName];
+ XlsxBook? book;String filename='',sheetName='';int header=0;int? code,qty;bool busy=false;String? message;List<String> errors=[];List<Map<String,dynamic>> preview=[];String? revision;String op=const Uuid().v4();bool canConfirm=false;
+ XlsxSheet? get sheet=>book?.tables[sheetName];
  void invalidate(){preview=[];revision=null;errors=[];canConfirm=false;op=const Uuid().v4();}
  Future<Map<String,dynamic>> post(String path,Map<String,dynamic> data)async=>decodeApi(await http.post(widget.service.uri(path),headers:widget.service.headers,body:jsonEncode(data)).timeout(const Duration(seconds:60)));
  Future<void> pick()async{
@@ -63,7 +61,7 @@ class _InventoryImportPageState extends State<InventoryImportPage>{
    if(picked==null)return;
    final f=picked.files.single;
    if(f.bytes==null||f.size>5*1024*1024||!f.name.toLowerCase().endsWith('.xlsx'))throw StateError('Chỉ nhận .xlsx tối đa 5 MB');
-   final decoded=xls.Excel.decodeBytes(f.bytes!);
+   final decoded=decodeInventoryWorkbook(f.bytes!);
    if(decoded.tables.isEmpty)throw StateError('File không có sheet');
    if(mounted)setState((){book=decoded;filename=f.name;sheetName=decoded.tables.keys.first;header=0;code=null;qty=null;invalidate();message=null;});
   }catch(e){if(mounted)setState(()=>message='Không đọc được Excel: $e');}
@@ -93,7 +91,7 @@ class _InventoryImportPageState extends State<InventoryImportPage>{
   finally{if(mounted)setState(()=>busy=false);}
  }
  @override Widget build(BuildContext context){
-  final s=sheet,headerRows=s==null?0:(s.maxRows<20?s.maxRows:20),columns=s==null||header>=s.rows.length?<xls.Data?>[]:s.rows[header];
+  final s=sheet,headerRows=s==null?0:(s.maxRows<20?s.maxRows:20),columns=s==null||header>=s.rows.length?<XlsxCell?>[]:s.rows[header];
   final choices=[for(var i=0;i<columns.length;i++)DropdownMenuItem(value:i,child:Text('Cột ${i+1}: ${cellText(columns[i])}',overflow:TextOverflow.ellipsis))];
   return Scaffold(appBar:AppBar(title:const Text('Nhập tồn Excel')),body:ListView(padding:const EdgeInsets.all(16),children:[
    const Text('Snapshot tồn · chỉ cập nhật mã có trong file · không realtime.'),
