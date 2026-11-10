@@ -8,6 +8,7 @@ import 'package:uuid/uuid.dart';
 import 'models.dart';
 import 'session.dart';
 import 'offline_queue.dart';
+import 'editor.dart';
 
 class FieldCustomer {
   final String id, name, address, province, district, category, status;
@@ -273,6 +274,10 @@ class CustomerDetail extends StatefulWidget {
 class _CustomerDetailState extends State<CustomerDetail> {
   List<String> photos=[];
   List<Map<String,dynamic>> visits=[];
+  Future<void> addRecord(String kind) async{
+    final queue=widget.queue;if(queue==null)return;
+    await Navigator.push(context,MaterialPageRoute(builder:(_)=>RecordEditor(kind:kind,catalog:widget.regions,linkedCustomer:widget.customer.toJson(),onSave:(data) async{await queue.enqueue('/api/v1/records',data);})));
+  }
   Future<void> addPhoto(ImageSource source) async {
     if(busy)return;setState(()=>busy=true);
     try{final photo=await ImagePicker().pickImage(source:source,maxWidth:1600,imageQuality:80);if(photo==null)return;
@@ -312,6 +317,7 @@ class _CustomerDetailState extends State<CustomerDetail> {
           Text('Số điện thoại: ${customer.phone ?? 'Chưa có'}'),
           Text('GPS: ${customer.latitude?.toStringAsFixed(6) ?? 'Chưa ghi'} / ${customer.longitude?.toStringAsFixed(6) ?? 'Chưa ghi'}'),
           const SizedBox(height: 16),
+          if(widget.queue!=null)Wrap(spacing:8,children:[OutlinedButton.icon(onPressed:()=>addRecord('survey'),icon:const Icon(Icons.assignment_outlined),label:const Text('Khảo sát')),OutlinedButton.icon(onPressed:()=>addRecord('forecast'),icon:const Icon(Icons.payments_outlined),label:const Text('Dự kiến doanh thu'))]),
           FilledButton.icon(
             onPressed: busy ? null : checkin,
             icon: const Icon(Icons.location_pin),

@@ -57,8 +57,9 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
  Future<void> openCustomer(Map<String,dynamic> row)async{
   try{
    final id=row['customer_id'].toString();
-   final data=decodeApi(await http.get(widget.queue.session.uri('/api/v1/customers/$id'),headers:widget.service.headers).timeout(const Duration(seconds:20)));
-   final customer=FieldCustomer.fromJson(Map<String,dynamic>.from(data['item'] as Map));
+   FieldCustomer customer;
+   try{final data=decodeApi(await http.get(widget.queue.session.uri('/api/v1/customers/$id'),headers:widget.service.headers).timeout(const Duration(seconds:20)));customer=FieldCustomer.fromJson(Map<String,dynamic>.from(data['item'] as Map));}
+   catch(e){if(e is ApiFailure&&(e.status==401||e.status==403||e.status==404))rethrow;final list=await widget.queue.cached('customers:${widget.service.province}');customer=FieldCustomer.fromJson(list.firstWhere((c)=>c['id']==id));}
    if(!mounted)return;
    await Navigator.push(context,MaterialPageRoute(builder:(_)=>CustomerDetail(service:widget.service,customer:customer,regions:widget.regions,queue:widget.queue)));
    if(mounted)await load();

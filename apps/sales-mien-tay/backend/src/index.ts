@@ -170,9 +170,9 @@ export default {
         let body: SalesRecordBody;
         try { body = await readBody(req); } catch { return bad('JSON không hợp lệ'); }
         const error = validate(body, true);
-        if(body.kind==='visit'&&body.data?.customerId!==undefined){
+        if(body.kind&&['visit','forecast','survey'].includes(body.kind)&&body.data?.customerId!==undefined){
           const id=body.data.customerId,day=body.data.plannedDate,sequence=body.data.sequence;
-          if(typeof id!=='string'||!/^[0-9a-f-]{36}$/i.test(id)||typeof day!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day))||new Date(day).toISOString().slice(0,10)!==day||typeof sequence!=='number'||!Number.isInteger(sequence)||sequence<1||sequence>9999)return bad('Điểm ghé, ngày hoặc thứ tự không hợp lệ');
+          if(typeof id!=='string'||!/^[0-9a-f-]{36}$/i.test(id)||(body.kind==='visit'&&(typeof day!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day))||new Date(day).toISOString().slice(0,10)!==day||typeof sequence!=='number'||!Number.isInteger(sequence)||sequence<1||sequence>9999)))return bad('Điểm ghé, ngày hoặc thứ tự không hợp lệ');
           const customer=await sql`SELECT name,province,district FROM customers WHERE id::text=${id} AND public.sales_can_access(${user.sub},owner_sub,province,district)`;
           if(!customer.length)return bad('Không có quyền điểm bán',403);
           if(body.province!==customer[0].province||body.district!==customer[0].district)return bad('Địa bàn tuyến không khớp điểm bán');
@@ -189,7 +189,8 @@ export default {
           INSERT INTO sales_records (kind, owner_sub, province, district, customer_name, period_ym, data, client_ref)
           SELECT ${body.kind!}, ${user.sub}, ${body.province ?? null}, ${body.district ?? null},
                   ${body.customer_name ?? null}, ${body.period_ym ?? null}, ${JSON.stringify(body.data ?? {})}::jsonb, ${body.client_ref??null}::uuid
-          WHERE public.sales_can_access(${user.sub},${user.sub},${body.province ?? null},${body.district ?? null}) ON CONFLICT DO NOTHING RETURNING *`;
+          WHERE public.sales_can_access(${user.sub},${user.sub},${body.province ?? null},${body.district ?? null})
+          AND (${body.data?.customerId==null} OR EXISTS(SELECT 1 FROM customers c WHERE c.id::text=${String(body.data?.customerId??'')} AND public.sales_can_access(${user.sub},c.owner_sub,c.province,c.district) AND c.province=${body.province??null} AND c.district=${body.district??null})) ON CONFLICT DO NOTHING RETURNING *`;
         if(rows.length)return json({item:rows[0]},201);
         if(body.client_ref){const existing=await sql`SELECT * FROM sales_records WHERE owner_sub=${user.sub} AND client_ref=${body.client_ref}::uuid AND public.sales_can_access(${user.sub},owner_sub,province,district)`;if(existing.length)return json({item:existing[0],idempotent:true});}
         return bad('Bản ghi đã tồn tại hoặc không có quyền địa bàn',409);
