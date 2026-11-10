@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import 'customers.dart';
 import 'offline_queue.dart';
 import 'session.dart';
+import 'inventory_import.dart';
 
 Map<String,dynamic> map(dynamic v)=>Map<String,dynamic>.from(v as Map);
 String? packagingError(Map<String,dynamic> spec){
@@ -55,7 +56,7 @@ class _CatalogPageState extends State<CatalogPage>{
   const Text('Danh mục công ty · Chưa tích hợp số tồn kho'),
   const SizedBox(height:8),
   TextField(controller:search,decoration:const InputDecoration(prefixIcon:Icon(Icons.search),labelText:'Mã CTY, SKU, tên hoặc nhãn hàng'),onChanged:(_){timer?.cancel();timer=Timer(const Duration(milliseconds:350),()=>load());}),
-  if(widget.admin)Padding(padding:const EdgeInsets.symmetric(vertical:8),child:Wrap(spacing:8,runSpacing:8,children:[FilledButton.icon(onPressed:busy||offline?null:()=>edit(),icon:const Icon(Icons.add),label:const Text('Tạo sản phẩm')),OutlinedButton(onPressed:busy||offline?null:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>CustomerMappingPage(service:widget.service))),child:const Text('Mã khách CTY')),TextButton(onPressed:busy||offline?null:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>CatalogAuditPage(service:widget.service))),child:const Text('Nhật ký'))])),
+  if(widget.admin)Padding(padding:const EdgeInsets.symmetric(vertical:8),child:Wrap(spacing:8,runSpacing:8,children:[FilledButton.icon(onPressed:busy||offline?null:()=>edit(),icon:const Icon(Icons.add),label:const Text('Tạo sản phẩm')),OutlinedButton(onPressed:busy||offline?null:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>CustomerMappingPage(service:widget.service))),child:const Text('Mã khách CTY')),OutlinedButton.icon(onPressed:busy||offline?null:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>InventoryImportPage(service:widget.service))),icon:const Icon(Icons.upload_file),label:const Text('Nhập tồn Excel')),TextButton(onPressed:busy||offline?null:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>CatalogAuditPage(service:widget.service))),child:const Text('Nhật ký'))])),
   if(busy)const LinearProgressIndicator(),if(error!=null)Padding(padding:const EdgeInsets.all(8),child:Text(error!)),
   if(rows.isEmpty&&!busy)const Padding(padding:EdgeInsets.all(16),child:Text('Chưa có sản phẩm phù hợp. Không có dữ liệu tồn kho.')),
   for(final p in rows)Card(child:ListTile(title:Text(p['name'].toString()),subtitle:Text('Mã CTY: ${p['company_code']} · SKU: ${p['sku']??"—"}\n${p['brand']??"—"} · ${p['category']??"—"} · ĐVT: ${p['unit']??"Chưa xác minh"}${p['active']==false?" · Ngừng sử dụng":""}'),trailing:widget.admin&&!offline?IconButton(tooltip:'Sửa sản phẩm',onPressed:()=>edit(p),icon:const Icon(Icons.edit_outlined)):const Icon(Icons.chevron_right),onTap:()=>showDialog<void>(context:context,builder:(c)=>AlertDialog(title:Text(p['name'].toString()),content:Text('Mã CTY: ${p['company_code']}\nĐVT: ${p['unit']??"Chưa xác minh"}\n${specSummary(map(p['product_spec']??{}))}\nTồn: chưa tích hợp'),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng'))])))),

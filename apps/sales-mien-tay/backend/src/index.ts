@@ -5,6 +5,7 @@ import districts from './districts_old.json';
 import {customerRoutes} from './customers';
 import {surveyRoutes} from './surveys';
 import {catalogRoutes} from './catalog';
+import {inventoryRoutes} from './inventory';
 
 interface Env {
   DATABASE_URL: string;
@@ -105,6 +106,8 @@ export default {
       if (!env.DATABASE_URL) return bad('DATABASE_URL chưa được cấu hình', 503);
       const productResponse = await customerRoutes(req, env, user, url);
       if (productResponse) return productResponse;
+      const inventoryResponse=await inventoryRoutes(req,env,user,url);
+      if(inventoryResponse)return inventoryResponse;
       const catalogResponse=await catalogRoutes(req,env,user,url);
       if(catalogResponse)return catalogResponse;
       const surveyResponse=await surveyRoutes(req,env,user,url);

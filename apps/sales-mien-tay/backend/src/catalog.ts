@@ -97,7 +97,7 @@ export async function catalogRoutes(req:Request,env:{DATABASE_URL:string},actor:
  }
  if(!Number.isInteger(v.version)||Number(v.version)<1)return bad('Thiếu phiên bản');
  const rows=await db`WITH old AS MATERIALIZED (SELECT * FROM catalog_products WHERE id=${id}::uuid AND version=${Number(v.version)} AND company_code=${product.company_code} FOR UPDATE),
- changed AS (UPDATE catalog_products p SET sku=${product.sku},name=${product.name},brand=${product.brand},category=${product.category},unit=${product.unit},product_spec=${spec}::jsonb,active=${product.active},version=p.version+1,updated_at=now() FROM old WHERE p.id=old.id RETURNING p.*),
+ changed AS (UPDATE catalog_products p SET sku=${product.sku},name=${product.name},needs_review=CASE WHEN p.name IS DISTINCT FROM ${product.name} THEN false ELSE p.needs_review END,brand=${product.brand},category=${product.category},unit=${product.unit},product_spec=${spec}::jsonb,active=${product.active},version=p.version+1,updated_at=now() FROM old WHERE p.id=old.id RETURNING p.*),
  audit AS (INSERT INTO catalog_edits(op_id,actor_sub,product_id,before_data,after_data) SELECT ${op}::uuid,${actor.sub},changed.id,to_jsonb(old),to_jsonb(changed) FROM changed JOIN old ON old.id=changed.id RETURNING product_id)
  SELECT changed.* FROM changed JOIN audit ON audit.product_id=changed.id`;
  return rows.length?json({item:rows[0]}):bad('Mã CTY không được sửa hoặc version đã thay đổi; tải lại',409);
