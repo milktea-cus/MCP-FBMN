@@ -41,9 +41,10 @@ class SalesSession {
     decodeApi(await http.get(uri(path),headers:sessionHeaders(cookie)).timeout(const Duration(seconds:20)));
   Future<Map<String,dynamic>> post(String path,Map<String,dynamic> data) async =>
     decodeApi(await http.post(uri(path),headers:sessionHeaders(cookie),body:jsonEncode(data)).timeout(const Duration(seconds:20)));
-  Future<void> login(String email,String password) async {
-    final r=await http.post(uri('/api/auth/login'),headers:sessionHeaders(cookie),
-      body:jsonEncode({'email':email,'password':password})).timeout(const Duration(seconds:20));
+  Future<void> requestOtp(String email) async { await post('/api/auth/otp/request',{'email':email}); }
+  Future<void> login(String email,String password,{bool otp=false}) async {
+    final r=await http.post(uri(otp?'/api/auth/otp/login':'/api/auth/login'),headers:sessionHeaders(cookie),
+      body:jsonEncode({'email':email,otp?'otp':'password':password})).timeout(const Duration(seconds:20));
     decodeApi(r);
     if(!kIsWeb){
       final value=RegExp(r'__Host-sales-session=([^;\s,]+)').firstMatch(r.headers['set-cookie']??'')?.group(1);

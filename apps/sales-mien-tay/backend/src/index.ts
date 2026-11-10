@@ -79,7 +79,10 @@ export default {
     if (origin && !allowedOrigin(origin, env)) return bad('Origin không được cho phép', 403);
     const answer = async (): Promise<Response> => {
       const url = new URL(req.url);
-      if (url.pathname === '/health' && req.method === 'GET') return json({status: 'worker_alive', database: 'not_checked'});
+      if (url.pathname === '/health' && req.method === 'GET') {
+        if(!env.DATABASE_URL)return json({status:'unavailable',database:'unconfigured'},503);
+        try{await neon(env.DATABASE_URL)`SELECT 1`;return json({status:'ok',database:'ok'});}catch{return json({status:'unavailable',database:'unavailable'},503);}
+      }
       if (!env.DATABASE_URL) return bad('DATABASE_URL chưa được cấu hình', 503);
       const authResponse = await authRoutes(req, env, url);
       if (authResponse) return authResponse;

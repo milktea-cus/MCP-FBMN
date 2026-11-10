@@ -59,7 +59,7 @@ export async function userFromRequest(req: Request, env: AuthEnv) {
  return principal(env,sub);
 }
 export async function authRoutes(req: Request, env: AuthEnv, url: URL): Promise<Response|null> {
- if(url.pathname!='/api/auth/login' && url.pathname!='/api/auth/logout') return null;
+ if(!['/api/auth/login','/api/auth/logout','/api/auth/otp/request','/api/auth/otp/login'].includes(url.pathname)) return null;
  if(req.method!=='POST') return json({error:'Method not allowed'},405);
  if(req.headers.get('Origin')!==origin) return json({error:'Origin không hợp lệ'},403);
  if(url.pathname.endsWith('/logout')){
@@ -69,14 +69,29 @@ export async function authRoutes(req: Request, env: AuthEnv, url: URL): Promise<
  }
  if(!req.headers.get('Content-Type')?.includes('application/json')) return json({error:'JSON required'},400);
  const raw=await req.text();if(raw.length>4096)return json({error:'Dữ liệu quá lớn'},400);
- let data:{email?:unknown;password?:unknown};try{data=JSON.parse(raw);}catch{return json({error:'JSON không hợp lệ'},400);}
- if(!data || typeof data.email!=='string'||typeof data.password!=='string'||data.email.length>254||data.password.length>256||!data.password) return json({error:'Thông tin đăng nhập không hợp lệ'},400);
- const res=await provider('/sign-in/email','POST',undefined,JSON.stringify({email:data.email.trim(),password:data.password,rememberMe:true}));
- if(!res.ok)return json({error:'Đăng nhập không thành công. Kiểm tra tài khoản, mật khẩu và xác minh email.'},res.status===429?429:res.status>=500?503:401);
+ let data:{email?:unknown;password?:unknown;otp?:unknown};try{data=JSON.parse(raw);}catch{return json({error:'JSON không hợp lệ'},400);}
+ if(!data || typeof data.email!=='string'||data.email.length>254||!data.email.includes('@')) return json({error:'Email không hợp lệ'},400);
+ const email=data.email.trim().toLowerCase();
+ const db=neon(env.DATABASE_URL);
+ const known=await db`SELECT user_sub FROM public.staff_members WHERE lower(email)=${email} AND active LIMIT 1`;
+ if(url.pathname.endsWith('/otp/request')){
+  if(known.length){
+   const result=await provider('/email-otp/send-verification-otp','POST',undefined,JSON.stringify({email,type:'sign-in'}));
+   if(!result.ok)return json({error:'Chưa thể gửi mã. Vui lòng thử lại.'},result.status===429?429:503);
+  }
+  return json({ok:true});
+ }
+ if(!known.length)return json({error:'Đăng nhập không thành công'},401);
+ const otpLogin=url.pathname.endsWith('/otp/login');
+ if(otpLogin ? typeof data.otp!=='string'||!/^\d{6}$/.test(data.otp) : typeof data.password!=='string'||data.password.length>256||!data.password)
+  return json({error:'Thông tin đăng nhập không hợp lệ'},400);
+ const res=await provider(otpLogin?'/sign-in/email-otp':'/sign-in/email','POST',undefined,JSON.stringify(otpLogin?{email,otp:data.otp}:{email,password:data.password,rememberMe:true}));
+ if(!res.ok)return json({error:'Đăng nhập không thành công. Kiểm tra thông tin hoặc mã xác minh.'},res.status===429?429:res.status>=500?503:401);
  const header=res.headers.get('Set-Cookie')??'';
  const value=header.match(/(?:^|,\s*)__Secure-neon-auth\.session_token=([^;\s,]+)/)?.[1];
  if(!value)return json({error:'Không nhận được phiên xác thực'},502);
  const sub=await sessionSubject(value);
+ if(sub!==known[0].user_sub)throw new AuthError(403,'Identity không khớp hồ sơ nhân viên');
  await principal(env,sub);
  return json({ok:true},200,{'Set-Cookie':setCookie(value,604800)});
 }

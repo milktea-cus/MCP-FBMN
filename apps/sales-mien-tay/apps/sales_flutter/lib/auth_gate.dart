@@ -13,8 +13,8 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
  final email=TextEditingController(),password=TextEditingController();
  Map<String,dynamic>? me;
  RegionCatalog? catalog;
- bool busy=true,checking=false,obscure=true;
- String? error;
+ bool busy=true,checking=false,obscure=true,otpMode=true,logoutPending=false;
+ String? error,notice;
  Timer? timer;
  @override void initState(){
   super.initState();WidgetsBinding.instance.addObserver(this);
@@ -29,10 +29,10 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
  }
  @override void didChangeAppLifecycleState(AppLifecycleState state){if(state==AppLifecycleState.resumed&&me!=null)unawaited(revalidate());}
  Future<void> revalidate() async{
-  if(checking)return;checking=true;
+  if(checking||logoutPending)return;checking=true;
   try{
    final next=await session.get('/api/v1/me');
-   if(!mounted)return;
+   if(!mounted||logoutPending)return;
    final changed=me==null||me!['identity']!=next['identity']||me!['scope_revision']!=next['scope_revision']||me!['role']!=next['role'];
    if(changed){
     final meta=await session.get('/api/v1/meta');
@@ -51,15 +51,25 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   }finally{checking=false;}
  }
  Future<void> login() async{
-  if(busy||email.text.trim().isEmpty||password.text.isEmpty)return;
+  if(busy||logoutPending||email.text.trim().isEmpty||password.text.isEmpty)return;
   setState((){busy=true;error=null;});
-  try{await session.login(email.text.trim(),password.text);await revalidate();}
+  try{await session.login(email.text.trim(),password.text,otp:otpMode);await revalidate();}
   catch(e){if(mounted)setState(()=>error=e.toString());}
   finally{password.clear();if(mounted)setState(()=>busy=false);}
  }
+ Future<void> sendOtp() async {
+  if(busy||logoutPending||email.text.trim().isEmpty)return;
+  setState((){busy=true;error=null;notice=null;});
+  try{await session.requestOtp(email.text.trim());if(mounted)setState(()=>notice='Nếu email đã được cấp quyền, mã đăng nhập sẽ được gửi đến hộp thư.');}
+  catch(e){if(mounted)setState(()=>error=e.toString());}
+  finally{if(mounted)setState(()=>busy=false);}
+ }
  Future<void> logout() async{
-  try{await session.logout();if(!mounted)return;Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;error=null;});}
+  if(busy)return;
+  setState((){logoutPending=true;busy=true;me=null;catalog=null;});
+  try{await session.logout();if(!mounted)return;Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;error=null;logoutPending=false;});}
   catch(e){if(mounted){Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;error='Chưa xác nhận đăng xuất trên máy chủ. Hãy kết nối mạng và thử lại.';});}}
+  finally{if(mounted)setState(()=>busy=false);}
  }
  @override void dispose(){timer?.cancel();onSessionRejected=null;WidgetsBinding.instance.removeObserver(this);email.dispose();password.dispose();super.dispose();}
  @override Widget build(BuildContext context){
@@ -70,11 +80,14 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
    const SizedBox(height:24),
    const Text('Email',style:TextStyle(fontSize:13)),const SizedBox(height:6),
    TextField(controller:email,enabled:!busy,keyboardType:TextInputType.emailAddress,autofillHints:const [AutofillHints.username],decoration:const InputDecoration(hintText:'Email nhân viên')),
-   const SizedBox(height:14),const Text('Mật khẩu',style:TextStyle(fontSize:13)),const SizedBox(height:6),
-   TextField(controller:password,enabled:!busy,obscureText:obscure,autofillHints:const [AutofillHints.password],onSubmitted:(_)=>login(),decoration:InputDecoration(suffixIcon:IconButton(tooltip:obscure?'Hiện mật khẩu':'Ẩn mật khẩu',onPressed:()=>setState(()=>obscure=!obscure),icon:Icon(obscure?Icons.visibility_outlined:Icons.visibility_off_outlined)))),
+   const SizedBox(height:14),Text(otpMode?'Mã đăng nhập email':'Mật khẩu',style:const TextStyle(fontSize:13)),const SizedBox(height:6),
+   TextField(controller:password,enabled:!busy,obscureText:otpMode?false:obscure,keyboardType:otpMode?TextInputType.number:TextInputType.visiblePassword,autofillHints:otpMode?const [AutofillHints.oneTimeCode]:const [AutofillHints.password],onSubmitted:(_)=>login(),decoration:InputDecoration(suffixIcon:otpMode?null:IconButton(tooltip:obscure?'Hiện mật khẩu':'Ẩn mật khẩu',onPressed:()=>setState(()=>obscure=!obscure),icon:Icon(obscure?Icons.visibility_outlined:Icons.visibility_off_outlined)))),
+   if(otpMode)TextButton(onPressed:busy||logoutPending?null:sendOtp,child:const Text('Gửi mã đăng nhập')),
+   TextButton(onPressed:busy||logoutPending?null:()=>setState((){otpMode=!otpMode;password.clear();error=null;notice=null;}),child:Text(otpMode?'Dùng mật khẩu':'Dùng mã email')),
+   if(notice!=null)Text(notice!),
    if(error!=null)...[const SizedBox(height:12),Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error))],
-   const SizedBox(height:20),FilledButton(onPressed:busy?null:login,child:busy?const SizedBox(width:20,height:20,child:CircularProgressIndicator(strokeWidth:2)):const Text('Đăng nhập')),
-   TextButton(onPressed:busy?null:()=>unawaited(revalidate()),child:const Text('Khôi phục phiên')),
+   const SizedBox(height:20),FilledButton(onPressed:busy||logoutPending?null:login,child:busy?const SizedBox(width:20,height:20,child:CircularProgressIndicator(strokeWidth:2)):const Text('Đăng nhập')),
+   TextButton(onPressed:busy||logoutPending?null:()=>unawaited(revalidate()),child:const Text('Khôi phục phiên')),
    TextButton(onPressed:busy?null:logout,child:const Text('Xóa phiên / Đăng xuất')),
   ]))))))));
  }
