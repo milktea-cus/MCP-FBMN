@@ -73,7 +73,7 @@ export async function catalogRoutes(req:Request,env:{DATABASE_URL:string},actor:
    SELECT c.id,${code},${actor.sub},${op}::uuid FROM customers c WHERE c.id=${id}::uuid AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district) AND ${Number(version)===0}
    ON CONFLICT(customer_id) DO NOTHING RETURNING *`;
   if(rows.length)return json({item:rows[0]},201);
-  const updated=await db`UPDATE catalog_customer_mapping m SET company_code=${code},version=version+1,updated_by=${actor.sub},last_op=${op}::uuid,updated_at=now() FROM customers c WHERE c.id=m.customer_id AND m.customer_id=${id}::uuid AND m.version=${Number(version)} AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district) RETURNING m.*`;
+  const updated=await db`UPDATE catalog_customer_mapping m SET company_code=${code},version=m.version+1,updated_by=${actor.sub},last_op=${op}::uuid,updated_at=now() FROM customers c WHERE c.id=m.customer_id AND m.customer_id=${id}::uuid AND m.version=${Number(version)} AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district) RETURNING m.*`;
   return updated.length?json({item:updated[0]}):bad('Mapping đã thay đổi, tải lại',409);
  }
  const match=/^\/api\/v1\/catalog\/products\/([a-f0-9-]{36})$/i.exec(path);
@@ -83,8 +83,8 @@ export async function catalogRoutes(req:Request,env:{DATABASE_URL:string},actor:
  try{v=await body(req);product=parseProduct(v);}catch(e){return bad(e instanceof Error?e.message:'Dữ liệu không hợp lệ');}
  const op=v.client_ref;if(!validId(op))return bad('Thiếu UUID thao tác');
  const id=match?.[1]??op;
- const prior=await db`SELECT product_id,after_data,actor_sub FROM catalog_edits WHERE op_id=${op}::uuid`;
- if(prior.length)return prior[0].product_id===id&&prior[0].actor_sub===actor.sub?json({item:prior[0].after_data,idempotent:true}):bad('UUID đã dùng',409);
+ const prior=await db`SELECT product_id,after_data,actor_sub,(after_data @> ${JSON.stringify(product)}::jsonb AND after_data->'product_spec'=${JSON.stringify(product.product_spec)}::jsonb) AS same_payload FROM catalog_edits WHERE op_id=${op}::uuid`;
+ if(prior.length)return prior[0].product_id===id&&prior[0].actor_sub===actor.sub&&prior[0].same_payload?json({item:prior[0].after_data,idempotent:true}):bad('UUID đã dùng',409);
  const spec=JSON.stringify(product.product_spec);
  if(!match){
   const rows=await db`WITH inserted AS (

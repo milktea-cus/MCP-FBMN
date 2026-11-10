@@ -321,7 +321,7 @@ class _SalesHomeState extends State<SalesHome> {
           Expanded(child: _selectedIndex == 0 ? _overview() : _selectedIndex == 1
               ? CustomerDirectoryPage(key:ValueKey('$_province:${_queue.pending.length}'),service:CustomerService(_apiUrl,_accessToken,province:_province,identity:_queue.identity,revision:_queue.revision),regions:_catalog,queue:_queue)
               : _selectedIndex==2?SurveyPage(key:ValueKey('survey:$_province'),queue:_queue,service:_customerService,regions:_catalog,admin:widget.me['role']=='admin',legacy:(_)=>Scaffold(appBar:AppBar(title:const Text('Biểu mẫu khảo sát cũ')),body:_records('survey',readOnly:true)))
-              : _selectedIndex==10?CatalogPage(queue:_queue,service:_customerService,admin:widget.me['role']=='admin')
+              : _selectedIndex==10?CatalogPage(queue:_queue,service:CustomerService(_apiUrl,_accessToken,identity:_queue.identity,revision:_queue.revision),admin:widget.me['role']=='admin')
               : _selectedIndex==5||_selectedIndex==9?FieldWorkPage(key:ValueKey('field:$_selectedIndex:$_province'),queue:_queue,regions:_catalog,service:_customerService,report:_selectedIndex==9):_records(moduleKinds[_selectedIndex - 2])),
         ])),
       ]),
