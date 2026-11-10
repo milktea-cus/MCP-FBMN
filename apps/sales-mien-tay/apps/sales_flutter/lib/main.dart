@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'customers.dart';
 import 'editor.dart';
 import 'models.dart';
 import 'theme.dart';
@@ -34,9 +35,9 @@ class _SalesHomeState extends State<SalesHome> {
   String? _message;
 
   bool get _online => _apiUrl.trim().isNotEmpty && _accessToken.trim().isNotEmpty;
-  List<String> get _sections => ['Tổng quan', ...moduleKinds.map((e) => moduleLabels[e]!)];
+  List<String> get _sections => ['Tổng quan', 'Khách hàng / Điểm bán', ...moduleKinds.map((e) => moduleLabels[e]!)];
   List<IconData> get _icons => const [
-    Icons.dashboard_outlined, Icons.store_outlined, Icons.flag_outlined,
+    Icons.dashboard_outlined, Icons.storefront_outlined, Icons.store_outlined, Icons.flag_outlined,
     Icons.payments_outlined, Icons.route_outlined, Icons.handshake_outlined,
     Icons.policy_outlined, Icons.support_agent_outlined,
   ];
@@ -217,6 +218,12 @@ class _SalesHomeState extends State<SalesHome> {
             _stat('Điểm bán có nhãn Thành Đạt', '$countTD', Icons.analytics_outlined),
           ]);
       }),
+      const SizedBox(height: 12),
+      Card(child: ListTile(leading: const Icon(Icons.storefront_outlined),
+        title: const Text('Danh bạ khách hàng / Điểm bán'),
+        subtitle: const Text('Ảnh • vị trí GPS • check-in • lịch sử'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => setState(() => _selectedIndex = 1))),
       const SizedBox(height: 20),
       _coverageTable(surveys),
       const SizedBox(height: 22),
@@ -224,11 +231,11 @@ class _SalesHomeState extends State<SalesHome> {
       const SizedBox(height: 8),
       for (var i = 0; i < moduleKinds.length; i++) Card(
         child: ListTile(
-          leading: Icon(_icons[i+1], color: SalesTheme.brand),
+          leading: Icon(_icons[i+2], color: SalesTheme.brand),
           title: Text(moduleLabels[moduleKinds[i]]!),
           subtitle: Text('${_ofKind(moduleKinds[i]).length} bản ghi'),
           trailing: const Icon(Icons.chevron_right),
-          onTap: () => setState(() => _selectedIndex = i + 1),
+          onTap: () => setState(() => _selectedIndex = i + 2),
         ),
       ),
       const SizedBox(height: 10),
@@ -330,7 +337,9 @@ class _SalesHomeState extends State<SalesHome> {
             child: Padding(padding: const EdgeInsets.all(10), child: Text(_message!))),
           Expanded(child: _catalog == null
             ? const Center(child: CircularProgressIndicator())
-            : _selectedIndex == 0 ? _overview() : _records(moduleKinds[_selectedIndex - 1])),
+            : _selectedIndex == 0 ? _overview() : _selectedIndex == 1
+              ? CustomerDirectoryPage(service: _online ? CustomerService(_apiUrl, _accessToken) : null, regions: _catalog!)
+              : _records(moduleKinds[_selectedIndex - 2])),
         ])),
       ]),
     );
