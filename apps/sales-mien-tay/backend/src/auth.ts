@@ -95,3 +95,19 @@ export async function authRoutes(req: Request, env: AuthEnv, url: URL): Promise<
  await principal(env,sub);
  return json({ok:true},200,{'Set-Cookie':setCookie(value,604800)});
 }
+
+export async function provisionIdentity(req:Request,env:AuthEnv,actor:{admin:boolean}):Promise<Response>{
+ if(!actor.admin)return json({error:'Chỉ Admin tạo tài khoản'},403);
+ if(req.method!=='POST')return json({error:'Method not allowed'},405);
+ if(req.headers.get('Origin')!==origin)return json({error:'Origin không hợp lệ'},403);
+ const value=cookie(req);if(!value)return json({error:'Cần phiên quản trị xác thực'},401);
+ let data:{email?:unknown;name?:unknown};try{const raw=await req.text();if(raw.length>4096)throw Error();data=JSON.parse(raw);}catch{return json({error:'JSON không hợp lệ'},400);}
+ if(!data||typeof data.email!=='string'||data.email.length>254||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email.trim())||typeof data.name!=='string'||!data.name.trim()||data.name.length>240)return json({error:'Email hoặc tên không hợp lệ'},400);
+ const email=data.email.trim().toLowerCase();
+ const result=await provider('/admin/create-user','POST',value,JSON.stringify({email,name:data.name.trim(),password:crypto.randomUUID()+crypto.randomUUID(),role:'user'}));
+ if(!result.ok)return json({error:'Không tạo được identity. Kiểm tra quyền quản trị Neon Auth hoặc tài khoản đã tồn tại.'},result.status===401||result.status===403?403:result.status>=500?503:409);
+ const created=await result.json() as {user?:{id?:string};id?:string};
+ const sub=created.user?.id??created.id;
+ if(!sub||!/^[0-9a-f-]{36}$/i.test(sub))return json({error:'Identity chưa được đồng bộ'},502);
+ return json({user_sub:sub,email},201);
+}

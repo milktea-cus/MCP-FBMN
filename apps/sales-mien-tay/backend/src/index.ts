@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless';
-import {AuthError, authRoutes, userFromRequest} from './auth';
+import {AuthError, authRoutes, userFromRequest, provisionIdentity} from './auth';
 import {staffRoutes} from './staff';
 import districts from './districts_old.json';
 import {customerRoutes} from './customers';
@@ -89,6 +89,7 @@ export default {
       let user: Awaited<ReturnType<typeof userFromRequest>>;
       user = await userFromRequest(req, env);
       if (url.pathname === '/api/v1/me' && req.method === 'GET') return json({identity: user.sub, role: user.staff.role, employee_code: user.staff.employee_code, full_name: user.staff.full_name, email: user.staff.email, scope_revision: String(user.staff.scope_revision), scopes: user.scopes, permissions: user.admin ? ['staff:manage','records:all'] : user.manager ? ['records:team','records:own'] : ['records:own']});
+      if(url.pathname==='/api/v1/admin/identity')return provisionIdentity(req,env,user);
       const staffResponse = await staffRoutes(req, env, user, url);
       if (staffResponse) return staffResponse;
       if (url.pathname === '/api/v1/meta' && req.method === 'GET') {

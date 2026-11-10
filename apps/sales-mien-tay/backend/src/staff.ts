@@ -25,5 +25,5 @@ export async function staffRoutes(req:Request,env:AuthEnv,actor:{sub:string;admi
  try{
   const result=await db`SELECT public.sales_save_staff(${actor.sub},${data.user_sub},${data.employee_code.trim()},${data.full_name.trim()},${String(data.phone??'')},${String(data.role)},${data.active},${manager as string|null},${JSON.stringify(canonical)}::jsonb,${String(data.scope_revision??'0')}::bigint) AS item`;
   return json({item:result[0].item});
- }catch{return json({error:'Không lưu được: kiểm tra identity đã xác minh, mã nhân viên, quản lý hoặc phiên bản quyền; không được khóa Admin cuối cùng.'},409);}
+ }catch{return json({error:'Không lưu được: kiểm tra identity đã được tạo, mã nhân viên, quản lý hoặc phiên bản quyền; không được khóa Admin cuối cùng.'},409);}
 }

@@ -39,7 +39,7 @@ class StaffEditor extends StatefulWidget{
  @override State<StaffEditor> createState()=>_StaffEditorState();
 }
 class _StaffEditorState extends State<StaffEditor>{
- late final TextEditingController subject,code,name,phone;
+ late final TextEditingController subject,code,name,phone,email;
  late String role;
  late bool active;
  String? manager,error;
@@ -48,10 +48,18 @@ class _StaffEditorState extends State<StaffEditor>{
  @override void initState(){
   super.initState();final s=widget.staff??{};
   subject=TextEditingController(text:s['user_sub']?.toString()??'');code=TextEditingController(text:s['employee_code']?.toString()??'');name=TextEditingController(text:s['full_name']?.toString()??'');phone=TextEditingController(text:s['phone']?.toString()??'');
+  email=TextEditingController(text:s['email']?.toString()??'');
   role=s['role']?.toString()??'sales';active=s['active']!=false;manager=s['manager_sub']?.toString();
   for(final a in (s['scopes'] as List? ?? [])){scopes.putIfAbsent(a['province'].toString(),()=>{}).add(a['district'].toString());}
  }
- @override void dispose(){subject.dispose();code.dispose();name.dispose();phone.dispose();super.dispose();}
+ @override void dispose(){subject.dispose();email.dispose();code.dispose();name.dispose();phone.dispose();super.dispose();}
+ Future<void> createIdentity() async{
+  if(email.text.trim().isEmpty||name.text.trim().isEmpty){setState(()=>error='Nhập email và họ tên trước.');return;}
+  setState((){busy=true;error=null;});
+  try{final r=await widget.session.post('/api/v1/admin/identity',{'email':email.text.trim(),'name':name.text.trim()});if(mounted)setState(()=>subject.text=r['user_sub'].toString());}
+  catch(e){if(mounted)setState(()=>error=e.toString());}
+  finally{if(mounted)setState(()=>busy=false);}
+ }
  Future<void> save() async{
   if(subject.text.trim().isEmpty||code.text.trim().isEmpty||name.text.trim().isEmpty){setState(()=>error='Vui lòng nhập identity, mã và họ tên.');return;}
   setState((){busy=true;error=null;});
@@ -63,8 +71,10 @@ class _StaffEditorState extends State<StaffEditor>{
  @override Widget build(BuildContext context)=>AlertDialog(
   title:Text(widget.staff==null?'Thêm nhân viên':'Sửa nhân viên'),
   content:SizedBox(width:560,child:SingleChildScrollView(child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-   const Text('Identity ID phải là tài khoản Neon Auth đã xác minh. Không tự cấp quyền theo email.'),const SizedBox(height:12),
-   field(subject,'Identity subject',readOnly:widget.staff!=null),field(code,'Mã nhân viên'),field(name,'Họ tên'),field(phone,'Điện thoại'),
+   const Text('Tạo identity riêng, sau đó lưu hồ sơ và địa bàn. Nhân viên xác minh email khi đăng nhập. Không cấp quyền theo email.'),const SizedBox(height:12),
+   field(name,'Họ tên'),field(email,'Email nhân viên',readOnly:widget.staff!=null||subject.text.isNotEmpty),
+   if(widget.staff==null&&subject.text.isEmpty)OutlinedButton(onPressed:busy?null:createIdentity,child:const Text('Tạo tài khoản Neon Auth')),
+   field(subject,'Identity subject',readOnly:widget.staff!=null),field(code,'Mã nhân viên'),field(phone,'Điện thoại'),
    DropdownButtonFormField<String>(initialValue:role,decoration:const InputDecoration(labelText:'Vai trò'),items:const [DropdownMenuItem(value:'admin',child:Text('Admin')),DropdownMenuItem(value:'manager',child:Text('Manager')),DropdownMenuItem(value:'sales',child:Text('Sales'))],onChanged:busy?null:(v)=>setState(()=>role=v??'sales')),
    if(role=='sales')DropdownButtonFormField<String>(initialValue:widget.managers.any((m)=>m['user_sub']==manager)?manager:'',decoration:const InputDecoration(labelText:'Quản lý trực tiếp'),items:[const DropdownMenuItem(value:'',child:Text('Chưa phân quản lý')),for(final m in widget.managers)DropdownMenuItem(value:m['user_sub'].toString(),child:Text(m['full_name'].toString()))],onChanged:busy?null:(v)=>setState(()=>manager=v==''?null:v)),
    SwitchListTile(title:const Text('Tài khoản hoạt động'),value:active,onChanged:busy?null:(v)=>setState(()=>active=v)),
