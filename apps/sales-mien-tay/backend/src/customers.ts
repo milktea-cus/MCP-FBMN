@@ -43,11 +43,8 @@ async function input(req: Request): Promise<ObjectBody> {
   return data as ObjectBody;
 }
 async function inScope(db: Db, actor: Actor, province: string, district: string) {
-  if (actor.admin) return true;
-  const rows = await db`SELECT 1 FROM staff_scopes
-    WHERE user_sub=${actor.sub} AND province=${province}
-      AND (district='' OR district=${district}) LIMIT 1`;
-  return rows.length > 0;
+  const rows = await db`SELECT public.sales_can_access(${actor.sub},${actor.sub},${province},${district}) AS allowed`;
+  return rows[0]?.allowed === true;
 }
 async function fetchCustomer(db: Db, actor: Actor, id: string) {
   const rows = await db`SELECT c.* FROM customers c WHERE c.id=${id}::uuid AND
@@ -108,8 +105,9 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       const consent=data.location_consent===true;
       const rows=await db`INSERT INTO customers(client_ref,owner_sub,name,code,category,contact_name,phone,
           address_line,province,district,latitude,longitude,location_accuracy_m,location_consent,note,status)
-        VALUES (${String(data.client_ref)}::uuid,${actor.sub},${name},${code},${data.category??'tap_hoa'},${contact},${phone},
-          ${address},${province},${district},${lat??null},${lon??null},${acc??null},${consent},${note},${data.status??'active'})
+        SELECT ${String(data.client_ref)}::uuid,${actor.sub},${name},${code},${data.category??'tap_hoa'},${contact},${phone},
+          ${address},${province},${district},${lat??null},${lon??null},${acc??null},${consent},${note},${data.status??'active'}
+        WHERE public.sales_can_access(${actor.sub},${actor.sub},${province},${district})
         ON CONFLICT(owner_sub,client_ref) DO NOTHING RETURNING *`;
       const existing=rows.length?rows:await db`SELECT * FROM customers WHERE owner_sub=${actor.sub} AND client_ref=${String(data.client_ref)}::uuid AND public.sales_can_access(${actor.sub},owner_sub,province,district)`;
       if(!existing.length) return fail('Không có quyền với bản ghi đã tồn tại',403);
@@ -125,7 +123,7 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
   if(!current) return fail('Không tìm thấy điểm bán hoặc không có quyền',404);
   if (!match[2] && req.method==='GET') return response({item:current});
   if (!match[2] && req.method==='PATCH') {
-    if (current.owner_sub!==actor.sub && !actor.admin) return fail('Không được sửa khách hàng của người khác',403);
+    if (current.owner_sub!==actor.sub && !actor.admin && !actor.manager) return fail('Không được sửa khách hàng của người khác',403);
     let data: ObjectBody;try{data=await input(req);}catch{return fail('JSON không hợp lệ');}
     if (!Number.isInteger(data.version) || Number(data.version)!==Number(current.version)) return fail('Dữ liệu đã thay đổi, vui lòng tải lại',409);
     const merged:ObjectBody={...current,...data};
@@ -137,7 +135,7 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
         province=${province},district=${district},latitude=${merged.latitude??null},longitude=${merged.longitude??null},
         location_accuracy_m=${merged.location_accuracy_m??null},location_consent=${merged.location_consent===true},
         note=${optional(merged.note,2000)},status=${merged.status},version=version+1,updated_at=now()
-      WHERE id=${id}::uuid AND version=${data.version as number} AND public.sales_can_access(${actor.sub},owner_sub,province,district) RETURNING *`;
+      WHERE id=${id}::uuid AND version=${data.version as number} AND public.sales_can_access(${actor.sub},owner_sub,province,district) AND public.sales_can_access(${actor.sub},owner_sub,${province},${district}) RETURNING *`;
     if(!rows.length)return fail('Xung đột phiên bản',409);
     await db`INSERT INTO field_audit_events(actor_sub,action,entity_type,entity_id) VALUES (${actor.sub},'update','customer',${id}::uuid)`;
     return response({item:rows[0]});

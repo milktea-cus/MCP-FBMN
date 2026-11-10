@@ -127,9 +127,10 @@ export default {
         }
         const rows = await sql`
           INSERT INTO sales_records (kind, owner_sub, province, district, customer_name, period_ym, data)
-          VALUES (${body.kind!}, ${user.sub}, ${body.province ?? null}, ${body.district ?? null},
-                  ${body.customer_name ?? null}, ${body.period_ym ?? null}, ${JSON.stringify(body.data ?? {})}::jsonb)
-          RETURNING *`;
+          SELECT ${body.kind!}, ${user.sub}, ${body.province ?? null}, ${body.district ?? null},
+                  ${body.customer_name ?? null}, ${body.period_ym ?? null}, ${JSON.stringify(body.data ?? {})}::jsonb
+          WHERE public.sales_can_access(${user.sub},${user.sub},${body.province ?? null},${body.district ?? null}) RETURNING *`;
+        if(!rows.length)return bad('Không có quyền địa bàn',403);
         return json({item: rows[0]}, 201);
       }
       const match = /^\/api\/v1\/records\/([0-9a-f-]{36})$/i.exec(url.pathname);
@@ -153,7 +154,7 @@ export default {
         const rows = await sql`
           UPDATE sales_records SET province=${province}, district=${district},
             data=${JSON.stringify(body.data)}::jsonb, updated_at=now()
-          WHERE id=${match[1]}::uuid AND public.sales_can_access(${user.sub},owner_sub,province,district) RETURNING *`;
+          WHERE id=${match[1]}::uuid AND public.sales_can_access(${user.sub},owner_sub,province,district) AND public.sales_can_access(${user.sub},owner_sub,${province},${district}) RETURNING *`;
         return rows.length ? json({item: rows[0]}) : bad('Không tìm thấy hoặc không có quyền', 404);
       }
       if (match && req.method === 'DELETE') {

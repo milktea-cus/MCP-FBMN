@@ -33,6 +33,10 @@ jobs:
       - run: npm run typecheck
       - name: Bundle Worker for deployment (no credentials)
         run: npx wrangler deploy --dry-run --minify --outdir .release
+      - name: Export verified public Worker bundle for plugin deployment
+        if: github.ref == 'refs/heads/main'
+        run: |
+          node -e "const fs=require('node:fs'),c=require('node:crypto');const b=fs.readFileSync('.release/index.js');const s=b.toString('base64');console.log('P1_BUNDLE_SHA256:'+c.createHash('sha256').update(b).digest('hex'));for(let i=0;i<s.length;i+=12000)console.log('P1_BUNDLE_CHUNK:'+s.slice(i,i+12000));"
       - uses: actions/upload-artifact@v4
         with:
           name: sales-worker-bundle
