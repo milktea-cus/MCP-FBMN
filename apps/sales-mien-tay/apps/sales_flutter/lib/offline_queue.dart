@@ -119,12 +119,22 @@ class OfflineLease {
  static const duration=Duration(hours:12);
  static Future<void> remember(Map<String,dynamic> me,Map<String,List<String>> districts) async{
   final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);
+  if(await t.objectStore('cache').getObject('logout_pending')!=null){await t.completed;return;}
   await t.objectStore('cache').put({'key':'active_lease','me':me,'districts':districts,'expires':DateTime.now().add(duration).millisecondsSinceEpoch});await t.completed;
  }
  static Future<Map<String,dynamic>?> read() async{
   final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('active_lease');await t.completed;
   if(row==null)return null;final v=Map<String,dynamic>.from(row as Map);
   return (v['expires'] as int)>DateTime.now().millisecondsSinceEpoch?v:null;
+ }
+ static Future<void> markLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);final s=t.objectStore('cache');await s.delete('active_lease');await s.put({'key':'logout_pending'});await t.completed;
+ }
+ static Future<bool> logoutPending() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('logout_pending');await t.completed;return row!=null;
+ }
+ static Future<void> finishLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('logout_pending');await t.completed;
  }
  static Future<void> clear() async{
   final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('active_lease');await t.completed;

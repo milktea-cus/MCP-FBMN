@@ -29,7 +29,8 @@ class FieldCustomer {
 class CustomerService {
   final String endpoint, token;
   final String province;
-  const CustomerService(this.endpoint, this.token,{this.province=''});
+  final String? identity,revision;
+  const CustomerService(this.endpoint, this.token,{this.province='',this.identity,this.revision});
   Uri uri(String path, [Map<String, String>? query]) {
     final url = Uri.parse('${endpoint.replaceFirst(RegExp(r'/$'), '')}$path');
     if (url.scheme != 'https' && url.host != 'localhost' && url.host != '127.0.0.1') {
@@ -37,7 +38,7 @@ class CustomerService {
     }
     return url.replace(queryParameters: query);
   }
-  Map<String, String> get headers => sessionHeaders(token);
+  Map<String, String> get headers => {...sessionHeaders(token),if(identity!=null)'X-Sync-Identity':identity!,if(revision!=null)'X-Sync-Revision':revision!};
   Map<String, dynamic> decode(http.Response res, [int ok = 200]) {
     final data = decodeApi(res);
     if (res.statusCode != ok && !(ok == 201 && res.statusCode == 200)) {

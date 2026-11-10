@@ -71,7 +71,7 @@ class _SalesHomeState extends State<SalesHome> {
   Future<void> _refresh() async {
     setState(() => _loading = true);
     try {
-      final api = SalesApi(_apiUrl, _accessToken);
+      final api = SalesApi(_apiUrl, _accessToken,identity:_queue.identity,revision:_queue.revision);
       final lists = await Future.wait(moduleKinds.map((kind) async {try{final items=await api.list(kind);await _queue.cache('records:$kind',items.map((r)=>r.toJson()).toList());return items;}catch(e){if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;return (await _queue.cached('records:$kind')).map(SalesRecord.fromJson).toList();}}));
       if (!mounted) return;
       setState(() {
@@ -306,7 +306,7 @@ class _SalesHomeState extends State<SalesHome> {
           if (_message != null) Material(color: const Color(0xFFFBE8E7),
             child: Padding(padding: const EdgeInsets.all(10), child: Text(_message!))),
           Expanded(child: _selectedIndex == 0 ? _overview() : _selectedIndex == 1
-              ? CustomerDirectoryPage(key:ValueKey('$_province:${_queue.pending.length}'),service:CustomerService(_apiUrl,_accessToken,province:_province),regions:_catalog,queue:_queue)
+              ? CustomerDirectoryPage(key:ValueKey('$_province:${_queue.pending.length}'),service:CustomerService(_apiUrl,_accessToken,province:_province,identity:_queue.identity,revision:_queue.revision),regions:_catalog,queue:_queue)
               : _records(moduleKinds[_selectedIndex - 2])),
         ])),
       ]),

@@ -26,7 +26,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   unawaited(start());
  }
  Future<void> start() async{
-  try{await session.restore();await revalidate();}
+  try{await session.restore();if(await OfflineLease.logoutPending()){if(mounted)setState(()=>logoutPending=true);try{await session.logout();await OfflineLease.finishLogout();if(mounted)setState(()=>logoutPending=false);}catch(_){if(mounted)setState(()=>error='Đã đăng xuất trên máy. Kết nối mạng và bấm Đăng xuất để hoàn tất.');}return;}await revalidate();}
   catch(_){if(mounted)setState(()=>error='Không khôi phục được phiên. Vui lòng đăng nhập lại.');}
   finally{if(mounted)setState(()=>busy=false);}
  }
@@ -39,10 +39,11 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
    if(connectionNotice||recovering){if(mounted)setState((){connectionNotice=false;recovering=false;error=null;});}
    final changed=me==null||me!['identity']!=next['identity']||me!['scope_revision']!=next['scope_revision']||me!['role']!=next['role'];
    if(changed){
-    if(me!=null){await OfflineLease.clear();if(!mounted)return;Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;});}
+    await OfflineLease.clear();
+    if(me!=null){if(!mounted)return;Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;});}
     final meta=await session.get('/api/v1/meta');
     final regions=RegionCatalog((meta['districts'] as Map<String,dynamic>).map((k,v)=>MapEntry(k,(v as List).cast<String>())));
-    if(!mounted)return;
+    if(!mounted||logoutPending)return;
     Navigator.of(context).popUntil((r)=>r.isFirst);
     setState((){me=next;catalog=regions;error=null;});
    }
@@ -68,7 +69,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
  Future<void> login() async{
   if(busy||logoutPending||email.text.trim().isEmpty||password.text.isEmpty)return;
   setState((){busy=true;error=null;});
-  try{await session.login(email.text.trim(),password.text,otp:otpMode);await revalidate();}
+  try{await OfflineLease.clear();await session.login(email.text.trim(),password.text,otp:otpMode);await revalidate();}
   catch(e){if(mounted)setState(()=>error=e.toString());}
   finally{password.clear();if(mounted)setState(()=>busy=false);}
  }
@@ -82,7 +83,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
  Future<void> logout() async{
   if(busy)return;
   setState((){logoutPending=true;busy=true;me=null;catalog=null;recovering=false;});
-  try{await OfflineLease.clear();await session.logout();if(!mounted)return;Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;error=null;logoutPending=false;});}
+  try{await OfflineLease.markLogout();await session.logout();await OfflineLease.finishLogout();if(!mounted)return;Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;error=null;logoutPending=false;});}
   catch(e){if(mounted){Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;error='Chưa xác nhận đăng xuất trên máy chủ. Hãy kết nối mạng và thử lại.';});}}
   finally{if(mounted)setState(()=>busy=false);}
  }

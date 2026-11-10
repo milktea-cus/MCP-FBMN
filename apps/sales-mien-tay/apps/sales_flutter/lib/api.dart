@@ -7,7 +7,8 @@ import 'session.dart';
 class SalesApi {
   final String baseUrl;
   final String accessToken;
-  const SalesApi(this.baseUrl, this.accessToken);
+  final String? identity,revision;
+  const SalesApi(this.baseUrl, this.accessToken,{this.identity,this.revision});
 
   Uri _uri(String path, [Map<String, String>? params]) {
     final base = baseUrl.replaceAll(RegExp(r'/$'), '');
@@ -17,7 +18,7 @@ class SalesApi {
     }
     return uri.replace(queryParameters: params);
   }
-  Map<String, String> get _headers => sessionHeaders(accessToken);
+  Map<String, String> get _headers => {...sessionHeaders(accessToken),if(identity!=null)'X-Sync-Identity':identity!,if(revision!=null)'X-Sync-Revision':revision!};
   Future<List<SalesRecord>> list(String kind) async {
     final res = await http.get(_uri('/api/v1/records', {'kind': kind}), headers: _headers);
     final data = decodeApi(res);
