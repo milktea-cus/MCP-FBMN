@@ -51,7 +51,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
    if(rejected) await session.clear();
    if(mounted){
     if(hadSession)Navigator.of(context).popUntil((r)=>r.isFirst);
-    setState((){me=null;catalog=null;error=hadSession||!(e is ApiFailure&&e.status==401)?e.toString():null;});
+    setState((){me=null;catalog=null;error=hadSession||e.status!=401?e.toString():null;});
    }
   }finally{checking=false;}
  }
