@@ -103,6 +103,54 @@ export default {
       const productResponse = await customerRoutes(req, env, user, url);
       if (productResponse) return productResponse;
       const sql = neon(env.DATABASE_URL);
+      if(url.pathname==='/api/v1/routes'&&req.method==='GET'){
+        const day=url.searchParams.get('day')??'';
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day))||new Date(day).toISOString().slice(0,10)!==day)return bad('Ngày không hợp lệ');
+        const province=url.searchParams.get('province')??'';
+        const items=await sql`SELECT r.id,r.owner_sub,r.customer_name,r.province,r.district,r.data,
+          c.id AS customer_id,c.name,c.address_line,c.latitude,c.longitude,
+          EXISTS(SELECT 1 FROM field_visits v WHERE v.customer_id=c.id AND v.owner_sub=r.owner_sub
+            AND (v.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date=${day}::date) AS visited
+          FROM sales_records r JOIN customers c ON c.id::text=r.data->>'customerId'
+          WHERE r.kind='visit' AND r.data->>'plannedDate'=${day}
+            AND public.sales_can_access(${user.sub},r.owner_sub,r.province,r.district)
+            AND public.sales_can_access(${user.sub},c.owner_sub,c.province,c.district)
+            AND (${!province} OR r.province=${province})
+          ORDER BY CASE WHEN r.data->>'sequence' ~ '^[0-9]{1,4}$' THEN (r.data->>'sequence')::int ELSE 9999 END,r.created_at,r.id`;
+        return json({items});
+      }
+      if(url.pathname==='/api/v1/reports/monthly'&&req.method==='GET'){
+        const month=url.searchParams.get('month')??'';
+        if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))return bad('Tháng không hợp lệ');
+        const province=url.searchParams.get('province')??'';
+        const items=await sql`WITH r AS (
+          SELECT owner_sub,province,kind,data FROM sales_records
+          WHERE period_ym=${month} AND kind IN ('target','forecast')
+            AND public.sales_can_access(${user.sub},owner_sub,province,district)
+            AND (${!province} OR province=${province})
+        ), totals AS (
+          SELECT owner_sub,province,
+            sum(CASE WHEN kind='target' AND jsonb_typeof(data->'monthlyTarget')='number' THEN (data->>'monthlyTarget')::numeric ELSE 0 END) AS target,
+            sum(CASE WHEN kind='forecast' THEN coalesce((SELECT sum(CASE WHEN jsonb_typeof(w)='number' THEN (w#>>'{}')::numeric ELSE 0 END) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(data->'weekly')='array' THEN data->'weekly' ELSE '[]'::jsonb END) w),0) ELSE 0 END) AS forecast,
+            count(*) FILTER(WHERE kind='forecast') AS forecasts
+          FROM r GROUP BY owner_sub,province
+        ), visits AS (
+          SELECT v.owner_sub,c.province,count(*) AS checkins
+          FROM field_visits v JOIN customers c ON c.id=v.customer_id
+          WHERE to_char(v.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh','YYYY-MM')=${month}
+            AND public.sales_can_access(${user.sub},c.owner_sub,c.province,c.district)
+            AND public.sales_can_access(${user.sub},v.owner_sub,c.province,c.district)
+            AND (${!province} OR c.province=${province})
+          GROUP BY v.owner_sub,c.province
+        )
+        SELECT coalesce(t.owner_sub,v.owner_sub) AS owner_sub,coalesce(t.province,v.province) AS province,
+          s.full_name,coalesce(t.target,0) AS target,coalesce(t.forecast,0) AS forecast,
+          coalesce(t.forecasts,0) AS forecasts,coalesce(v.checkins,0) AS checkins
+        FROM totals t FULL JOIN visits v ON t.owner_sub=v.owner_sub AND t.province IS NOT DISTINCT FROM v.province
+        JOIN staff_members s ON s.user_sub=coalesce(t.owner_sub,v.owner_sub)
+        ORDER BY s.full_name,coalesce(t.province,v.province) NULLS FIRST`;
+        return json({month,items});
+      }
       if (url.pathname === '/api/v1/records' && req.method === 'GET') {
         const kind = url.searchParams.get('kind') ?? '';
         if (!kinds.includes(kind as Kind)) return bad('kind không hợp lệ');
@@ -122,6 +170,14 @@ export default {
         let body: SalesRecordBody;
         try { body = await readBody(req); } catch { return bad('JSON không hợp lệ'); }
         const error = validate(body, true);
+        if(body.kind==='visit'&&body.data?.customerId!==undefined){
+          const id=body.data.customerId,day=body.data.plannedDate,sequence=body.data.sequence;
+          if(typeof id!=='string'||!/^[0-9a-f-]{36}$/i.test(id)||typeof day!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day))||new Date(day).toISOString().slice(0,10)!==day||typeof sequence!=='number'||!Number.isInteger(sequence)||sequence<1||sequence>9999)return bad('Điểm ghé, ngày hoặc thứ tự không hợp lệ');
+          const customer=await sql`SELECT name,province,district FROM customers WHERE id::text=${id} AND public.sales_can_access(${user.sub},owner_sub,province,district)`;
+          if(!customer.length)return bad('Không có quyền điểm bán',403);
+          if(body.province!==customer[0].province||body.district!==customer[0].district)return bad('Địa bàn tuyến không khớp điểm bán');
+          body.customer_name=customer[0].name;
+        }
         if(body.client_ref!==undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(body.client_ref))return bad('client_ref không hợp lệ');
         if (error) return bad(error);
         if (body.province && !user.admin) {
