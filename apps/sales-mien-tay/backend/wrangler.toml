@@ -1,0 +1,11 @@
+name = "field-sales-api"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# Thiết lập các biến sau trên Cloudflare dashboard / wrangler secret,
+# không commit DATABASE_URL hoặc access token vào repo.
+# DATABASE_URL: Neon pooled connection string (secret)
+# AUTH_ISSUER: issuer OIDC từ nhà cung cấp xác thực
+# AUTH_AUDIENCE: audience của API
+# AUTH_JWKS_URL: URL HTTPS tới JWKS của issuer
+# ALLOWED_ORIGINS: các origin phân tách dấu phẩy (ví dụ https://sales.example.vn)

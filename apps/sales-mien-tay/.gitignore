@@ -1,0 +1,21 @@
+# Flutter
+.dart_tool/
+.flutter-plugins*
+.packages
+.pub-cache/
+.pub/
+build/
+**/android/local.properties
+**/android/key.properties
+**/android/*.jks
+# Node / Cloudflare
+node_modules/
+.wrangler/
+.dev.vars
+# Secrets
+.env
+.env.*
+!.env.example
+# Misc
+.DS_Store
+*.log
