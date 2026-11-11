@@ -16,6 +16,23 @@ void main(){
   final other=OfflineQueue(Disconnected(),'other','1',factory:factory);expect(await other.cached('survey-drafts'),isEmpty);await other.reload();expect(other.pending,isEmpty);
   a.dispose();b.dispose();other.dispose();
  });
+ test('explicit retry preserves failed draft until authorized sync succeeds',()async{
+  final factory=newIdbFactoryMemory();
+  final q=OfflineQueue(Disconnected(),'retry-user','8',factory:factory);
+  await q.enqueue('/api/v1/notifications/42/read',{});
+  await q.reload();
+  final key=q.pending.single['key'] as String;
+  final db=await q.db,t=db.transaction('outbox',idbModeReadWrite);
+  await t.objectStore('outbox').put({...q.pending.single,'status':'blocked','error':'409 conflict'});
+  await t.completed;
+  await q.reload();
+  expect(q.pending.single['status'],'blocked');
+  await q.retryBlocked(key);
+  expect(q.pending.single['key'],key);
+  expect(q.pending.single['status'],'pending');
+  expect(q.error,isNotNull); // Offline, so server has not acknowledged the receipt.
+  q.dispose();
+ });
  test('durable outbox separates identities and scope revisions',() async {
   final factory=newIdbFactoryMemory();
   final a=OfflineQueue(Disconnected(),'a','1',factory:factory);
