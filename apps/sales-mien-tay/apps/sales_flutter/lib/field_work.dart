@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
@@ -123,12 +124,27 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
  }
  Future<void> addStop()async{
   try{
-   List<FieldCustomer> customers;
-   try{customers=await widget.service.list();await widget.queue.cache('customers:${widget.service.province}',customers.map((c)=>c.toJson()).toList());}
-   catch(e){if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;customers=(await widget.queue.cached('customers:${widget.service.province}')).map(FieldCustomer.fromJson).toList();}
-   customers=customers.where((c)=>c.owner==widget.queue.identity).toList();
+   // Push the picker on the same tap. Network/cache lookup runs inside the
+   // already-visible dialog rather than delaying its opening by 7–20 seconds.
+   final available=()async{
+    List<FieldCustomer> customers;
+    try{
+     customers=await widget.service.list();
+     // Local persistence is background work, never a delay before showing rows.
+     unawaited(widget.queue.cache('customers:${widget.service.province}',
+       customers.map((c)=>c.toJson()).toList()).catchError((_){ }));
+    }catch(e){
+     if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;
+     customers=(await widget.queue.cached('customers:${widget.service.province}'))
+       .map(FieldCustomer.fromJson).toList();
+    }
+    return customers.where((c)=>c.owner==widget.queue.identity).toList();
+   }();
    if(!mounted)return;
-   final selected=await showDialog<FieldCustomer>(context:context,builder:(c)=>AlertDialog(title:const Text('Chọn điểm ghé'),content:SizedBox(width:440,child:ListView(shrinkWrap:true,children:[if(customers.isEmpty)const Text('Chưa có khách hàng. Tạo và đồng bộ khách hàng trước.'),for(final item in customers)ListTile(title:Text(item.name),subtitle:Text('${item.district}, ${item.province}'),onTap:()=>Navigator.pop(c,item))])),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng'))]));
+   final selected=await showDialog<FieldCustomer>(
+     context:context,
+     builder:(_)=>SalesStopCustomerPicker(customers:available),
+   );
    if(selected==null||!mounted)return;
    final sequence=TextEditingController(text:'${rows.where((r)=>r['planned']==true&&(r['data'] as Map)['plannedDate']==dayKey(day)).length+1}'),purpose=TextEditingController();
    final ok=await showDialog<bool>(context:context,builder:(c)=>AlertDialog(title:Text('Tuyến ${dayKey(day)}'),content:Column(mainAxisSize:MainAxisSize.min,children:[Text(selected.name),TextField(controller:sequence,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Thứ tự ghé')),TextField(controller:purpose,decoration:const InputDecoration(labelText:'Mục đích'))]),actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Hủy')),FilledButton(onPressed:()=>Navigator.pop(c,true),child:const Text('Lưu điểm ghé'))]));
@@ -206,4 +222,49 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
    ]))
   ]);
  }
+}
+
+/// The route picker appears on the first frame even if the account-scoped
+/// customer query is still pending. It never makes unauthorised data visible:
+/// a 401/403 from the server does not fall back to the offline cache.
+class SalesStopCustomerPicker extends StatelessWidget {
+ final Future<List<FieldCustomer>> customers;
+ const SalesStopCustomerPicker({super.key,required this.customers});
+ @override Widget build(BuildContext context)=>AlertDialog(
+  title:const Text('Chọn điểm ghé'),
+  content:SizedBox(width:440,height:420,
+   child:FutureBuilder<List<FieldCustomer>>(
+    future:customers,
+    builder:(context,snapshot){
+     if(snapshot.connectionState!=ConnectionState.done){
+      return const Center(child:Column(mainAxisSize:MainAxisSize.min,children:[
+       CircularProgressIndicator(),
+       SizedBox(height:16),
+       Text('Đang mở danh sách khách hàng…'),
+      ]));
+     }
+     if(snapshot.hasError){
+      return const Center(child:Text(
+       'Không tải được danh sách khách hàng. Kiểm tra kết nối và thử lại.'));
+     }
+     final items=snapshot.data??[];
+     if(items.isEmpty)return const Center(child:Text(
+       'Chưa có khách hàng trong phạm vi được cấp.'));
+     return ListView.builder(
+      itemCount:items.length,
+      itemBuilder:(context,index){
+       final item=items[index];
+       return ListTile(
+        title:Text(item.name,maxLines:2,overflow:TextOverflow.ellipsis),
+        subtitle:Text('${item.district}, ${item.province}',
+         maxLines:1,overflow:TextOverflow.ellipsis),
+        onTap:()=>Navigator.pop(context,item),
+       );
+      },
+     );
+    },
+   )),
+  actions:[TextButton(onPressed:()=>Navigator.pop(context),
+   child:const Text('Đóng'))],
+ );
 }
