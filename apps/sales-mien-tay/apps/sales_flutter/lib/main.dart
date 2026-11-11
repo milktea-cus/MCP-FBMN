@@ -8,6 +8,7 @@ import 'session.dart';
 import 'auth_gate.dart';
 import 'staff_page.dart';
 import 'offline_queue.dart';
+import 'notifications.dart';
 import 'field_work.dart';
 import 'performance.dart';
 import 'orders.dart';
@@ -64,12 +65,24 @@ class SalesHome extends StatefulWidget {
   State<SalesHome> createState() => _SalesHomeState();
 }
 
-class _SalesHomeState extends State<SalesHome> {
+class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
   final List<SalesRecord> _items = [];
   late final OfflineQueue _queue;
+  late final FieldNotificationStore _notifications;
+  Timer? _notificationsTimer;
+  void _notificationChanged(){if(mounted)setState((){});}
+  @override void didChangeAppLifecycleState(AppLifecycleState state){
+    if(state==AppLifecycleState.resumed){
+      unawaited(_queue.sync());unawaited(_notifications.refresh());
+    }
+  }
   int _lastPending=0;
   void _queueChanged(){if(!mounted)return;final count=_queue.pending.length;if(_lastPending>count)unawaited(_refresh());_lastPending=count;setState((){});}
-  @override void dispose(){_queue.removeListener(_queueChanged);_queue.dispose();super.dispose();}
+  @override void dispose(){
+    WidgetsBinding.instance.removeObserver(this);_notificationsTimer?.cancel();
+    _notifications.removeListener(_notificationChanged);_notifications.dispose();
+    _queue.removeListener(_queueChanged);_queue.dispose();super.dispose();
+  }
   RegionCatalog get _catalog => widget.catalog;
   String get _apiUrl => salesOrigin;
   String get _accessToken => widget.session.cookie;
@@ -89,7 +102,13 @@ class _SalesHomeState extends State<SalesHome> {
   void initState() {
     super.initState();
     _queue=OfflineQueue(widget.session,widget.me['identity'].toString(),widget.me['scope_revision'].toString());
+    WidgetsBinding.instance.addObserver(this);
     _queue.addListener(_queueChanged);unawaited(_queue.start());
+    _notifications=FieldNotificationStore(widget.session,_queue);
+    _notifications.addListener(_notificationChanged);
+    unawaited(_notifications.start());
+    _notificationsTimer=Timer.periodic(const Duration(seconds:60),
+      (_)=>unawaited(_notifications.refresh()));
     _refresh();
   }
 
@@ -224,10 +243,11 @@ class _SalesHomeState extends State<SalesHome> {
   Widget build(BuildContext context) {
     final narrow = MediaQuery.of(context).size.width < 850;
     return Scaffold(
-      appBar: SalesHomeBar(loading:_loading, onNotifications:()=>showDialog<void>(
-        context:context,builder:(c)=>AlertDialog(title:const Text('Thông báo'),
-          content:const Text('Tính năng thông báo đang được chuẩn bị. Chưa có hộp thư thông báo.'),
-          actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng'))])),
+      appBar: SalesHomeBar(
+        loading:_loading,
+        unreadCount:_notifications.unread,
+        onNotifications:()=>Navigator.push(context,MaterialPageRoute(
+          builder:(_)=>FieldNotificationInbox(store:_notifications))),
       ),
       bottomNavigationBar: narrow ? NavigationBar(
         selectedIndex: const [0,1,2,5,9].contains(_selectedIndex)?const [0,1,2,5,9].indexOf(_selectedIndex):0,
@@ -438,8 +458,10 @@ class SalesModuleGrid extends StatelessWidget {
 
 class SalesHomeBar extends StatelessWidget implements PreferredSizeWidget {
   final bool loading;
+  final int unreadCount;
   final VoidCallback onNotifications;
-  const SalesHomeBar({super.key,required this.loading,required this.onNotifications});
+  const SalesHomeBar({super.key,required this.loading,required this.onNotifications,
+    this.unreadCount=0});
   @override Size get preferredSize=>Size.fromHeight(kToolbarHeight+(loading?2:0));
   @override Widget build(BuildContext context)=>AppBar(
     centerTitle:false, titleSpacing:0,
@@ -452,7 +474,13 @@ class SalesHomeBar extends StatelessWidget implements PreferredSizeWidget {
     ]),
     bottom:loading?const PreferredSize(preferredSize:Size.fromHeight(2),
       child:LinearProgressIndicator(minHeight:2)):null,
-    actions:[IconButton(tooltip:'Thông báo',icon:const Icon(Icons.notifications_none_outlined),
+    actions:[IconButton(
+      tooltip:'Thông báo',
+      icon:unreadCount>0?Badge.count(
+        count:unreadCount>99?99:unreadCount,
+        backgroundColor:Theme.of(context).colorScheme.error,
+        child:const Icon(Icons.notifications_none_outlined),
+      ):const Icon(Icons.notifications_none_outlined),
       onPressed:onNotifications)],
   );
 }
