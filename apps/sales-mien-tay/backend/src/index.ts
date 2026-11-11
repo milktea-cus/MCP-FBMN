@@ -9,6 +9,7 @@ import {catalogImportRoutes} from './catalog_import';
 import {inventoryRoutes} from './inventory';
 import {targetRoutes} from './targets';
 import {actualRoutes} from './actuals';
+import {performanceRoutes} from './performance';
 
 interface Env {
   DATABASE_URL: string;
@@ -109,6 +110,8 @@ export default {
       if (!env.DATABASE_URL) return bad('DATABASE_URL chưa được cấu hình', 503);
       const productResponse = await customerRoutes(req, env, user, url);
       if (productResponse) return productResponse;
+      const performanceResponse=await performanceRoutes(req,env,user,url);
+      if(performanceResponse)return performanceResponse;
       const actualResponse=await actualRoutes(req,env,user,url);
       if(actualResponse)return actualResponse;
       const targetResponse=await targetRoutes(req,env,user,url);
