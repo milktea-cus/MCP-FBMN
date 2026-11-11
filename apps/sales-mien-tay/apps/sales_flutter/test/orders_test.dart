@@ -128,7 +128,10 @@ void main(){
   await tester.pumpWidget(app());await tester.pumpAndSettle();
   await tester.tap(find.text('Tạo đơn mới'));await tester.pumpAndSettle();
   await tester.tap(find.text('Chọn khách hàng'));await tester.pumpAndSettle();
-  await tester.tap(find.text('Nhà sách Demo'));await tester.pumpAndSettle();
+  await tester.enterText(find.byKey(const Key('order-picker-search')),'Demo');
+  await tester.pump(const Duration(milliseconds:300));await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const ValueKey('order-customer-33333333-3333-4333-8333-333333333333')));
+  await tester.pumpAndSettle();
   await tester.tap(find.text('Thêm sản phẩm'));await tester.pumpAndSettle();
   await tester.tap(find.byKey(const ValueKey('order-product-000456')));await tester.pumpAndSettle();
   await tester.tap(find.text('Thêm sản phẩm'));await tester.pumpAndSettle();
