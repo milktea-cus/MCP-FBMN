@@ -9,6 +9,8 @@ export PATH="$sdk/bin:$PATH"
 flutter config --no-analytics
 flutter create --platforms=web,android .
 flutter pub get
+python3 scripts/generate_app_icons.py
+python3 scripts/check_app_icons.py
 flutter analyze --no-fatal-infos
 flutter test
 flutter build web --release --pwa-strategy=none --no-web-resources-cdn --dart-define=API_BASE_URL=https://field-sales-api.milktea-cus.workers.dev

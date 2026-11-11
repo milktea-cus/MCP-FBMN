@@ -8,7 +8,8 @@ class SalesThemePreference {
 
   static Future<void> restore() async {
     try {
-      final saved = await SharedPreferencesAsync().getString(storageKey);
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString(storageKey);
       mode.value = saved == 'dark' ? ThemeMode.dark : ThemeMode.light;
     } catch (_) {
       // A blocked preference store must never block sign-in or offline data.
@@ -19,8 +20,8 @@ class SalesThemePreference {
     final chosen = selection == ThemeMode.dark ? ThemeMode.dark : ThemeMode.light;
     mode.value = chosen;
     try {
-      await SharedPreferencesAsync().setString(storageKey,
-        chosen == ThemeMode.dark ? 'dark' : 'light');
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(storageKey, chosen == ThemeMode.dark ? 'dark' : 'light');
     } catch (_) {
       // The visible setting still works for the current app session.
     }

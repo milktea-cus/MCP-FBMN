@@ -40,6 +40,23 @@ void main(){
       expect(tester.takeException(),isNull);
     });
   }
+  testWidgets('drawer dark mode toggle stays independent of bottom navigation',(tester)async{
+    final calls=<String>[];
+    await tester.pumpWidget(MaterialApp(theme:SalesTheme.build(),
+      home:Scaffold(appBar:SalesHomeBar(loading:false,onNotifications:(){}),
+        drawer:SalesHomeDrawer(admin:true,loading:false,selectedIndex:0,
+          sections:sections,icons:List.filled(sections.length,Icons.dashboard_outlined),
+          onSection:(_){},onRefresh:(){},onStaff:(){},onProfile:(){},
+          themeMode:ThemeMode.light,onThemeModeChanged:(value)=>calls.add(value.name)),
+        body:const SizedBox.expand())));
+    await tester.tap(find.byTooltip('Open navigation menu'));
+    await tester.pumpAndSettle();
+    expect(find.text('Quản lý nhân viên'),findsOneWidget);
+    expect(find.text('Hồ sơ / Đăng xuất'),findsOneWidget);
+    await tester.tap(find.text('Chế độ tối'));
+    expect(calls,['dark']);
+    expect(tester.takeException(),isNull);
+  });
   testWidgets('sales cannot see staff; drawer retains stock and profile; loading disables refresh',(tester)async{
     final calls=<String>[];
     await tester.pumpWidget(shell(admin:false,loading:true,calls:calls));
