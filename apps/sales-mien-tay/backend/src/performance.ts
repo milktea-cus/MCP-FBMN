@@ -75,7 +75,7 @@ async function validateScope(sql:Db,u:User,f:ReportFilters):Promise<string|null>
 function aggregateRows(actualRows:Record<string,unknown>[],targets:Record<string,unknown>[],group:Group,mode:Mode){
  const grouped=new Map<string,{id:string,label:string,code:string,actual:bigint,records:number,quantity:bigint,target:bigint|null}>();
  const put=(id:string,label:string,code:string)=>{
-  let entry=grouped.get(id);if(!entry){entry={id,label,code,actual:0n,records:0,quantity:0n,target:mode==='none'?null:0n};grouped.set(id,entry);}
+  let entry=grouped.get(id);if(!entry){entry={id,label,code,actual:0n,records:0,quantity:0n,target:null};grouped.set(id,entry);}
   return entry;
  };
  for(const r of actualRows){
@@ -217,9 +217,9 @@ export async function performanceRoutes(req:Request,env:{DATABASE_URL:string},u:
  if(actuals.length>2000)return invalid('Có trên 2.000 nhóm, hãy thu hẹp bộ lọc.',413);
  const rows=aggregateRows(actuals,targetRows as Record<string,unknown>[],group,mode);
  const amount=BigInt(String(summary[0]?.amount??'0')),records=Number(summary[0]?.records??0);
- const target=mode==='none'?null:(targetRows as Record<string,unknown>[]).reduce((sum,t)=>sum+BigInt(String(t.amount)),0n);
+ const target=mode==='none'||targetRows.length===0?null:(targetRows as Record<string,unknown>[]).reduce((sum,t)=>sum+BigInt(String(t.amount)),0n);
  return reply({filters:f,target_dimension:mode,can_view_team:manager,
    metric:{...reportMetric(target,amount,records),quantity:String(summary[0]?.quantity??'0')},
    rows,group,has_data:rows.length>0,limit:2000,
-   target_note:mode==='none'?'Không có Target so sánh phù hợp với tổ hợp bộ lọc.':mode==='employee'?'Target tổng của nhân viên; không cộng phân bổ khách/SKU.':mode==='customer'?'Target phân bổ khách hàng (không phải tổng Target nhân viên).':'Target phân bổ SKU (không phải tổng Target nhân viên).'});
+   target_note:mode==='none'?'Không có Target so sánh phù hợp với tổ hợp bộ lọc.':targetRows.length===0?'Chưa có Target được giao cho chiều so sánh và kỳ này.':mode==='employee'?'Target tổng của nhân viên; không cộng phân bổ khách/SKU. Với Manager, chỉ tính Target khi có đủ quyền trên mọi địa bàn của nhân viên.':mode==='customer'?'Target phân bổ khách hàng (không phải tổng Target nhân viên).':'Target phân bổ SKU (không phải tổng Target nhân viên).'});
 }
