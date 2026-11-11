@@ -10,6 +10,7 @@ import 'staff_page.dart';
 import 'offline_queue.dart';
 import 'field_work.dart';
 import 'performance.dart';
+import 'orders.dart';
 import 'surveys.dart';
 import 'catalog.dart';
 import 'stock.dart';
@@ -24,7 +25,7 @@ class SalesApp extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) => MaterialApp(
     debugShowCheckedModeBanner: false,
-    title: 'Filed Work',
+    title: 'Field Work',
     theme: SalesTheme.build(width: constraints.maxWidth),
     home: const AuthGate(),
     ),
@@ -55,11 +56,11 @@ class _SalesHomeState extends State<SalesHome> {
   int _selectedIndex = 0;
   String? _message;
 
-  List<String> get _sections => ['Tổng quan', 'Khách hàng / Điểm bán', ...moduleKinds.map((e) => moduleLabels[e]!), 'Báo cáo tháng', 'Danh mục SKU', 'Tra tồn'];
+  List<String> get _sections => ['Tổng quan', 'Khách hàng / Điểm bán', ...moduleKinds.map((e) => moduleLabels[e]!), 'Báo cáo tháng', 'Danh mục SKU', 'Tra tồn', 'Ra đơn'];
   List<IconData> get _icons => const [
     Icons.dashboard_outlined, Icons.storefront_outlined, Icons.store_outlined, Icons.flag_outlined,
     Icons.payments_outlined, Icons.route_outlined, Icons.handshake_outlined,
-    Icons.policy_outlined, Icons.support_agent_outlined, Icons.analytics_outlined, Icons.inventory_2_outlined, Icons.inventory_outlined,
+    Icons.policy_outlined, Icons.support_agent_outlined, Icons.analytics_outlined, Icons.inventory_2_outlined, Icons.inventory_outlined,Icons.shopping_cart_outlined,
   ];
 
   @override
@@ -306,7 +307,7 @@ class _SalesHomeState extends State<SalesHome> {
             NavigationRailDestination(icon: Icon(_icons[i]), label: Text(_sections[i]))],
         ),
         Expanded(child: Column(children: [
-          if(_selectedIndex!=3&&_selectedIndex!=10&&_selectedIndex!=11)Padding(padding:const EdgeInsets.all(12),child:DropdownButtonFormField<String>(initialValue:_province,isExpanded:true,decoration:const InputDecoration(labelText:'Địa bàn'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả địa bàn của tôi')),for(final p in _catalog.provinces)DropdownMenuItem(value:p,child:Text(p))],onChanged:(p)=>setState(()=>_province=p??''))),
+          if(_selectedIndex!=3&&_selectedIndex!=10&&_selectedIndex!=11&&_selectedIndex!=12)Padding(padding:const EdgeInsets.all(12),child:DropdownButtonFormField<String>(initialValue:_province,isExpanded:true,decoration:const InputDecoration(labelText:'Địa bàn'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả địa bàn của tôi')),for(final p in _catalog.provinces)DropdownMenuItem(value:p,child:Text(p))],onChanged:(p)=>setState(()=>_province=p??''))),
           if(_queue.pending.isNotEmpty||_queue.quarantined>0||_queue.error!=null) Material(color:SalesTheme.tableHeader,child:ListTile(leading:const Icon(Icons.cloud_upload_outlined,color:SalesTheme.brand),title:Text('Chờ đồng bộ: ${_queue.pending.length} · Cách ly: ${_queue.quarantined}'),subtitle:Text(_queue.error??(_queue.syncing?'Đang đồng bộ':'Đã lưu trên máy')),trailing:IconButton(tooltip:'Đồng bộ ngay',onPressed:_queue.syncing?null:()=>unawaited(_queue.sync()),icon:const Icon(Icons.sync)),onTap:()=>showDialog<void>(context:context,builder:(c)=>AlertDialog(title:const Text('Hàng đợi đồng bộ'),content:SizedBox(width:420,child:ListView(shrinkWrap:true,children:[for(final r in _queue.pending)ListTile(title:Text((r['payload'] as Map)['name']?.toString()??(r['payload'] as Map)['customer_name']?.toString()??(r['payload'] as Map)['kind'].toString()),subtitle:Text(r['error']?.toString()??'Đã lưu máy · chờ đồng bộ'))])),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng'))])))),
           if (_message != null) Material(color: const Color(0xFFFBE8E7),
             child: Padding(padding: const EdgeInsets.all(10), child: Text(_message!))),
@@ -314,6 +315,7 @@ class _SalesHomeState extends State<SalesHome> {
               ? CustomerDirectoryPage(key:ValueKey('$_province:${_queue.pending.length}'),service:CustomerService(_apiUrl,_accessToken,province:_province,identity:_queue.identity,revision:_queue.revision),regions:_catalog,queue:_queue)
               : _selectedIndex==2?SurveyPage(key:ValueKey('survey:$_province'),queue:_queue,service:_customerService,regions:_catalog,admin:widget.me['role']=='admin',legacy:(_)=>Scaffold(appBar:AppBar(title:const Text('Biểu mẫu khảo sát cũ')),body:_records('survey',readOnly:true)))
               : _selectedIndex==3?TargetPage(key:ValueKey('target:${_queue.namespace}'),queue:_queue)
+              : _selectedIndex==12?OrdersPage(key:ValueKey('orders:${_queue.namespace}'),queue:_queue,admin:widget.me['role']=='admin')
               : _selectedIndex==11?StockPage(key:ValueKey('stock:${_queue.namespace}'),queue:_queue,service:CustomerService(_apiUrl,_accessToken,identity:_queue.identity,revision:_queue.revision))
               : _selectedIndex==10?CatalogPage(queue:_queue,service:CustomerService(_apiUrl,_accessToken,identity:_queue.identity,revision:_queue.revision),admin:widget.me['role']=='admin')
               : _selectedIndex==9?PerformancePage(key:ValueKey('report:${_queue.namespace}'),queue:_queue,regions:_catalog,service:_customerService)
@@ -335,7 +337,7 @@ class SalesHomeBar extends StatelessWidget implements PreferredSizeWidget {
       Image.asset('assets/fbmn-transparent-logo.webp',height:28,width:88,fit:BoxFit.contain,
         semanticLabel:'Futurebook'),
       const SizedBox(width:6),
-      const Flexible(child:Text('Filed Work',maxLines:1,overflow:TextOverflow.ellipsis,
+      const Flexible(child:Text('Field Work',maxLines:1,overflow:TextOverflow.ellipsis,
         style:TextStyle(fontWeight:FontWeight.w700,fontSize:18))),
     ]),
     bottom:loading?const PreferredSize(preferredSize:Size.fromHeight(2),
@@ -369,9 +371,9 @@ class SalesHomeDrawer extends StatelessWidget {
       ListTile(leading:const Icon(Icons.sync),title:const Text('Tải lại dữ liệu'),
         enabled:!loading,onTap:loading?null:()=>run(onRefresh)),
       const Divider(),
-      for(final i in [10,11])section(i),
+      for(final i in [10,11,12])section(i),
       const Divider(),
-      for(var i=0;i<sections.length;i++)if(i!=10&&i!=11)section(i),
+      for(var i=0;i<sections.length;i++)if(i!=10&&i!=11&&i!=12)section(i),
     ])));
   }
 }

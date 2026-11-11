@@ -49,7 +49,7 @@ Uint8List buildPerformanceXlsx(Map<String,dynamic> report,List<Map<String,dynami
  final metric=Map<String,dynamic>.from(report['metric'] as Map);
  final groups=(report['rows'] as List).map((x)=>Map<String,dynamic>.from(x as Map)).toList();
  final summary=<List<Object?>>[
-  ['FILED WORK — BÁO CÁO KINH DOANH'],
+  ['FIELD WORK — BÁO CÁO KINH DOANH'],
   ['Kỳ',_period(f)],['Nhóm',f['group']],['Nhân viên',f['owner']],['Tỉnh',f['province']],
   ['Khách hàng',f['customer']],['Mã CTY',f['product']],
   ['Chỉ tiêu so sánh',report['target_note']],['Target (VNĐ)',_integer(metric['target'])],

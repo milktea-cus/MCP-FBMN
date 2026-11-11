@@ -23,12 +23,12 @@ void main(){
       await tester.pumpAndSettle();
       expect(tester.takeException(),isNull);
       expect(find.byType(Image),findsOneWidget);
-      expect(find.text('Filed Work'),findsOneWidget);
+      expect(find.text('Field Work'),findsOneWidget);
       expect(find.byTooltip('Thông báo'),findsOneWidget);
       final bar=tester.widget<AppBar>(find.byType(AppBar));
       expect(bar.actions!.length,1);
-      expect(tester.getRect(find.byType(Image)).right,lessThanOrEqualTo(tester.getRect(find.text('Filed Work')).left));
-      expect(tester.getRect(find.text('Filed Work')).right,lessThanOrEqualTo(tester.getRect(find.byTooltip('Thông báo')).left));
+      expect(tester.getRect(find.byType(Image)).right,lessThanOrEqualTo(tester.getRect(find.text('Field Work')).left));
+      expect(tester.getRect(find.text('Field Work')).right,lessThanOrEqualTo(tester.getRect(find.byTooltip('Thông báo')).left));
       await tester.tap(find.byTooltip('Thông báo'));expect(calls,['bell']);
       await tester.tap(find.byTooltip('Open navigation menu'));await tester.pumpAndSettle();
       expect(find.text('Quản lý nhân viên'),findsOneWidget);

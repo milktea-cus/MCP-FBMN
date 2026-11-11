@@ -39,7 +39,7 @@ export async function inventoryRoutes(req:Request,env:{DATABASE_URL:string},acto
    SELECT st.revision::text||':'||count(p.id)::text||':'||coalesce(sum(p.version),0)::text||':'||coalesce(max(p.updated_at)::text,'empty') AS snapshot
    FROM inventory_state st LEFT JOIN catalog_products p ON true WHERE st.id=1 GROUP BY st.revision
   ), page AS (
-   SELECT p.company_code,p.sku,p.name,p.brand,p.category,p.unit,p.product_spec,p.needs_review,s.quantity,s.snapshot_at
+   SELECT p.id::text AS id,p.company_code,p.sku,p.name,p.brand,p.category,p.unit,p.product_spec,p.needs_review,s.quantity,s.snapshot_at
    FROM catalog_products p LEFT JOIN inventory_stock s ON s.product_id=p.id
    WHERE p.active AND p.company_code>${after}
    AND (${!q} OR strpos(lower(p.company_code),lower(${q}))>0 OR strpos(lower(p.name),lower(${q}))>0 OR strpos(lower(coalesce(p.sku,'')),lower(${q}))>0 OR strpos(lower(coalesce(p.brand,'')),lower(${q}))>0 OR strpos(lower(coalesce(p.category,'')),lower(${q}))>0)
