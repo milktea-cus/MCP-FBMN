@@ -340,9 +340,13 @@ class _OrderPickerState extends State<_OrderPicker>{
    else{
     try{
      final saved=await widget.queue.cached('order-picker-${widget.type}');
-     final all=orderRows(saved.firstOrNull?['items']);
+     var all=orderRows(saved.firstOrNull?['items']);
+     if(all.isEmpty&&widget.type=='products'){
+      final stock=await widget.queue.cached(stockCacheKey);
+      all=orderRows(stock.firstOrNull?['items']);
+     }
      final q=search.text.toLowerCase().trim();
-     rows=all.where((r)=>q.isEmpty||['name','company_code','export_code'].any((k)=>(r[k]?.toString()??'').toLowerCase().contains(q))).toList();
+     rows=all.where((r)=>q.isEmpty||['name','company_code','export_code','sku'].any((k)=>(r[k]?.toString()??'').toLowerCase().contains(q))).toList();
      offline=true;error='Danh mục lưu máy; tồn và quyền sẽ kiểm lại khi xuất.';
     }catch(_){rows=[];error='Chưa có danh mục đã lưu.';}
    }
