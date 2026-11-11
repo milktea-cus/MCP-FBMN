@@ -3,6 +3,8 @@ CREATE TABLE public.catalog_import_batches(
  id uuid PRIMARY KEY, actor_sub text NOT NULL, filename text NOT NULL, sheet text NOT NULL,
  request_hash text NOT NULL, row_count integer NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE public.catalog_edits ADD COLUMN import_batch_id uuid REFERENCES public.catalog_import_batches(id);
+CREATE INDEX catalog_edits_import_batch ON public.catalog_edits(import_batch_id);
 REVOKE UPDATE,DELETE ON public.catalog_import_batches FROM sales_api;
 GRANT SELECT,INSERT ON public.catalog_import_batches TO sales_api;
 CREATE FUNCTION public.catalog_import_apply(a text,b uuid,f text,s text,h text,rows jsonb)
@@ -23,11 +25,11 @@ BEGIN
   IF FOUND THEN
    IF old.version<>rec.version THEN RAISE EXCEPTION 'catalog_stale'; END IF;
    UPDATE catalog_products SET name=rec.name,sku=rec.sku,brand=rec.brand,category=rec.category,unit=rec.unit,product_spec=rec.product_spec,needs_review=CASE WHEN name IS DISTINCT FROM rec.name THEN false ELSE needs_review END,version=version+1,updated_at=now() WHERE id=old.id RETURNING * INTO saved;
-   INSERT INTO catalog_edits(op_id,actor_sub,product_id,before_data,after_data) VALUES(gen_random_uuid(),a,saved.id,to_jsonb(old),to_jsonb(saved));
+   INSERT INTO catalog_edits(op_id,actor_sub,product_id,before_data,after_data,import_batch_id) VALUES(gen_random_uuid(),a,saved.id,to_jsonb(old),to_jsonb(saved),b);
   ELSE
    IF rec.version<>0 THEN RAISE EXCEPTION 'catalog_stale'; END IF;
    INSERT INTO catalog_products(company_code,name,sku,brand,category,unit,product_spec) VALUES(rec.company_code,rec.name,rec.sku,rec.brand,rec.category,rec.unit,rec.product_spec) RETURNING * INTO saved;
-   INSERT INTO catalog_edits(op_id,actor_sub,product_id,after_data) VALUES(gen_random_uuid(),a,saved.id,to_jsonb(saved));
+   INSERT INTO catalog_edits(op_id,actor_sub,product_id,after_data,import_batch_id) VALUES(gen_random_uuid(),a,saved.id,to_jsonb(saved),b);
   END IF;
  END LOOP;
  RETURN to_jsonb(batch);

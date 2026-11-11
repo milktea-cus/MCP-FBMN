@@ -76,9 +76,9 @@ class InventoryImportPage extends StatefulWidget{
  @override State<InventoryImportPage> createState()=>_InventoryImportPageState();
 }
 class _InventoryImportPageState extends State<InventoryImportPage>{
- XlsxBook? book;String filename='',sheetName='';int header=0;int? code,qty;bool busy=false;String? message;List<String> errors=[];List<Map<String,dynamic>> preview=[];String? revision;String op=const Uuid().v4();bool canConfirm=false,duplicate=false;int fileGeneration=0;bool catalogMode=false;final mapping=<int,String>{};List<Map<String,dynamic>> catalogRows=[];
+ XlsxBook? book;String filename='',sheetName='';int header=0;int? code,qty;bool busy=false;String? message;List<String> errors=[];List<Map<String,dynamic>> preview=[];String? revision;String op=const Uuid().v4();bool canConfirm=false,duplicate=false;int fileGeneration=0;bool catalogMode=false;final mapping=<int,String>{};
  XlsxSheet? get sheet=>book?.tables[sheetName];
- void invalidate(){preview=[];catalogRows=[];revision=null;errors=[];canConfirm=false;duplicate=false;op=const Uuid().v4();}
+ void invalidate(){preview=[];revision=null;errors=[];canConfirm=false;duplicate=false;op=const Uuid().v4();}
  Future<Map<String,dynamic>> post(String path,Map<String,dynamic> data)async=>decodeApi(await http.post(widget.service.uri(path),headers:widget.service.headers,body:jsonEncode(data)).timeout(const Duration(seconds:60)));
  Future<void> pick()async{
   if(busy)return;setState(()=>busy=true);
@@ -102,7 +102,7 @@ class _InventoryImportPageState extends State<InventoryImportPage>{
   setState(()=>busy=true);
   try{
    final data=await post(catalogMode?'/api/v1/catalog/import/preview':'/api/v1/inventory/preview',{'filename':filename,'sheet':sheetName,'rows':parsed.rows});
-   if(mounted)setState((){preview=_rows(data['items']);catalogRows=catalogMode?parsed.rows:[];revision=catalogMode?'catalog':data['revision'].toString();canConfirm=catalogMode||data['can_confirm']==true;duplicate=data['duplicate']==true;});
+   if(mounted)setState((){preview=_rows(data['items']);revision=catalogMode?'catalog':data['revision'].toString();canConfirm=catalogMode||data['can_confirm']==true;duplicate=data['duplicate']==true;});
   }catch(e){if(mounted)setState(()=>message=e.toString());}
   finally{if(mounted)setState(()=>busy=false);}
  }
@@ -121,20 +121,20 @@ class _InventoryImportPageState extends State<InventoryImportPage>{
   final s=sheet,headerRows=s==null?0:(s.maxRows<20?s.maxRows:20),columns=s==null||header>=s.rows.length?<XlsxCell?>[]:s.rows[header];
   final attrs=importAttributes.entries.where((e)=>catalogMode?e.key!='quantity':['ignore','company_code','quantity'].contains(e.key)).toList();
   return Scaffold(appBar:AppBar(title:const Text('Nhập Excel')),body:ListView(padding:const EdgeInsets.all(16),children:[
-   SegmentedButton<bool>(segments:const [ButtonSegment(value:false,label:Text('Cập nhật tồn')),ButtonSegment(value:true,label:Text('Cập nhật sản phẩm'))],selected:{catalogMode},onSelectionChanged:busy?null:(v)=>setState((){catalogMode=v.single;mapping.clear();code=null;qty=null;invalidate();})),
+   SegmentedButton<bool>(segments:const [ButtonSegment(value:false,label:Text('Cập nhật tồn')),ButtonSegment(value:true,label:Text('Cập nhật sản phẩm'))],selected:{catalogMode},onSelectionChanged:busy?null:(v)=>setState((){catalogMode=v.single;mapping.clear();code=null;qty=null;mapping.clear();invalidate();})),
    Text(catalogMode?'Ô trống giữ nguyên · chỉ cập nhật thuộc tính đã chọn · mã mới cần tên hàng.':'Snapshot tồn · chỉ cập nhật mã có trong file · không realtime.'),
    Wrap(spacing:8,runSpacing:8,children:[FilledButton.icon(onPressed:busy?null:pick,icon:const Icon(Icons.upload_file),label:const Text('Chọn file .xlsx')),OutlinedButton(onPressed:busy?null:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>catalogMode?CatalogImportHistory(service:widget.service):InventoryHistoryPage(service:widget.service))),child:const Text('Nhật ký nhập'))]),
    if(filename.isNotEmpty)Text(filename),if(busy)const LinearProgressIndicator(),if(message!=null)Padding(padding:const EdgeInsets.all(8),child:Text(message!)),
    if(s!=null)...[
     const SizedBox(height:12),
-    DropdownButtonFormField<String>(key:ValueKey(fileGeneration),initialValue:sheetName,isExpanded:true,decoration:const InputDecoration(labelText:'Sheet'),items:[for(final name in book!.tables.keys)DropdownMenuItem(value:name,child:Text(name))],onChanged:busy?null:(v)=>setState((){sheetName=v!;header=0;code=null;qty=null;invalidate();})),
+    DropdownButtonFormField<String>(key:ValueKey(fileGeneration),initialValue:sheetName,isExpanded:true,decoration:const InputDecoration(labelText:'Sheet'),items:[for(final name in book!.tables.keys)DropdownMenuItem(value:name,child:Text(name))],onChanged:busy?null:(v)=>setState((){sheetName=v!;header=0;code=null;qty=null;mapping.clear();invalidate();})),
     const SizedBox(height:12),
-    DropdownButtonFormField<int>(key:ValueKey('$fileGeneration:$sheetName'),initialValue:headerRows>0?header:null,decoration:const InputDecoration(labelText:'Dòng tiêu đề'),items:[for(var i=0;i<headerRows;i++)DropdownMenuItem(value:i,child:Text('Dòng ${i+1}'))],onChanged:busy?null:(v)=>setState((){header=v!;code=null;qty=null;invalidate();})),
+    DropdownButtonFormField<int>(key:ValueKey('$fileGeneration:$sheetName'),initialValue:headerRows>0?header:null,decoration:const InputDecoration(labelText:'Dòng tiêu đề'),items:[for(var i=0;i<headerRows;i++)DropdownMenuItem(value:i,child:Text('Dòng ${i+1}'))],onChanged:busy?null:(v)=>setState((){header=v!;code=null;qty=null;mapping.clear();invalidate();})),
     const SizedBox(height:12),
     const Text('Ánh xạ cột Excel · cuộn ngang để xem toàn bộ'),
     SingleChildScrollView(scrollDirection:Axis.horizontal,child:Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
      for(var i=0;i<columns.length;i++)SizedBox(width:190,child:Padding(padding:const EdgeInsets.all(4),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-      Text('${excelColumn(i)} · ${cellText(columns[i])}',maxLines:2,overflow:TextOverflow.ellipsis,style:Theme.of(context).textTheme.titleSmall),
+      SizedBox(height:44,child:Text('${excelColumn(i)} · ${cellText(columns[i])}',maxLines:2,overflow:TextOverflow.ellipsis,style:Theme.of(context).textTheme.titleSmall)),
       const SizedBox(height:6),
       DropdownButtonFormField<String>(key:ValueKey('map:$fileGeneration:$sheetName:$header:$catalogMode:$i:${mapping[i]}'),initialValue:mapping[i]??'ignore',isExpanded:true,decoration:const InputDecoration(labelText:'Thuộc tính'),items:[for(final e in attrs)DropdownMenuItem(value:e.key,child:Text(e.value,overflow:TextOverflow.ellipsis))],onChanged:busy?null:(v)=>setState((){mapping[i]=v!;code=null;qty=null;for(final e in mapping.entries){if(e.value=='company_code')code=e.key;if(e.value=='quantity')qty=e.key;}invalidate();})),
       for(final row in s.rows.skip(header+1).take(3))Padding(padding:const EdgeInsets.symmetric(vertical:5),child:Text(i<row.length?cellText(row[i]):'',maxLines:1,overflow:TextOverflow.ellipsis)),

@@ -41,7 +41,9 @@ export async function catalogImportRoutes(req:Request,env:{DATABASE_URL:string},
    for(const [k,value] of Object.entries(x.patch)){if(fields.includes(k))merged[k]=value;else (merged.product_spec as Obj)[k]=value;}
    let product;try{product=parseProduct(merged);}catch(e){throw Error('Dòng '+x.row_number+': '+(e instanceof Error?e.message:'Dữ liệu sai'));}
    const version=old?.version??0;
-   prepared.push({...product,version});
+   const preservedSpec={...(old?.product_spec??{})};
+   for(const k of specs)if(k in x.patch)preservedSpec[k]=product.product_spec[k];
+   prepared.push({...product,...Object.fromEntries(fields.filter(k=>old&&!(k in x.patch)).map(k=>[k,old![k]])),product_spec:preservedSpec,version});
    preview.push({...x,version,name:product.name,changes:Object.entries(x.patch).map(([k,value])=>({field:k,before:fields.includes(k)?old?.[k]??null:old?.product_spec?.[k]??null,after:value})),is_new:!old});
   }
   if(!confirm)return response({items:preview});
