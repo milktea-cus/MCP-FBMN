@@ -106,7 +106,8 @@ class _PerformancePageState extends State<PerformancePage> {
    crossAxisAlignment:CrossAxisAlignment.start,children:[Icon(icon,size:20),
    Text(title,style:Theme.of(context).textTheme.labelMedium),
    const SizedBox(height:4),
-   Text(value,maxLines:2,overflow:TextOverflow.ellipsis,style:Theme.of(context).textTheme.titleMedium)])));
+   Tooltip(message:value,child:FittedBox(fit:BoxFit.scaleDown,alignment:Alignment.centerLeft,
+    child:Text(value,maxLines:1,softWrap:false,style:Theme.of(context).textTheme.titleMedium)))])));
  }
  Widget filterButton(String title,String value,String kind){
   return Row(children:[Expanded(child:OutlinedButton(onPressed:busy?null:()=>select(kind),
@@ -158,14 +159,16 @@ class _PerformancePageState extends State<PerformancePage> {
    if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
    if(hasReport)...[
     LayoutBuilder(builder:(ctx,size){
-     final width=(size.maxWidth-10)/2;
+     final columns=size.maxWidth>=1040?4:size.maxWidth>=300?2:1;
      final cells=[
       metric('Target',metricData['target']==null?'Không áp dụng':_money(metricData['target']),Icons.flag_outlined),
       metric('Doanh số',hasActual?_money(metricData['actual']):'Chưa có dữ liệu',Icons.payments_outlined),
       metric('Hoàn thành',hasActual?_pct(metricData['progress_percent']):'—',Icons.trending_up_outlined),
       metric('Còn thiếu',hasActual&&metricData['remaining']!=null?_money(metricData['remaining']):'—',Icons.account_balance_wallet_outlined),
      ];
-     return Wrap(spacing:8,runSpacing:8,children:[for(final cell in cells)SizedBox(width:width,child:cell)]);
+     return GridView.count(primary:false,shrinkWrap:true,
+      physics:const NeverScrollableScrollPhysics(),crossAxisCount:columns,
+      crossAxisSpacing:8,mainAxisSpacing:8,mainAxisExtent:120,children:cells);
     }),
     const SizedBox(height:8),
     Text(data['target_note']?.toString()??'',style:Theme.of(context).textTheme.bodySmall),

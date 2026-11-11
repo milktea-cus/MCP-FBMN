@@ -203,28 +203,16 @@ class _SalesHomeState extends State<SalesHome> {
             _stat('Điểm bán có nhãn Thành Đạt', '$countTD', Icons.analytics_outlined),
           ]);
       }),
-      const SizedBox(height: 12),
-      Card(child: ListTile(leading: const Icon(Icons.storefront_outlined),
-        title: const Text('Danh bạ khách hàng / Điểm bán'),
-        subtitle: const Text('Ảnh • vị trí GPS • check-in • lịch sử'),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: () => setState(() => _selectedIndex = 1))),
-      Card(child:ListTile(leading:const Icon(Icons.route_outlined),title:const Text('Tuyến đi hôm nay'),subtitle:const Text('Điểm ghé · GPS · lịch sử'),trailing:const Icon(Icons.chevron_right),onTap:()=>setState(()=>_selectedIndex=5))),
-      Card(child:ListTile(leading:const Icon(Icons.analytics_outlined),title:const Text('Báo cáo tháng'),subtitle:const Text('Chỉ tiêu · dự kiến · check-in theo nhân viên'),trailing:const Icon(Icons.chevron_right),onTap:()=>setState(()=>_selectedIndex=9))),
+      const SizedBox(height: 18),
+      Text('Phân hệ nghiệp vụ', style: Theme.of(context).textTheme.titleLarge),
+      const SizedBox(height: 10),
+      SalesModuleGrid(
+        sections: _sections,
+        icons: _icons,
+        onSelect: (index) => setState(() => _selectedIndex = index),
+      ),
       const SizedBox(height: 20),
       _coverageTable(surveys),
-      const SizedBox(height: 22),
-      Text('Phân hệ nghiệp vụ', style: Theme.of(context).textTheme.titleLarge),
-      const SizedBox(height: 8),
-      for (var i = 0; i < moduleKinds.length; i++) Card(
-        child: ListTile(
-          leading: Icon(_icons[i+2], color: SalesTheme.brand),
-          title: Text(moduleLabels[moduleKinds[i]]!),
-          subtitle: Text(moduleKinds[i]=='target'?'Tháng · quý · năm':'${_ofKind(moduleKinds[i]).length} bản ghi'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => setState(() => _selectedIndex = i + 2),
-        ),
-      ),
       const SizedBox(height: 10),
       const Text('Chỉ tính nhãn/NPP được đánh dấu hiện diện. Một điểm bán có thể mang nhiều NPP và nhãn.'),
       const SizedBox(height: 14),
@@ -324,6 +312,56 @@ class _SalesHomeState extends State<SalesHome> {
       ]),
     );
   }
+}
+
+
+/// Responsive home shortcuts. All routes retain their original indices.
+class SalesModuleGrid extends StatelessWidget {
+  final List<String> sections;
+  final List<IconData> icons;
+  final ValueChanged<int> onSelect;
+  const SalesModuleGrid({super.key, required this.sections, required this.icons,
+    required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(builder: (context, size) {
+    final columns = size.maxWidth >= 1000 ? 6
+      : size.maxWidth >= 650 ? 4 : size.maxWidth >= 315 ? 3 : 2;
+    return GridView.builder(
+      primary: false,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: sections.length - 1,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: columns, mainAxisSpacing: 10, crossAxisSpacing: 10,
+        mainAxisExtent: 110,
+      ),
+      itemBuilder: (context, slot) {
+        final index = slot + 1;
+        final label = index == 1 ? 'Khách hàng'
+          : index == 9 ? 'Báo cáo' : sections[index];
+        return Card(
+          margin: EdgeInsets.zero,
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            key: ValueKey('module-grid-$index'),
+            onTap: () => onSelect(index),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 9),
+              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Icon(icons[index], color: Theme.of(context).colorScheme.primary, size: 28),
+                const SizedBox(height: 9),
+                Text(label, textAlign: TextAlign.center, maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w600)),
+              ]),
+            ),
+          ),
+        );
+      },
+    );
+  });
 }
 
 class SalesHomeBar extends StatelessWidget implements PreferredSizeWidget {

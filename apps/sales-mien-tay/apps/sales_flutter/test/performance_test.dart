@@ -17,7 +17,7 @@ class CacheQueue extends OfflineQueue{
  @override Future<List<Map<String,dynamic>>> cached(String k)async=>saved[k]??[];
 }
 void main(){
- for(final width in [360.0,390.0]){
+ for(final width in [360.0,390.0,780.0,1280.0,1440.0]){
   testWidgets('4C scoped report, KPIs and offline readonly at $width',(tester)async{
    tester.view.devicePixelRatio=1;
    tester.view.physicalSize=Size(width,844);
