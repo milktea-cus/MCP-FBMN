@@ -37,6 +37,8 @@ class FakeService extends CustomerService {
 }
 class CaptureDialLauncher extends UrlLauncherPlatform {
   String? lastUrl;
+  // Ignore uncalled platform-specific members in this fake; only launchUrl is used.
+  @override dynamic noSuchMethod(Invocation invocation)=>super.noSuchMethod(invocation);
   @override Future<bool> launchUrl(String url, LaunchOptions options)async{
     lastUrl=url;
     return true;
