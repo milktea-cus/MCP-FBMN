@@ -30,7 +30,8 @@ void main(){
   await tester.pumpAndSettle();
   expect(tester.takeException(),isNull);
   expect(find.text('Doanh số thực tế'),findsOneWidget);
-  expect(find.text('150.000 đ'),findsWidgets);
+  expect(saleMoney(150000),'150.000 đ');
+  expect(find.text('150.000 đ'),findsWidgets,reason:tester.widgetList<Text>(find.byType(Text)).map((x)=>x.data).toList().toString());
   expect(find.text('Nhập Excel'),findsOneWidget);
   expect(find.text('Nhập tay'),findsOneWidget);
   expect(find.textContaining('không cộng dữ liệu dự kiến'),findsOneWidget);

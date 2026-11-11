@@ -13,13 +13,13 @@ import 'surveys.dart';
 
 class FieldCustomer {
   final String id, name, address, province, district, category, status;
-  final String? phone, contact, note, owner;
+  final String? phone, contact, note, owner, code;
   final double? latitude, longitude;
   final int version;
-  Map<String,dynamic> toJson()=>{'id':id,'owner_sub':owner,'name':name,'address_line':address,'province':province,'district':district,'category':category,'status':status,'phone':phone,'contact_name':contact,'note':note,'latitude':latitude,'longitude':longitude,'version':version};
+  Map<String,dynamic> toJson()=>{'id':id,'owner_sub':owner,'name':name,'code':code,'address_line':address,'province':province,'district':district,'category':category,'status':status,'phone':phone,'contact_name':contact,'note':note,'latitude':latitude,'longitude':longitude,'version':version};
   FieldCustomer.fromJson(Map<String, dynamic> j)
       : id = j['id'].toString(), name = j['name'].toString(),
-        owner = j['owner_sub'] as String?, address = j['address_line'].toString(), province = j['province'].toString(),
+        owner = j['owner_sub'] as String?, code = j['code'] as String?, address = j['address_line'].toString(), province = j['province'].toString(),
         district = j['district'].toString(), category = j['category'].toString(),
         status = j['status'].toString(), phone = j['phone'] as String?,
         contact = j['contact_name'] as String?, note = j['note'] as String?,
@@ -179,7 +179,7 @@ class CustomerEditor extends StatefulWidget {
 class _CustomerEditorState extends State<CustomerEditor> {
   final key = GlobalKey<FormState>();
   final name = TextEditingController(), address = TextEditingController(), contact = TextEditingController(),
-    phone = TextEditingController(), note = TextEditingController();
+    phone = TextEditingController(), note = TextEditingController(), companyCode = TextEditingController();
   final clientRef = const Uuid().v4();
   String? province, district;
   String category = 'tap_hoa';
@@ -187,8 +187,8 @@ class _CustomerEditorState extends State<CustomerEditor> {
   XFile? photo;
   bool saving = false;
   String? error;
-  @override void initState(){super.initState();final c=widget.customer;if(c!=null){name.text=c.name;address.text=c.address;contact.text=c.contact??'';phone.text=c.phone??'';note.text=c.note??'';province=c.province;district=c.district;category=c.category;}}
-  @override void dispose() {name.dispose(); address.dispose();contact.dispose();phone.dispose();note.dispose();super.dispose();}
+  @override void initState(){super.initState();final c=widget.customer;if(c!=null){name.text=c.name;companyCode.text=c.code??'';address.text=c.address;contact.text=c.contact??'';phone.text=c.phone??'';note.text=c.note??'';province=c.province;district=c.district;category=c.category;}}
+  @override void dispose() {name.dispose(); address.dispose();contact.dispose();phone.dispose();note.dispose();companyCode.dispose();super.dispose();}
   Future<void> gps() async {
     try {final p = await captureGps(context); if (mounted) setState(() {position = p; error = null;});}
     catch (e) {if (mounted) setState(() => error = e.toString());}
@@ -205,7 +205,7 @@ class _CustomerEditorState extends State<CustomerEditor> {
     }
     setState(() => saving = true);
     try {
-      final data=<String,dynamic>{if(widget.customer==null)'client_ref':clientRef,'name':name.text.trim(),
+      final data=<String,dynamic>{if(widget.customer==null)'client_ref':clientRef,'name':name.text.trim(),'code':companyCode.text.trim().isEmpty?null:companyCode.text.trim(),
         'address_line':address.text.trim(),'contact_name':contact.text.trim().isEmpty?null:contact.text.trim(),
         'phone':phone.text.trim().isEmpty?null:phone.text.trim(),'note':note.text.trim().isEmpty?null:note.text.trim(),
         'province':province,'district':district,'category':category,
@@ -227,6 +227,9 @@ class _CustomerEditorState extends State<CustomerEditor> {
     body: Form(key:key, child:ListView(padding:const EdgeInsets.all(16),children:[
       TextFormField(controller:name,decoration:const InputDecoration(labelText:'Tên điểm bán *'),
         validator:(v)=>(v??'').trim().length<2?'Tên ít nhất 2 ký tự':null),
+      const SizedBox(height:12),
+      TextFormField(controller:companyCode,decoration:const InputDecoration(labelText:'Mã khách công ty · dùng nhập doanh số',helperText:'Nhập đúng mã trong file công ty, giữ số 0 ở đầu'),
+       validator:(v)=>(v??'').trim().length>80?'Mã khách tối đa 80 ký tự':null),
       const SizedBox(height:12),
       DropdownButtonFormField<String>(initialValue:province,decoration:const InputDecoration(labelText:'Tỉnh/TP (địa giới cũ) *'),
         items:widget.regions.provinces.map((p)=>DropdownMenuItem(value:p,child:Text(p))).toList(),

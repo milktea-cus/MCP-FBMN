@@ -1,4 +1,5 @@
 BEGIN;
+CREATE UNIQUE INDEX IF NOT EXISTS customers_unique_company_code_per_owner ON public.customers(owner_sub,code) WHERE code IS NOT NULL AND btrim(code)<>'';
 CREATE TABLE public.sales_actuals(
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
  owner_sub text NOT NULL REFERENCES public.staff_members(user_sub),
