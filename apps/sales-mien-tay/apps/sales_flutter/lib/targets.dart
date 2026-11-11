@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
+import 'package:http/http.dart' as http;
 import 'offline_queue.dart';
 import 'session.dart';
 
@@ -11,26 +12,44 @@ String targetMoney(int value)=>'${value.toString().replaceAllMapped(RegExp(r'\B(
 List<Map<String,dynamic>> targetRows(Object? value)=>(value as List? ?? []).map((r)=>Map<String,dynamic>.from(r as Map)).toList();
 int targetTotal(List<Map<String,dynamic>> rows,List<int> months,String dimension,[String? entity])=>rows.where((r)=>r['dimension']==dimension&&months.contains(targetAmount(r['month']))&&(entity==null||r['entity_id']==entity)).fold(0,(sum,r)=>sum+targetAmount(r['amount']));
 
+
+class TargetClient {
+ final OfflineQueue queue;
+ final http.Client? client;
+ const TargetClient(this.queue,{this.client});
+ Map<String,String> get headers=>{...sessionHeaders(queue.session.cookie),'X-Sync-Identity':queue.identity,'X-Sync-Revision':queue.revision};
+ Future<Map<String,dynamic>> get(String path) async {
+  final uri=queue.session.uri(path);
+  return decodeApi(await (client==null?http.get(uri,headers:headers):client!.get(uri,headers:headers)).timeout(const Duration(seconds:20)));
+ }
+ Future<Map<String,dynamic>> post(String path,Map<String,dynamic> body) async {
+  final uri=queue.session.uri(path),data=jsonEncode(body);
+  return decodeApi(await (client==null?http.post(uri,headers:headers,body:data):client!.post(uri,headers:headers,body:data)).timeout(const Duration(seconds:20)));
+ }
+}
+
 class TargetPage extends StatefulWidget{
  final OfflineQueue queue;
- const TargetPage({super.key,required this.queue});
+ final TargetClient? client;
+ const TargetPage({super.key,required this.queue,this.client});
  @override State<TargetPage> createState()=>_TargetPageState();
 }
 class _TargetPageState extends State<TargetPage>{
  int year=DateTime.now().year,month=DateTime.now().month,_generation=0;
  String period='month',owner='';
+ late final TargetClient client=widget.client??TargetClient(widget.queue);
  List<Map<String,dynamic>> staff=[],rows=[],allocations=[];
  bool busy=true,cached=false,canEdit=false;
  String? error;
  List<int> get months=>targetMonths(period,month);
  String get path=>Uri(path:'/api/v1/targets',queryParameters:{'year':'$year','owner':owner}).toString();
  String get cacheKey=>'targets-v1:$year:$owner';
- @override void initState(){super.initState();load();}
+ @override void initState(){super.initState();owner=widget.queue.identity;load();}
  Future<void> load()async{
   final generation=++_generation,key=cacheKey,request=path;
   setState((){busy=true;error=null;cached=false;canEdit=false;rows=[];allocations=[];});
   Map<String,dynamic>? data;bool offline=false;String? failure;
-  try{data=await widget.queue.session.get(request);
+  try{data=await client.get(request);
    try{await widget.queue.cache(key,[data]);}catch(_){}
   }catch(e){
    failure=e.toString();
@@ -44,14 +63,14 @@ class _TargetPageState extends State<TargetPage>{
  }
  Future<void> choose(String dimension)async{
   if(dimension=='employee'){await edit(dimension,'','Target nhân viên');return;}
-  final selected=await showDialog<Map<String,dynamic>>(context:context,builder:(_)=>_TargetPicker(queue:widget.queue,owner:owner,dimension:dimension));
+  final selected=await showDialog<Map<String,dynamic>>(context:context,builder:(_)=>_TargetPicker(client:client,owner:owner,dimension:dimension));
   if(selected!=null&&mounted)await edit(dimension,selected['id'].toString(),selected['name'].toString());
  }
  Future<void> edit(String dimension,String entity,String name)async{
   final selectedMonths=List<int>.of(months),selectedYear=year,selectedOwner=owner;
   final existing={for(final r in rows.where((r)=>r['dimension']==dimension&&r['entity_id']==entity))targetAmount(r['month']):r};
   final result=await showDialog<bool>(context:context,barrierDismissible:false,builder:(_)=>_TargetEditor(
-   queue:widget.queue,year:selectedYear,owner:selectedOwner,dimension:dimension,entity:entity,name:name,months:selectedMonths,existing:existing));
+   client:client,year:selectedYear,owner:selectedOwner,dimension:dimension,entity:entity,name:name,months:selectedMonths,existing:existing));
   if(result==true&&mounted)await load();
  }
  Widget allocationCard(String dimension,String label,int total){
@@ -104,8 +123,8 @@ class _TargetPageState extends State<TargetPage>{
 }
 
 class _TargetPicker extends StatefulWidget{
- final OfflineQueue queue;final String owner,dimension;
- const _TargetPicker({required this.queue,required this.owner,required this.dimension});
+ final TargetClient client;final String owner,dimension;
+ const _TargetPicker({required this.client,required this.owner,required this.dimension});
  @override State<_TargetPicker> createState()=>_TargetPickerState();
 }
 class _TargetPickerState extends State<_TargetPicker>{
@@ -114,7 +133,7 @@ class _TargetPickerState extends State<_TargetPicker>{
  @override void dispose(){search.dispose();super.dispose();}
  Future<void> load()async{
   final g=++generation;setState((){busy=true;error=null;});
-  try{final r=await widget.queue.session.get(Uri(path:'/api/v1/targets/options',queryParameters:{'owner':widget.owner,'dimension':widget.dimension,'q':search.text.trim()}).toString());
+  try{final r=await widget.client.get(Uri(path:'/api/v1/targets/options',queryParameters:{'owner':widget.owner,'dimension':widget.dimension,'q':search.text.trim()}).toString());
    if(mounted&&g==generation)setState(()=>items=targetRows(r['items']));
   }catch(e){if(mounted&&g==generation)setState(()=>error=e.toString());}
   finally{if(mounted&&g==generation)setState(()=>busy=false);}
@@ -127,8 +146,8 @@ class _TargetPickerState extends State<_TargetPicker>{
   ])),actions:[TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Đóng'))]);
 }
 class _TargetEditor extends StatefulWidget{
- final OfflineQueue queue;final int year;final String owner,dimension,entity,name;final List<int> months;final Map<int,Map<String,dynamic>> existing;
- const _TargetEditor({required this.queue,required this.year,required this.owner,required this.dimension,required this.entity,required this.name,required this.months,required this.existing});
+ final TargetClient client;final int year;final String owner,dimension,entity,name;final List<int> months;final Map<int,Map<String,dynamic>> existing;
+ const _TargetEditor({required this.client,required this.year,required this.owner,required this.dimension,required this.entity,required this.name,required this.months,required this.existing});
  @override State<_TargetEditor> createState()=>_TargetEditorState();
 }
 class _TargetEditorState extends State<_TargetEditor>{
@@ -141,7 +160,7 @@ class _TargetEditorState extends State<_TargetEditor>{
   final payload=jsonEncode(values);if(lastPayload!=null&&lastPayload!=payload)ref=const Uuid().v4();lastPayload=payload;
   setState((){busy=true;error=null;});
   try{
-   await widget.queue.session.post('/api/v1/targets',{'client_ref':ref,'owner':widget.owner,'year':widget.year,'dimension':widget.dimension,'entity_id':widget.entity,'months':values});
+   await widget.client.post('/api/v1/targets',{'client_ref':ref,'owner':widget.owner,'year':widget.year,'dimension':widget.dimension,'entity_id':widget.entity,'months':values});
    if(mounted)Navigator.pop(context,true);
   }catch(e){if(mounted)setState(()=>error=e.toString());}
   finally{if(mounted)setState(()=>busy=false);}

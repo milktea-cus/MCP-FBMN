@@ -218,7 +218,7 @@ class _SalesHomeState extends State<SalesHome> {
         child: ListTile(
           leading: Icon(_icons[i+2], color: SalesTheme.brand),
           title: Text(moduleLabels[moduleKinds[i]]!),
-          subtitle: Text('${_ofKind(moduleKinds[i]).length} bản ghi'),
+          subtitle: Text(moduleKinds[i]=='target'?'Tháng · quý · năm':'${_ofKind(moduleKinds[i]).length} bản ghi'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => setState(() => _selectedIndex = i + 2),
         ),
