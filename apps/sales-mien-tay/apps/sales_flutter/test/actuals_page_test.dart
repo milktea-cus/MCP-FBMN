@@ -24,14 +24,15 @@ void main(){
    if(r.url.path.endsWith('/options'))return http.Response.bytes(utf8.encode(jsonEncode({'items':[
     {'id':'owner','code':'TEST','name':'Admin'}]})),200,headers:{'content-type':'application/json; charset=utf-8'});
    if(r.url.path.endsWith('/history'))return http.Response('{"items":[]}',200);
-   return http.Response.bytes(utf8.encode(jsonEncode({'month':date.substring(0,7),'items':records,'can_import':true})),200,headers:{'content-type':'application/json; charset=utf-8'});
+   return http.Response.bytes(utf8.encode(jsonEncode({'month':date.substring(0,7),'items':records,'summary':{'total_amount':'225000','active_records':2,'total_records':2},'can_import':true})),200,headers:{'content-type':'application/json; charset=utf-8'});
   });
   await tester.pumpWidget(MaterialApp(home:ActualsPage(queue:queue,client:ActualClient(queue,client:client))));
   await tester.pumpAndSettle();
   expect(tester.takeException(),isNull);
   expect(find.text('Doanh số thực tế'),findsOneWidget);
   expect(saleMoney(150000),'150.000 đ');
-  expect(find.text('150.000 đ'),findsWidgets,reason:tester.widgetList<Text>(find.byType(Text)).map((x)=>x.data).toList().toString());
+  expect(find.text('225.000 đ'),findsOneWidget);
+  expect(find.textContaining('hiển thị 1/2 dòng'),findsOneWidget);
   expect(find.text('Nhập Excel'),findsOneWidget);
   expect(find.text('Nhập tay'),findsOneWidget);
   expect(find.textContaining('không cộng dữ liệu dự kiến'),findsOneWidget);

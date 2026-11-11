@@ -17,10 +17,11 @@ class ActualClient{
  Map<String,String> get headers=>{...sessionHeaders(queue.session.cookie),'X-Sync-Identity':queue.identity,'X-Sync-Revision':queue.revision};
  Future<Map<String,dynamic>> request(String method,String path,[Map<String,dynamic>? data])async{
   final uri=queue.session.uri(path),body=data==null?null:jsonEncode(data);
-  final reply=method=='GET'
-    ? await (client?.get(uri,headers:headers)??http.get(uri,headers:headers))
-    : method=='PATCH' ? await (client?.patch(uri,headers:headers,body:body)??http.patch(uri,headers:headers,body:body))
-    : await (client?.post(uri,headers:headers,body:body)??http.post(uri,headers:headers,body:body));
+  final Future<http.Response> request=method=='GET'
+    ? (client?.get(uri,headers:headers)??http.get(uri,headers:headers))
+    : method=='PATCH' ? (client?.patch(uri,headers:headers,body:body)??http.patch(uri,headers:headers,body:body))
+    : (client?.post(uri,headers:headers,body:body)??http.post(uri,headers:headers,body:body));
+  final reply=await request.timeout(const Duration(seconds:25));
   return decodeApi(reply);
  }
  Future<Map<String,dynamic>> get(String path)=>request('GET',path);
