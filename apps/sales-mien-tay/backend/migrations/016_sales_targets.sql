@@ -59,5 +59,6 @@ BEGIN
 END $fn$;
 REVOKE ALL ON FUNCTION public.sales_target_apply(text,uuid,text,integer,text,text,jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.sales_target_apply(text,uuid,text,integer,text,text,jsonb) TO sales_api;
+REVOKE ALL ON public.sales_targets,public.sales_target_mutations FROM sales_api;
 GRANT SELECT ON public.sales_targets TO sales_api;
 COMMIT;
