@@ -28,3 +28,25 @@ jobs:
           check 403 -H 'Origin: https://untrusted.invalid' -H 'Content-Type: application/json' -d '{}' "$base/api/auth/login"
           curl --fail --max-time 30 -H 'Origin: https://sales-mien-tay.vercel.app' -H 'Content-Type: application/json' -d '{"email":"nobody-p1-smoke@example.invalid"}' "$base/api/auth/otp/request" | jq -e '.ok==true'
           echo 'PASS: DB health; anonymous, fake JWT, invalid session, untrusted origin; OTP allowlist'
+
+  frontend_proxy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify frontend loads and same-origin API/auth proxy is JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+          site=https://sales-mien-tay.vercel.app
+          curl --fail --retry 2 --max-time 30 -o /tmp/index.html "$site/"
+          grep -qi '<html' /tmp/index.html
+          curl --fail --retry 2 --max-time 30 -o /tmp/flutter_bootstrap.js "$site/flutter_bootstrap.js"
+          code=$(curl -sS --max-time 30 -o /tmp/me.json -w '%{http_code}' "$site/api/v1/me")
+          echo "/api/v1/me => HTTP $code"
+          test "$code" = 401
+          jq -e '.error | type=="string"' /tmp/me.json
+          code=$(curl -sS --max-time 30 -o /tmp/login.json -w '%{http_code}' \
+            -H 'Content-Type: application/json' --data '{}' "$site/api/auth/login")
+          echo "/api/auth/login (invalid) => HTTP $code"
+          test "$code" = 400
+          jq -e '.error | type=="string"' /tmp/login.json
+          echo 'PASS: frontend HTML/Flutter bootstrap, JSON auth proxy and unauthenticated 401'

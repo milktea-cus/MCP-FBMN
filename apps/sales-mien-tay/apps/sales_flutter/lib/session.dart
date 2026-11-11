@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -19,7 +20,9 @@ class ApiFailure implements Exception {
 }
 VoidCallback? onSessionRejected;
 void checkSessionStatus(http.Response r) {
-  if(r.statusCode==401 || r.statusCode==403) onSessionRejected?.call();
+  // 403 may be a permission/scope denial, not an invalid login session.
+  // /api/v1/me is still handled explicitly by AuthGate.revalidate().
+  if(r.statusCode==401) onSessionRejected?.call();
 }
 Map<String,dynamic> decodeApi(http.Response r) {
   if(r.statusCode<200 || r.statusCode>=300) {
@@ -28,7 +31,11 @@ Map<String,dynamic> decodeApi(http.Response r) {
     try {message=(jsonDecode(r.body) as Map)['error']?.toString()??message;} catch (_) {}
     throw ApiFailure(r.statusCode,message);
   }
-  return jsonDecode(r.body) as Map<String,dynamic>;
+  try {
+    return jsonDecode(r.body) as Map<String,dynamic>;
+  } on FormatException {
+    throw const ApiFailure(502,'Máy chủ trả dữ liệu không hợp lệ. Hãy thử lại.');
+  }
 }
 class SalesSession {
   final _storage=const FlutterSecureStorage();
@@ -37,14 +44,33 @@ class SalesSession {
   Future<void> restore() async {
     if(!kIsWeb) cookie=await _storage.read(key:'sales.neon.session.v1')??'';
   }
-  Future<Map<String,dynamic>> get(String path) async =>
-    decodeApi(await http.get(uri(path),headers:sessionHeaders(cookie)).timeout(const Duration(seconds:20)));
-  Future<Map<String,dynamic>> post(String path,Map<String,dynamic> data) async =>
-    decodeApi(await http.post(uri(path),headers:sessionHeaders(cookie),body:jsonEncode(data)).timeout(const Duration(seconds:20)));
+  Future<Map<String,dynamic>> get(String path) async {
+    try {
+      return decodeApi(await http.get(uri(path),headers:sessionHeaders(cookie))
+          .timeout(const Duration(seconds:15)));
+    } on TimeoutException {
+      throw const ApiFailure(504,'Kết nối máy chủ quá chậm. Vui lòng thử lại.');
+    }
+  }
+  Future<Map<String,dynamic>> post(String path,Map<String,dynamic> data) async {
+    try {
+      return decodeApi(await http.post(uri(path),headers:sessionHeaders(cookie),
+          body:jsonEncode(data)).timeout(const Duration(seconds:15)));
+    } on TimeoutException {
+      throw const ApiFailure(504,'Kết nối máy chủ quá chậm. Vui lòng thử lại.');
+    }
+  }
   Future<void> requestOtp(String email) async { await post('/api/auth/otp/request',{'email':email}); }
   Future<void> login(String email,String password,{bool otp=false}) async {
-    final r=await http.post(uri(otp?'/api/auth/otp/login':'/api/auth/login'),headers:sessionHeaders(cookie),
-      body:jsonEncode({'email':email,otp?'otp':'password':password})).timeout(const Duration(seconds:20));
+    late final http.Response r;
+    try {
+      r=await http.post(uri(otp?'/api/auth/otp/login':'/api/auth/login'),
+        headers:sessionHeaders(cookie),
+        body:jsonEncode({'email':email,otp?'otp':'password':password}))
+        .timeout(const Duration(seconds:15));
+    } on TimeoutException {
+      throw const ApiFailure(504,'Đăng nhập quá thời gian. Kiểm tra mạng và thử lại.');
+    }
     decodeApi(r);
     if(!kIsWeb){
       final value=RegExp(r'__Host-sales-session=([^;\s,]+)').firstMatch(r.headers['set-cookie']??'')?.group(1);

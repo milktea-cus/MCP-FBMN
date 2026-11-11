@@ -56,7 +56,16 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
    if(!rejected){
     if(hadSession&&leaseExpires!=null&&DateTime.now().isBefore(leaseExpires!)){if(mounted&&!connectionNotice){connectionNotice=true;ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Mất kết nối tạm thời. Phiên vẫn được giữ.')));}return;}
     if(!hadSession){try{final saved=await OfflineLease.read();if(saved!=null&&mounted&&!logoutPending){final cachedMe=Map<String,dynamic>.from(saved['me'] as Map);final districts=(saved['districts'] as Map).map((k,v)=>MapEntry(k.toString(),(v as List).cast<String>()));leaseExpires=DateTime.fromMillisecondsSinceEpoch(saved['expires'] as int);setState((){me=cachedMe;catalog=RegionCatalog(districts);recovering=false;connectionNotice=true;});return;}}catch(_) {}}
-    if(mounted){Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;recovering=true;});}return;
+    // Never hold the whole app on an endless recovery spinner during an outage.
+    // Preserve the cookie and account-scoped offline data for an explicit retry.
+    if(mounted){
+     Navigator.of(context).popUntil((r)=>r.isFirst);
+     setState((){
+      me=null;catalog=null;recovering=false;
+      error='Không kết nối được máy chủ. Kiểm tra mạng rồi chọn Khôi phục phiên.';
+     });
+    }
+    return;
    }
    recovering=false;
    if(rejected){try{await OfflineLease.clear();}catch(_){}await session.clear();}
@@ -89,7 +98,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
  }
  @override void dispose(){timer?.cancel();onSessionRejected=null;WidgetsBinding.instance.removeObserver(this);email.dispose();password.dispose();super.dispose();}
  @override Widget build(BuildContext context){
-  if(recovering&&me==null)return Scaffold(body:Center(child:Column(mainAxisSize:MainAxisSize.min,children:[const CircularProgressIndicator(),const SizedBox(height:16),const Text('Đang khôi phục phiên. Kết nối mạng để tiếp tục.'),TextButton(onPressed:()=>unawaited(revalidate()),child:const Text('Thử lại')),TextButton(onPressed:logout,child:const Text('Đăng xuất'))])));
+  // The login form below always stays accessible when session recovery fails.
   if(me!=null&&catalog!=null)return SalesHome(key:ValueKey(me!['identity'].toString()+':'+me!['scope_revision'].toString()),session:session,me:me!,catalog:catalog!,onLogout:logout);
   return Scaffold(body:SafeArea(child:Center(child:SingleChildScrollView(padding:const EdgeInsets.all(24),child:ConstrainedBox(constraints:const BoxConstraints(maxWidth:420),child:Card(child:Padding(padding:const EdgeInsets.all(24),child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,mainAxisSize:MainAxisSize.min,children:[
    Image.asset('assets/fbmn-transparent-logo.webp',height:46,alignment:Alignment.centerLeft),const SizedBox(height:12),
@@ -103,10 +112,12 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
    if(otpMode)TextButton(onPressed:busy||logoutPending?null:sendOtp,child:const Text('Gửi mã đăng nhập')),
    TextButton(onPressed:busy||logoutPending?null:()=>setState((){otpMode=!otpMode;password.clear();error=null;notice=null;}),child:Text(otpMode?'Dùng mật khẩu':'Dùng mã email')),
    if(notice!=null)Text(notice!),
+   if(logoutPending)...[const SizedBox(height:12),
+    const Text('Phiên đăng xuất cũ đang chờ xác nhận từ máy chủ. Chọn Hoàn tất đăng xuất để thử lại.')],
    if(error!=null)...[const SizedBox(height:12),Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error))],
    const SizedBox(height:20),FilledButton(onPressed:busy||logoutPending?null:login,child:busy?const SizedBox(width:20,height:20,child:CircularProgressIndicator(strokeWidth:2)):const Text('Đăng nhập')),
    TextButton(onPressed:busy||logoutPending?null:()=>unawaited(revalidate()),child:const Text('Khôi phục phiên')),
-   TextButton(onPressed:busy?null:logout,child:const Text('Xóa phiên / Đăng xuất')),
+   TextButton(onPressed:busy?null:logout,child:Text(logoutPending?'Hoàn tất đăng xuất':'Xóa phiên / Đăng xuất')),
   ]))))))));
  }
 }
