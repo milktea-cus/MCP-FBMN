@@ -59,13 +59,24 @@ export async function orderRoutes(req:Request,env:{DATABASE_URL:string},u:User,u
   }
   if(path==='/api/v1/orders/products'){
    const q=(url.searchParams.get('q')??'').trim().slice(0,120);
-   const items=await sql`SELECT p.id::text AS id,p.company_code,p.sku,p.name,p.unit,
+   const after=url.searchParams.get('after')??'';
+   const parsedLimit=Number(url.searchParams.get('limit')??'60');
+   if(after.length>80||!Number.isInteger(parsedLimit)||parsedLimit<1||parsedLimit>100)
+    return bad('Tham số phân trang không hợp lệ');
+   const limit=parsedLimit+1;
+   const items=await sql`SELECT p.id::text AS id,p.company_code,p.sku,p.name,p.brand,p.category,p.unit,
     p.product_spec,s.quantity::text AS quantity,s.snapshot_at
     FROM catalog_products p LEFT JOIN inventory_stock s ON s.product_id=p.id
-    WHERE p.active AND (p.name ILIKE '%'||${q}||'%' OR p.company_code ILIKE '%'||${q}||'%'
-       OR p.sku ILIKE '%'||${q}||'%')
-    ORDER BY p.company_code LIMIT 80`;
-   return respond({items,stock_unit:'ĐVT trong danh mục (thùng nếu danh mục dùng Thùng)',does_not_reserve_stock:true});
+    WHERE p.active AND p.company_code>${after}
+      AND (p.name ILIKE '%'||${q}||'%' OR p.company_code ILIKE '%'||${q}||'%'
+       OR p.sku ILIKE '%'||${q}||'%' OR p.brand ILIKE '%'||${q}||'%'
+       OR p.category ILIKE '%'||${q}||'%')
+    ORDER BY p.company_code ASC LIMIT ${limit}`;
+   const hasMore=items.length>parsedLimit;
+   const page=items.slice(0,parsedLimit);
+   return respond({items:page,next_cursor:hasMore?page[page.length-1].company_code:null,
+    stock_unit:'ĐVT trong danh mục (thùng nếu danh mục dùng Thùng)',
+    does_not_reserve_stock:true});
   }
   const detail=/^\/api\/v1\/orders\/([a-f0-9-]{36})(\/export|\/audit)?$/i.exec(path);
   if(path==='/api/v1/orders'){
