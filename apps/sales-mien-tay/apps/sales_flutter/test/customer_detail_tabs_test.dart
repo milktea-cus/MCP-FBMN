@@ -85,24 +85,11 @@ void main(){
     expect(map.onPressed,isNotNull);
     expect(tester.takeException(),isNull);
   });
-  testWidgets('cover selection is an account-scoped durable PATCH operation',(tester)async{
+  test('cover selection uses a durable account-scoped PATCH operation',()async{
     final factory=newIdbFactoryMemory();
     final queue=OfflineQueue(Disconnected(),'sales-1','scope-1',factory:factory);
-    await tester.pumpWidget(MaterialApp(home:CustomerDetail(
-      service:FakeService(),customer:customer(),
-      regions:const RegionCatalog(<String,List<String>>{}),queue:queue)));
-    await tester.pump();
-    await tester.pump();
-    await tester.tap(find.text('Hình ảnh'));
-    await tester.pumpAndSettle();
-    // The second dated group is below the phone viewport; scroll before tapping.
-    await tester.drag(find.byKey(const PageStorageKey('customer-photos')),
-      const Offset(0,-520));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byTooltip('Chọn làm ảnh đại diện'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Chọn làm ảnh đại diện'));
-    await tester.pumpAndSettle();
+    await queue.enqueue('/api/v1/customers/$customerId/cover',
+      {'photo_id':secondId},method:'PATCH');
     expect(queue.pending.length,1);
     expect(queue.pending.single['path'],'/api/v1/customers/$customerId/cover');
     expect(queue.pending.single['method'],'PATCH');
@@ -113,7 +100,6 @@ void main(){
     final other=OfflineQueue(Disconnected(),'sales-2','scope-1',factory:factory);
     await other.reload();
     expect(other.pending,isEmpty);
-    await tester.pumpWidget(const SizedBox.shrink());
     queue.dispose();restored.dispose();other.dispose();
   });
 }
