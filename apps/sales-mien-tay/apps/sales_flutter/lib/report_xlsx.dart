@@ -36,7 +36,6 @@ String _sheet(List<List<Object?>> data){
  '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
  '<sheetData>$body</sheetData></worksheet>';
 }
-String _metric(Object? value)=>value==null?'Không áp dụng':value.toString();
 Object _integer(Object? v)=>v==null?'—':ReportNumber(v.toString());
 String _period(Map<String,dynamic> f){
  final year=f['year'].toString(),mode=f['period'];
