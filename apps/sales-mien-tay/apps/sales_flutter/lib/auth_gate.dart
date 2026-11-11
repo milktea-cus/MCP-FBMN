@@ -93,7 +93,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   if(me!=null&&catalog!=null)return SalesHome(key:ValueKey(me!['identity'].toString()+':'+me!['scope_revision'].toString()),session:session,me:me!,catalog:catalog!,onLogout:logout);
   return Scaffold(body:SafeArea(child:Center(child:SingleChildScrollView(padding:const EdgeInsets.all(24),child:ConstrainedBox(constraints:const BoxConstraints(maxWidth:420),child:Card(child:Padding(padding:const EdgeInsets.all(24),child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,mainAxisSize:MainAxisSize.min,children:[
    Image.asset('assets/fbmn-transparent-logo.webp',height:46,alignment:Alignment.centerLeft),const SizedBox(height:12),
-   Text('Filed Work',style:Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight:FontWeight.bold)),
+   Text('Field Work',style:Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight:FontWeight.bold)),
    const SizedBox(height:8),const Text('Đăng nhập bằng tài khoản nhân viên được cấp.'),
    const SizedBox(height:24),
    const Text('Email',style:TextStyle(fontSize:13)),const SizedBox(height:6),
