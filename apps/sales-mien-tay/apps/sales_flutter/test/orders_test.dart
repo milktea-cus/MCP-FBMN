@@ -171,7 +171,11 @@ void main(){
   final saveButton=tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Lưu đơn'));
   expect(saveButton.onPressed,isNull);
   await tester.tap(find.byTooltip('Đóng giỏ'));await tester.pumpAndSettle();
-  expect(find.text('Nhà sách Demo'),findsOneWidget);
+  expect(find.text('Tạo đơn mới'),findsOneWidget);
+  final visibleTexts=tester.widgetList<Text>(find.byType(Text))
+      .map((w)=>w.data??'').toList();
+  expect(find.text('Nhà sách Demo'),findsOneWidget,
+    reason:'Danh sách đơn sau khi đóng giỏ: $visibleTexts');
   await tester.tap(find.text('Nhà sách Demo'));await tester.pumpAndSettle();
   expect(find.text('01'),findsOneWidget);
   expect(find.byKey(ValueKey('cart-quantity-$firstLineId')),findsOneWidget);
