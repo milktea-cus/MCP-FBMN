@@ -127,7 +127,7 @@ class _OrdersPageState extends State<OrdersPage>{
         drafts=[];
         error='Phiên hoặc địa bàn bị thu hồi; vui lòng đăng nhập lại.';
       }else{
-        error='Không kết nối được máy chủ. Nháp trên máy vẫn sử dụng được.';
+        error='Mất kết nối · vẫn có thể soạn đơn ngoại tuyến.';
       }
     });
   }
