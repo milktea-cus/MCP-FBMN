@@ -71,7 +71,8 @@ DECLARE actor_role text; old public.field_orders%ROWTYPE; saved public.field_ord
   IF action<>'save' OR expected<>0 OR jsonb_array_length(items)<1 THEN RAISE EXCEPTION 'order_invalid';END IF;
  ELSE
   IF old.version<>expected THEN RAISE EXCEPTION 'order_stale';END IF;
-  IF old.owner_sub<>owner_id OR old.customer_id<>cid THEN RAISE EXCEPTION 'order_forbidden';END IF;
+  IF old.owner_sub<>owner_id THEN RAISE EXCEPTION 'order_forbidden';END IF;
+  IF action<>'save' AND old.customer_id<>cid THEN RAISE EXCEPTION 'order_forbidden';END IF;
   IF (action='save' AND old.status<>'draft')
     OR (action='export' AND old.status<>'draft')
     OR (action='imported' AND (old.status<>'exported' OR actor_role<>'admin')) THEN RAISE EXCEPTION 'order_state'; END IF;
@@ -92,7 +93,7 @@ DECLARE actor_role text; old public.field_orders%ROWTYPE; saved public.field_ord
    INSERT INTO public.field_orders(id,owner_sub,customer_id,note,created_by,updated_by)
     VALUES(order_key,owner_id,cid,memo,a,a) RETURNING * INTO saved;
   ELSE
-   UPDATE public.field_orders SET note=memo,updated_by=a,version=version+1,updated_at=now()
+   UPDATE public.field_orders SET note=memo,customer_id=cid,updated_by=a,version=version+1,updated_at=now()
     WHERE id=order_key RETURNING * INTO saved;
    DELETE FROM public.field_order_lines WHERE field_order_lines.order_id=order_key;
   END IF;
@@ -106,6 +107,7 @@ DECLARE actor_role text; old public.field_orders%ROWTYPE; saved public.field_ord
   IF customer_code IS NULL THEN RAISE EXCEPTION 'order_customer_code';END IF;
   IF NOT EXISTS(SELECT 1 FROM public.field_order_lines WHERE field_order_lines.order_id=order_key)
   THEN RAISE EXCEPTION 'order_invalid'; END IF;
+  PERFORM 1 FROM public.inventory_state WHERE id=1 FOR SHARE;
   FOR rec IN SELECT l.quantity,l.unit,p.company_code,p.name,p.active,p.unit AS stock_unit,
     st.quantity AS available,st.snapshot_at
     FROM public.field_order_lines l JOIN public.catalog_products p ON p.id=l.product_id
