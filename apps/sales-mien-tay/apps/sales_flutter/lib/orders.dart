@@ -528,7 +528,7 @@ class _OrdersPageState extends State<OrdersPage>{
     content:SizedBox(width:450,height:340,child:ListView(children:[
      for(final r in orderRows(data['events']))ListTile(
       title:Text('${r['action']} · ${r['created_at']}'),
-      subtitle:Text('${r['actor_sub']} · ${orderEventStatus(r['before_data'])} → ${orderEventStatus(r['after_data'])}${(r['request_data'] as Map?)?['reason']!=null?'\nLý do: ${(r['request_data'] as Map)['reason']}':''}'),
+      subtitle:Text('${r['actor_sub']} · ${orderEventStatus(r['before_data'])} → ${orderEventStatus(r['after_data'])}${(r['request_data'] as Map?)?['reason']!=null?'\nLý do: ${(r['request_data'] as Map)['reason']}':''}')),
     ])),
     actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng'))]));
   }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('$e')));}
@@ -672,6 +672,7 @@ class _OrdersPageState extends State<OrdersPage>{
      onTap:()=>open(row))),
     if(filtered.isEmpty&&!loading)const Padding(
      padding:EdgeInsets.all(16),child:Text('Không có đơn phù hợp bộ lọc.')),
+   ],
    const Padding(padding:EdgeInsets.all(8),child:Text('Excel xuất là mẫu CHUẨN BỊ nhập công ty, chưa được đối chiếu mẫu chính thức. Tồn là snapshot, không được giữ chỗ khi ra đơn.')),
   ]);
  }
