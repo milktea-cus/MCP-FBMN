@@ -58,7 +58,9 @@ void main(){
    offline=true;
    await tester.tap(find.byTooltip('Làm mới báo cáo'));await tester.pumpAndSettle();
    expect(find.textContaining('Đang xem báo cáo lưu trên máy'),findsOneWidget);
-   expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Xuất Excel (.xlsx)')).onPressed,isNull);
+   await tester.scrollUntilVisible(find.text('Xuất Excel (.xlsx)'),180,scrollable:find.byType(Scrollable).first);
+   final button=tester.widget<FilledButton>(find.ancestor(of:find.text('Xuất Excel (.xlsx)'),matching:find.byWidgetPredicate((w)=>w is FilledButton)).first);
+   expect(button.onPressed,isNull);
    expect(tester.takeException(),isNull);
    await tester.pumpWidget(const SizedBox());q.dispose();mock.close();
   });
