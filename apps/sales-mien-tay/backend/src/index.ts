@@ -7,6 +7,7 @@ import {surveyRoutes} from './surveys';
 import {catalogRoutes} from './catalog';
 import {catalogImportRoutes} from './catalog_import';
 import {inventoryRoutes} from './inventory';
+import {targetRoutes} from './targets';
 
 interface Env {
   DATABASE_URL: string;
@@ -107,6 +108,8 @@ export default {
       if (!env.DATABASE_URL) return bad('DATABASE_URL chưa được cấu hình', 503);
       const productResponse = await customerRoutes(req, env, user, url);
       if (productResponse) return productResponse;
+      const targetResponse=await targetRoutes(req,env,user,url);
+      if(targetResponse)return targetResponse;
       const inventoryResponse=await inventoryRoutes(req,env,user,url);
       if(inventoryResponse)return inventoryResponse;
       const catalogImportResponse=await catalogImportRoutes(req,env,user,url);
@@ -165,9 +168,11 @@ export default {
         const province=url.searchParams.get('province')??'';
         const items=await sql`WITH r AS (
           SELECT owner_sub,province,kind,data FROM sales_records
-          WHERE period_ym=${month} AND kind IN ('target','forecast')
+          WHERE period_ym=${month} AND kind='forecast'
             AND public.sales_can_access(${user.sub},owner_sub,province,district)
             AND (${!province} OR province=${province})
+          UNION ALL SELECT owner_sub,NULL::text,'target',jsonb_build_object('monthlyTarget',amount) FROM sales_targets
+          WHERE dimension='employee' AND month=to_date(${month}||'-01','YYYY-MM-DD') AND ${!province} AND public.sales_can_access(${user.sub},owner_sub,NULL,NULL)
         ), totals AS (
           SELECT owner_sub,province,
             sum(CASE WHEN kind='target' AND jsonb_typeof(data->'monthlyTarget')='number' THEN (data->>'monthlyTarget')::numeric ELSE 0 END) AS target,
