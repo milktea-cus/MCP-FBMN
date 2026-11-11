@@ -10,6 +10,7 @@ import 'session.dart';
 import 'offline_queue.dart';
 import 'editor.dart';
 import 'surveys.dart';
+import 'customer_categories.dart';
 
 class FieldCustomer {
   final String id, name, address, province, district, category, status;
@@ -145,26 +146,35 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
   }
   @override
   Widget build(BuildContext context) {
-    return Column(children: [
-      Padding(padding: const EdgeInsets.fromLTRB(18,16,18,8), child: Row(children: [
-        const Expanded(child: Text('Khách hàng / Điểm bán', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold))),
-        IconButton(onPressed: refresh, icon: const Icon(Icons.refresh)),
-        FilledButton.icon(onPressed: add, icon: const Icon(Icons.add), label: const Text('Thêm điểm bán')),
+    return LayoutBuilder(builder:(context,constraints) {
+      final narrow=constraints.maxWidth<480;
+      return Column(children: [
+      Padding(padding: const EdgeInsets.fromLTRB(12,12,12,8), child: Row(children: [
+        Expanded(child:Text(narrow?'Khách hàng':'Khách hàng / Điểm bán',
+          maxLines:1,overflow:TextOverflow.ellipsis,
+          style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold))),
+        IconButton(onPressed:refresh,tooltip:'Làm mới khách hàng',icon:const Icon(Icons.refresh)),
+        if(narrow) IconButton(onPressed:add,tooltip:'Thêm điểm bán',icon:const Icon(Icons.add_circle_outline))
+        else FilledButton.icon(onPressed:add,icon:const Icon(Icons.add),label:const Text('Thêm điểm bán')),
       ])),
       if (error != null) Padding(padding: const EdgeInsets.all(12), child: Text(error!,style: const TextStyle(color: Colors.red))),
       if (loading) const LinearProgressIndicator(),
       Expanded(child: customers.isEmpty ? const Center(child: Text('Chưa có điểm bán trong phạm vi được cấp'))
       : ListView.builder(itemCount: customers.length, itemBuilder: (ctx,i) {
         final c = customers[i];
+        final category = CustomerCategory.fromId(c.category);
         return Card(child: ListTile(
-          leading: const CircleAvatar(child: Icon(Icons.storefront)),
-          title: Text(c.name), subtitle: Text('${c.district}, ${c.province} · ${c.address}'),
+          leading: CustomerCategoryAvatar(category:c.category),
+          title: Text(c.name,maxLines:2,overflow:TextOverflow.ellipsis),
+          subtitle: Text('${category.label} · ${c.district}, ${c.province} · ${c.address}',
+            maxLines:3,overflow:TextOverflow.ellipsis),
           trailing: c.owner!=widget.service.identity?const Icon(Icons.chevron_right):IconButton(tooltip:'Sửa thông tin',icon:const Icon(Icons.edit_outlined),onPressed:() async {final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>CustomerEditor(service:widget.service,regions:widget.regions,customer:c,queue:widget.queue)));if(changed==true&&mounted)refresh();}),
           onTap: () async {final changed=await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) =>
             CustomerDetail(service: widget.service, customer: c,regions:widget.regions,queue:widget.queue)));if(changed==true&&mounted)refresh();},
         ));
       })),
     ]);
+    });
   }
 }
 
@@ -187,7 +197,7 @@ class _CustomerEditorState extends State<CustomerEditor> {
   XFile? photo;
   bool saving = false;
   String? error;
-  @override void initState(){super.initState();final c=widget.customer;if(c!=null){name.text=c.name;companyCode.text=c.code??'';address.text=c.address;contact.text=c.contact??'';phone.text=c.phone??'';note.text=c.note??'';province=c.province;district=c.district;category=c.category;}}
+  @override void initState(){super.initState();final c=widget.customer;if(c!=null){name.text=c.name;companyCode.text=c.code??'';address.text=c.address;contact.text=c.contact??'';phone.text=c.phone??'';note.text=c.note??'';province=c.province;district=c.district;category=CustomerCategory.fromId(c.category).id;}}
   @override void dispose() {name.dispose(); address.dispose();contact.dispose();phone.dispose();note.dispose();companyCode.dispose();super.dispose();}
   Future<void> gps() async {
     try {final p = await captureGps(context); if (mounted) setState(() {position = p; error = null;});}
@@ -243,12 +253,18 @@ class _CustomerEditorState extends State<CustomerEditor> {
       TextFormField(controller:address,decoration:const InputDecoration(labelText:'Địa chỉ chi tiết *'),
         validator:(v)=>(v??'').trim().length<3?'Vui lòng nhập địa chỉ':null),
       const SizedBox(height:12),
-      DropdownButtonFormField<String>(initialValue:category,decoration:const InputDecoration(labelText:'Loại điểm bán'),
-        items: const [DropdownMenuItem(value:'tap_hoa',child:Text('Tạp hóa')),
-          DropdownMenuItem(value:'sieu_thi',child:Text('Siêu thị')),
-          DropdownMenuItem(value:'dai_ly',child:Text('Đại lý')),
-          DropdownMenuItem(value:'npp',child:Text('Nhà phân phối')),
-          DropdownMenuItem(value:'khac',child:Text('Khác'))],onChanged:(v)=>setState(()=>category=v??'tap_hoa')),
+      DropdownButtonFormField<String>(
+        key:ValueKey('customer-category-$category'),
+        initialValue:category,
+        isExpanded:true,
+        decoration:const InputDecoration(labelText:'Loại điểm bán'),
+        items:[for(final option in CustomerCategory.all)
+          DropdownMenuItem(value:option.id,child:Row(children:[
+            Icon(option.icon,size:20,color:option.color),
+            const SizedBox(width:10),
+            Flexible(child:Text(option.label,overflow:TextOverflow.ellipsis)),
+          ]))],
+        onChanged:(v)=>setState(()=>category=v??category)),
       const SizedBox(height:12),
       TextFormField(controller:contact,decoration:const InputDecoration(labelText:'Người liên hệ / Chủ cửa hàng')),
       const SizedBox(height:12),
@@ -315,7 +331,14 @@ class _CustomerDetailState extends State<CustomerDetail> {
         padding: const EdgeInsets.all(16),
         children: <Widget>[
           Text(customer.name, style: Theme.of(context).textTheme.headlineSmall),
-          Text('${customer.category} · ${customer.status}'),
+          Row(children:[
+            CustomerCategoryAvatar(category:customer.category),
+            const SizedBox(width:10),
+            Flexible(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+              CustomerCategoryLabel(category:customer.category),
+              Text(customer.status,style:Theme.of(context).textTheme.bodySmall),
+            ])),
+          ]),
           const SizedBox(height: 12),
           Text('Địa chỉ: ${customer.address}, ${customer.district}, ${customer.province}'),
           Text('Chủ điểm bán: ${customer.contact ?? 'Chưa có'}'),

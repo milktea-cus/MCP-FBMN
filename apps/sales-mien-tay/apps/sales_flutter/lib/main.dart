@@ -140,68 +140,10 @@ class _SalesHomeState extends State<SalesHome> {
   }
   List<SalesRecord> _ofKind(String kind) => _items.where((e) => e.kind == kind && (_province.isEmpty || e.province == _province)).toList();
 
-  Widget _stat(String label, String value, IconData icon) => Card(
-    child: Padding(padding: const EdgeInsets.all(18), child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Icon(icon, color: SalesTheme.brand),
-        const SizedBox(height: 14),
-        Text(value, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 4),
-        Text(label, style: Theme.of(context).textTheme.bodySmall),
-      ])),
+  Widget _coverageTable(List<SalesRecord> surveys) => SalesBrandCoverageTable(
+    surveys: surveys,
+    provinces: _catalog.provinces.where((p) => _province.isEmpty || p == _province).toList(),
   );
-
-  Widget _coverageTable(List<SalesRecord> surveys) {
-    final provinces = _catalog.provinces.where((p)=>_province.isEmpty||p==_province).toList();
-    bool has(SalesRecord r, String property, String label) {
-      final value = r.data[property];
-      return value is List && value.contains(label);
-    }
-    int count(List<SalesRecord> rows, String key, String value) =>
-      rows.where((r) => has(r, key, value)).length;
-    final rows = provinces.map((province) {
-      final records = surveys.where((r) => r.province == province).toList();
-      final td = count(records, 'brands', 'Thành Đạt (đối thủ)');
-      int distributors(SalesRecord r) =>
-        (r.data['distributors'] is List ? (r.data['distributors'] as List).length : 0)
-        + ((r.data['otherDistributor']?.toString().trim().isNotEmpty ?? false) ? 1 : 0);
-      return DataRow(cells: [
-        DataCell(Text(province)), DataCell(Text('${records.length}')),
-        DataCell(Text('${count(records, 'distributors', 'Thanh Đạt')}')),
-        DataCell(Text('${count(records, 'distributors', 'Liên Hiệp')}')),
-        DataCell(Text('${count(records, 'distributors', 'Hồng Ân')}')),
-        DataCell(Text('${records.where((r) => distributors(r) >= 2).length}')),
-        for (final brand in const ['MGP', 'HH', 'Hoa Sen', 'Thành Đạt (đối thủ)', 'Bút Cầu', 'Bến Nghé'])
-          DataCell(Text('${count(records, 'brands', brand)}')),
-        DataCell(Text('${records.where((r) => (r.data['brands'] is List
-          && (r.data['brands'] as List).isNotEmpty) ||
-          (r.data['otherBrand']?.toString().trim().isNotEmpty ?? false)).length}')),
-        DataCell(Text('${records.where((r) => (r.data['otherDistributor']?.toString().trim().isNotEmpty ?? false)).length}')),
-        DataCell(Text('${records.where((r) => (r.data['otherBrand']?.toString().trim().isNotEmpty ?? false)).length}')),
-        DataCell(Text(records.isEmpty ? '0%' : '${(td * 100 / records.length).toStringAsFixed(1)}%')),
-      ]);
-    }).toList();
-    return Card(child: Padding(padding: const EdgeInsets.all(8), child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Padding(padding: const EdgeInsets.all(10), child: Text('Hiện diện theo 13 tỉnh/TP cũ',
-        style: Theme.of(context).textTheme.titleMedium)),
-      const Padding(padding: EdgeInsets.symmetric(horizontal: 10), child: Text(
-        'Mỗi điểm bán tính một lần trong cột khảo sát; NPP/nhãn có thể trùng trên cùng khách.',
-        style: TextStyle(fontSize: 12))),
-      SingleChildScrollView(scrollDirection: Axis.horizontal, child: DataTable(
-        columnSpacing: 22,
-        columns: const [
-          DataColumn(label: Text('Tỉnh/TP')), DataColumn(label: Text('KH')),
-          DataColumn(label: Text('NPP Thanh Đạt')), DataColumn(label: Text('Liên Hiệp')),
-          DataColumn(label: Text('Hồng Ân')), DataColumn(label: Text('≥2 NPP')),
-          DataColumn(label: Text('MGP')), DataColumn(label: Text('HH')),
-          DataColumn(label: Text('Hoa Sen')), DataColumn(label: Text('Thành Đạt (đối thủ)')),
-          DataColumn(label: Text('Bút Cầu')), DataColumn(label: Text('Bến Nghé')),
-          DataColumn(label: Text('≥1 nhãn')), DataColumn(label: Text('NPP khác')),
-          DataColumn(label: Text('Nhãn khác')), DataColumn(label: Text('% Thành Đạt')),
-        ], rows: rows)),
-    ])));
-  }
 
   Widget _overview() {
     final surveys = _ofKind('survey');
@@ -214,17 +156,12 @@ class _SalesHomeState extends State<SalesHome> {
       const SizedBox(height: 7),
       const Text('Quản lý khảo sát điểm bán và kế hoạch Sales 13 tỉnh miền Tây (địa giới cũ).'),
       const SizedBox(height: 16),
-      LayoutBuilder(builder: (context, constraints) {
-        final columns = constraints.maxWidth > 900 ? 4 : constraints.maxWidth > 550 ? 2 : 1;
-        return GridView.count(crossAxisCount: columns, childAspectRatio: columns == 1 ? 2.15 : 1.55,
-          mainAxisSpacing: 8, crossAxisSpacing: 8, shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(), children: [
-            _stat('Điểm bán đã khảo sát', '${surveys.length}', Icons.store_outlined),
-            InkWell(onTap:()=>setState(()=>_selectedIndex=3),child:_stat('Quản lý Target','Xem chỉ tiêu',Icons.flag_outlined)),
-            _stat('Doanh thu dự kiến', _money(planned), Icons.payments_outlined),
-            _stat('Điểm bán có nhãn Thành Đạt', '$countTD', Icons.analytics_outlined),
-          ]);
-      }),
+      SalesOverviewKpis(
+        surveyed: surveys.length,
+        planned: _money(planned),
+        brandPresence: countTD,
+        onTarget: () => setState(() => _selectedIndex = 3),
+      ),
       const SizedBox(height: 18),
       Text('Phân hệ nghiệp vụ', style: Theme.of(context).textTheme.titleLarge),
       const SizedBox(height: 10),
@@ -236,7 +173,7 @@ class _SalesHomeState extends State<SalesHome> {
       const SizedBox(height: 20),
       _coverageTable(surveys),
       const SizedBox(height: 10),
-      const Text('Chỉ tính nhãn/NPP được đánh dấu hiện diện. Một điểm bán có thể mang nhiều NPP và nhãn.'),
+      const Text('Chỉ tính nhãn hàng được ghi nhận hiện diện. Một điểm bán có thể có nhiều nhãn hàng.'),
       const SizedBox(height: 14),
     ]);
   }
@@ -335,6 +272,117 @@ class _SalesHomeState extends State<SalesHome> {
         ])),
       ]),
     );
+  }
+}
+
+
+
+const _surveyBrands = ['MGP', 'HH', 'Hoa Sen', 'Thành Đạt (đối thủ)', 'Bút Cầu', 'Bến Nghé'];
+
+/// Compact KPI tiles; fixed row extents prevent giant single-column cards on phones.
+class SalesOverviewKpis extends StatelessWidget {
+  final int surveyed,brandPresence;
+  final String planned;
+  final VoidCallback onTarget;
+  const SalesOverviewKpis({super.key, required this.surveyed, required this.planned,
+    required this.brandPresence, required this.onTarget});
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(builder: (context, size) {
+    final columns = size.maxWidth >= 900 ? 4 : size.maxWidth >= 285 ? 2 : 1;
+    final items = <Widget>[
+      const _KpiTile(label: 'Điểm bán đã khảo sát', value: '', icon: Icons.store_outlined),
+      _KpiTile(label: 'Quản lý Target', value: 'Xem chỉ tiêu', icon: Icons.flag_outlined,
+        onTap: onTarget),
+      _KpiTile(label: 'Doanh thu dự kiến', value: planned, icon: Icons.payments_outlined),
+      _KpiTile(label: 'Có nhãn Thành Đạt', value: '$brandPresence', icon: Icons.analytics_outlined),
+    ];
+    items[0] = _KpiTile(label: 'Điểm bán đã khảo sát', value: '$surveyed', icon: Icons.store_outlined);
+    return GridView.count(
+      crossAxisCount: columns,
+      mainAxisSpacing: 8, crossAxisSpacing: 8,
+      mainAxisExtent: 124,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      children: items,
+    );
+  });
+}
+
+class _KpiTile extends StatelessWidget {
+  final String label,value;
+  final IconData icon;
+  final VoidCallback? onTap;
+  const _KpiTile({required this.label,required this.value,required this.icon,this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(padding: const EdgeInsets.all(11),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(icon, color: colors.primary, size: 19),
+            const SizedBox(height: 5),
+            SizedBox(height: 29, width: double.infinity,
+              child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft,
+                child: Text(value, maxLines: 1, softWrap: false,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)))),
+            const SizedBox(height: 4),
+            Flexible(child: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall)),
+          ])),
+      ),
+    );
+  }
+}
+
+/// Brand counts only. Distributor fields remain available in survey records.
+class SalesBrandCoverageTable extends StatelessWidget {
+  final List<SalesRecord> surveys;
+  final List<String> provinces;
+  const SalesBrandCoverageTable({super.key,required this.surveys,required this.provinces});
+
+  @override
+  Widget build(BuildContext context) {
+    bool hasBrand(SalesRecord record,String brand) {
+      final v=record.data['brands'];
+      return v is List && v.contains(brand);
+    }
+    final rows=provinces.map((province) {
+      final records=surveys.where((r)=>r.province==province).toList();
+      final td=records.where((r)=>hasBrand(r,'Thành Đạt (đối thủ)')).length;
+      return DataRow(cells:[
+        DataCell(Text(province)),
+        DataCell(Text('${records.length}')),
+        for(final brand in _surveyBrands)
+          DataCell(Text('${records.where((r)=>hasBrand(r,brand)).length}')),
+        DataCell(Text('${records.where((r) =>
+          (r.data['brands'] is List && (r.data['brands'] as List).isNotEmpty) ||
+          (r.data['otherBrand']?.toString().trim().isNotEmpty ?? false)).length}')),
+        DataCell(Text('${records.where((r) =>
+          r.data['otherBrand']?.toString().trim().isNotEmpty ?? false).length}')),
+        DataCell(Text(records.isEmpty ? '0%' : '${(td*100/records.length).toStringAsFixed(1)}%')),
+      ]);
+    }).toList();
+    return Card(child:Padding(padding:const EdgeInsets.all(8),
+      child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+        Padding(padding:const EdgeInsets.all(10),
+          child:Text('Hiện diện nhãn hàng theo 13 tỉnh/TP cũ',
+            style:Theme.of(context).textTheme.titleMedium)),
+        const Padding(padding:EdgeInsets.symmetric(horizontal:10),
+          child:Text('Mỗi điểm bán tính một lần trong cột KH; các nhãn hàng có thể cùng xuất hiện tại một điểm bán.',
+            style:TextStyle(fontSize:12))),
+        SingleChildScrollView(scrollDirection:Axis.horizontal,
+          child:DataTable(columnSpacing:22,columns:const[
+            DataColumn(label:Text('Tỉnh/TP')),DataColumn(label:Text('KH')),
+            for(final brand in _surveyBrands)DataColumn(label:Text(brand)),
+            DataColumn(label:Text('≥1 nhãn')),
+            DataColumn(label:Text('Nhãn khác')),DataColumn(label:Text('% Thành Đạt')),
+          ],rows:rows)),
+      ])));
   }
 }
 
