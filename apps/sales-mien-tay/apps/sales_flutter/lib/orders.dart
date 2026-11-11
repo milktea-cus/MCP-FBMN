@@ -46,7 +46,9 @@ class _OrdersPageState extends State<OrdersPage>{
  late final ActualClient client=widget.client??ActualClient(widget.queue);
  final note=TextEditingController();
  List<Map<String,dynamic>> saved=[],drafts=[],lines=[];
- Map<String,dynamic>? selected,customer;
+ Map<String,dynamic>? selected,customer,removedLine;
+ Object? removedFromOrder;
+ int removedIndex=0;
  bool busy=false,offline=false,loading=true,localSaving=false;
  String? error,localError;
  int localGeneration=0;
@@ -110,7 +112,7 @@ class _OrdersPageState extends State<OrdersPage>{
  }
  void create(){
   final id=const Uuid().v4();
-  note.clear();customer=null;lines=[];operation=const Uuid().v4();
+  note.clear();customer=null;lines=[];removedLine=null;operation=const Uuid().v4();
   setState(()=>selected={'id':id,'owner_sub':widget.queue.identity,'customer_id':'','status':'local','version':0,'note':'','local_dirty':true});
   unawaited(_persist().catchError((_){ }));
  }
@@ -119,6 +121,7 @@ class _OrdersPageState extends State<OrdersPage>{
   final r=Map<String,dynamic>.from(row);
   final local=drafts.where((d)=>d['id']==r['id']).firstOrNull;
   final source=local??r;
+  removedLine=null;
   note.text=source['note']?.toString()??'';
   customer=source['customer'] is Map?Map<String,dynamic>.from(source['customer'] as Map):{
    'id':source['customer_id'],'owner_sub':source['owner_sub'],
@@ -128,7 +131,7 @@ class _OrdersPageState extends State<OrdersPage>{
   if(mounted)setState(()=>selected=Map<String,dynamic>.from(source));
  }
  Future<void> chooseCustomer()async{
-  if(!canEdit)return;
+  if(!canEdit||busy)return;
   final item=await showDialog<Map<String,dynamic>>(context:context,
    builder:(_)=>OrderPicker(client:client,queue:widget.queue,type:'customers'));
   if(item==null||!mounted)return;
@@ -138,7 +141,7 @@ class _OrdersPageState extends State<OrdersPage>{
   });localChanged();
  }
  Future<void> addProduct()async{
-  if(!canEdit)return;
+  if(!canEdit||busy)return;
   final item=await showDialog<Map<String,dynamic>>(context:context,
     builder:(_)=>OrderPicker(client:client,queue:widget.queue,type:'products'));
   if(item==null||!mounted)return;
@@ -175,21 +178,20 @@ class _OrdersPageState extends State<OrdersPage>{
  }
  void removeLine(int index){
   if(!canEdit||busy||index<0||index>=lines.length)return;
-  final orderId=selected!['id'];
-  final removed=Map<String,dynamic>.from(lines.removeAt(index));
+  removedFromOrder=selected!['id'];
+  removedIndex=index;
+  removedLine=Map<String,dynamic>.from(lines.removeAt(index));
   localChanged();
-  final messenger=ScaffoldMessenger.of(context);
-  messenger.hideCurrentSnackBar();
-  messenger.showSnackBar(SnackBar(
-   content:const Text('Đã bỏ sản phẩm khỏi giỏ.'),
-   duration:const Duration(seconds:6),
-   action:SnackBarAction(label:'Hoàn tác',onPressed:(){
-    if(!mounted||selected?['id']!=orderId||!canEdit||busy)return;
-    if(lines.any((l)=>l['product_id']==removed['product_id']))return;
-    lines.insert(index>lines.length?lines.length:index,removed);
-    localChanged();
-   }),
-  ));
+ }
+ void undoRemove(){
+  final removed=removedLine;
+  if(removed==null||!canEdit||busy||selected?['id']!=removedFromOrder)return;
+  if(lines.any((line)=>line['product_id']==removed['product_id'])){
+   setState(()=>removedLine=null);return;
+  }
+  lines.insert(removedIndex>lines.length?lines.length:removedIndex,removed);
+  removedLine=null;
+  localChanged();
  }
  String get localStatus{
   if(localError!=null)return localError!;
@@ -350,14 +352,24 @@ class _OrdersPageState extends State<OrdersPage>{
    if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
    if(inCart)...[
     Row(children:[Expanded(child:Text('Đơn ${selected!['id'].toString().substring(0,8)} · ${orderStatus(selected!['status']?.toString()??'local')}')),
-     IconButton(tooltip:'Đóng giỏ',onPressed:()=>setState(()=>selected=null),icon:const Icon(Icons.close))]),
-    OutlinedButton.icon(onPressed:canEdit?chooseCustomer:null,icon:const Icon(Icons.storefront_outlined),
+     IconButton(tooltip:'Đóng giỏ',onPressed:busy?null:()=>setState(()=>selected=null),icon:const Icon(Icons.close))]),
+    OutlinedButton.icon(onPressed:canEdit&&!busy?chooseCustomer:null,icon:const Icon(Icons.storefront_outlined),
      label:Text(customer?['name']?.toString().isNotEmpty==true?
       '${customer!['name']} · CTY: ${customer!['export_code']??'CHƯA CÓ MÃ'}':'Chọn khách hàng')),
     if(customer!=null&&(customer!['export_code']==null||customer!['export_code'].toString().isEmpty))
      const Text('Khách chưa có mã công ty. Có thể lưu nháp nhưng chưa xuất được.'),
     if(canEdit)OutlinedButton.icon(onPressed:busy?null:addProduct,icon:const Icon(Icons.add_shopping_cart),
      label:const Text('Thêm sản phẩm')),
+    if(removedLine!=null&&canEdit)Card(
+     child:Padding(padding:const EdgeInsets.symmetric(horizontal:10,vertical:4),
+      child:Row(children:[
+       Expanded(child:Text('Đã bỏ mã ${removedLine!['company_code']??'sản phẩm'}',
+        maxLines:1,overflow:TextOverflow.ellipsis)),
+       TextButton(onPressed:busy?null:undoRemove,child:const Text('Hoàn tác')),
+       IconButton(tooltip:'Đóng hoàn tác',onPressed:()=>setState(()=>removedLine=null),
+        icon:const Icon(Icons.close),constraints:const BoxConstraints(minWidth:44,minHeight:44)),
+      ])),
+    ),
     for(var i=0;i<lines.length;i++)OrderCartLine(
      key:ValueKey(lines[i]['line_id']),
      number:i+1,line:lines[i],stockMessage:orderStockMessage(lines[i]),

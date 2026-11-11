@@ -147,6 +147,8 @@ void main(){
   await tester.tap(find.byKey(ValueKey('cart-delete-$firstLineId')));
   await tester.pump();
   expect(find.text('Hoàn tác'),findsOneWidget);
+  await tester.ensureVisible(find.text('Hoàn tác'));
+  await tester.pumpAndSettle();
   await tester.tap(find.text('Hoàn tác'));await tester.pumpAndSettle();
   expect(find.byKey(ValueKey('cart-quantity-$firstLineId')),findsOneWidget);
   final lines=queue.store['order-drafts-v1']!.last['lines'] as List;
