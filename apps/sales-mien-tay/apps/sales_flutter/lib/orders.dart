@@ -6,7 +6,7 @@ import 'actuals.dart';
 import 'offline_queue.dart';
 import 'order_export.dart';
 import 'session.dart';
-import 'stock.dart';
+import 'order_picker.dart';
 
 List<Map<String,dynamic>> orderRows(Object? value)=>(value as List? ?? []).map((x)=>Map<String,dynamic>.from(x as Map)).toList();
 String orderStatus(String value)=>switch(value){
@@ -111,7 +111,7 @@ class _OrdersPageState extends State<OrdersPage>{
  Future<void> chooseCustomer()async{
   if(!canEdit)return;
   final item=await showDialog<Map<String,dynamic>>(context:context,
-   builder:(_)=>_OrderPicker(client:client,queue:widget.queue,type:'customers'));
+   builder:(_)=>OrderPicker(client:client,queue:widget.queue,type:'customers'));
   if(item==null||!mounted)return;
   setState((){
    customer=item;selected!['customer_id']=item['id'];
@@ -121,11 +121,22 @@ class _OrdersPageState extends State<OrdersPage>{
  Future<void> addProduct()async{
   if(!canEdit)return;
   final item=await showDialog<Map<String,dynamic>>(context:context,
-    builder:(_)=>_OrderPicker(client:client,queue:widget.queue,type:'products'));
+    builder:(_)=>OrderPicker(client:client,queue:widget.queue,type:'products'));
   if(item==null||!mounted)return;
   final productId=item['id']?.toString()??'';
-  if(productId.isEmpty||lines.any((x)=>x['product_id']==productId)){
-   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Mã CTY đã có trong giỏ hoặc chưa được đồng bộ.')));
+  if(productId.isEmpty){
+   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Sản phẩm chưa có mã đồng bộ.')));
+   return;
+  }
+  final existing=lines.indexWhere((x)=>x['product_id']==productId);
+  if(existing>=0){
+   final quantity=int.tryParse('${lines[existing]['quantity']}')??0;
+   if(quantity>=100000000){
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Số lượng đã đạt giới hạn.')));
+    return;
+   }
+   lines[existing]['quantity']=quantity+1;
+   localChanged();
    return;
   }
   if(item['unit']==null||item['unit'].toString().trim().isEmpty){
@@ -317,57 +328,4 @@ class _OrdersPageState extends State<OrdersPage>{
    const Padding(padding:EdgeInsets.all(8),child:Text('Excel xuất là mẫu CHUẨN BỊ nhập công ty, chưa được đối chiếu mẫu chính thức. Tồn là snapshot, không được giữ chỗ khi ra đơn.')),
   ]);
  }
-}
-class _OrderPicker extends StatefulWidget{
- final ActualClient client;final OfflineQueue queue;final String type;
- const _OrderPicker({required this.client,required this.queue,required this.type});
- @override State<_OrderPicker> createState()=>_OrderPickerState();
-}
-class _OrderPickerState extends State<_OrderPicker>{
- final search=TextEditingController();List<Map<String,dynamic>> rows=[];bool busy=true,offline=false;
- String? error;int generation=0;
- @override void initState(){super.initState();load();}
- @override void dispose(){search.dispose();super.dispose();}
- Future<void> load()async{
-  final g=++generation;setState((){busy=true;error=null;offline=false;});
-  try{
-   final data=await widget.client.get(Uri(path:'/api/v1/orders/${widget.type}',
-    queryParameters:{'q':search.text.trim()}).toString());
-   if(mounted&&g==generation){rows=orderRows(data['items']);
-    await widget.queue.cache('order-picker-${widget.type}',[{'items':rows}]);}
-  }catch(e){
-   if(e is ApiFailure&&(e.status==401||e.status==403)){rows=[];error='Quyền đã thay đổi.';}
-   else{
-    try{
-     final saved=await widget.queue.cached('order-picker-${widget.type}');
-     var all=orderRows(saved.firstOrNull?['items']);
-     if(all.isEmpty&&widget.type=='products'){
-      final stock=await widget.queue.cached(stockCacheKey);
-      all=orderRows(stock.firstOrNull?['items']);
-     }
-     final q=search.text.toLowerCase().trim();
-     rows=all.where((r)=>q.isEmpty||['name','company_code','export_code','sku'].any((k)=>(r[k]?.toString()??'').toLowerCase().contains(q))).toList();
-     offline=true;error='Danh mục lưu máy; tồn và quyền sẽ kiểm lại khi xuất.';
-    }catch(_){rows=[];error='Chưa có danh mục đã lưu.';}
-   }
-  }
-  if(mounted&&g==generation)setState(()=>busy=false);
- }
- @override Widget build(BuildContext context)=>AlertDialog(
-  title:Text(widget.type=='customers'?'Chọn điểm bán':'Chọn mã CTY'),
-  content:SizedBox(width:500,height:430,child:Column(children:[
-   TextField(controller:search,decoration:InputDecoration(labelText:'Tìm mã hoặc tên',
-    suffixIcon:IconButton(icon:const Icon(Icons.search),onPressed:load)),onSubmitted:(_)=>load()),
-   if(busy)const LinearProgressIndicator(),
-   if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
-   Expanded(child:ListView(children:[
-    for(final r in rows)ListTile(
-     title:Text('${widget.type=='products'?' ${r['company_code']} · ':''}${r['name']}'),
-     subtitle:Text(widget.type=='products'?
-      'ĐVT: ${r['unit']??'—'} · Tồn: ${r['quantity']??'Chưa có'} · ${orderStockStale(r['snapshot_at'])?'Tồn cũ':'Tồn mới'}':
-      'Mã khách CTY: ${r['export_code']??'CHƯA CÓ'} · ${r['province']??''}'),
-     onTap:()=>Navigator.pop(context,r)),
-    if(!busy&&rows.isEmpty)const Text('Không tìm thấy dữ liệu phù hợp'),
-   ])),
-  ])),actions:[TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Đóng'))]);
 }
