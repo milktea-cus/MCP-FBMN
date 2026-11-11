@@ -71,4 +71,86 @@ void main(){
     await tester.pumpAndSettle();
     expect(tester.takeException(),isNull);
   });
+
+  testWidgets('Bulk route planner opens immediately, preserves selection order',
+    (tester)async{
+    tester.view.devicePixelRatio=1;
+    tester.view.physicalSize=const Size(390,844);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final pending=Completer<List<FieldCustomer>>();
+    SalesBulkCustomerSelection? choice;
+    await tester.pumpWidget(MaterialApp(home:Scaffold(body:Builder(
+      builder:(context)=>FilledButton(
+        onPressed:()async{
+         choice=await showDialog<SalesBulkCustomerSelection>(
+          context:context,
+          builder:(_)=>SalesBulkCustomerPicker(
+            customers:pending.future,
+            initialDate:DateTime(2026,11,11),
+          ),
+         );
+        },
+        child:const Text('Lập nhiều khách'),
+      )))));
+    await tester.tap(find.text('Lập nhiều khách').first);
+    await tester.pump();
+    expect(find.text('Đang mở danh sách khách hàng…'),findsOneWidget);
+    expect(find.text('Xem trước'),findsOneWidget);
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Xem trước'))
+      .onPressed,isNull);
+    pending.complete([
+      sampleCustomer('Đại lý A'),
+      FieldCustomer.fromJson({
+       ...sampleCustomer('Đại lý B').toJson(),
+       'id':'22222222-2222-4222-8222-222222222222',
+      }),
+    ]);
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Đại lý A'),findsOneWidget);
+    expect(find.text('Đại lý B'),findsOneWidget);
+    await tester.tap(find.text('Đại lý B'));
+    await tester.pump();
+    await tester.tap(find.text('Đại lý A'));
+    await tester.pump();
+    await tester.tap(find.text('Xem trước'));
+    await tester.pumpAndSettle();
+    expect(choice,isNotNull);
+    expect(choice!.selected,[
+      '22222222-2222-4222-8222-222222222222',
+      '11111111-1111-4111-8111-111111111111',
+    ]);
+    expect(choice!.date,DateTime(2026,11,11));
+    expect(tester.takeException(),isNull);
+  });
+
+  testWidgets('Bulk route copied selections stay scoped to returned customers',
+    (tester)async{
+    SalesBulkCustomerSelection? choice;
+    await tester.pumpWidget(MaterialApp(home:Scaffold(body:Builder(
+      builder:(context)=>FilledButton(
+        onPressed:()async{
+         choice=await showDialog<SalesBulkCustomerSelection>(
+          context:context,builder:(_)=>SalesBulkCustomerPicker(
+            customers:Future.value([sampleCustomer('Đại lý A')]),
+            initialDate:DateTime(2026,11,11),copying:true,
+            preselectedIds:const [
+              '11111111-1111-4111-8111-111111111111',
+              'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            ],
+          ));
+        },
+        child:const Text('Sao chép'),
+      )))));
+    await tester.tap(find.text('Sao chép'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Xem trước tuyến sao chép'),findsOneWidget);
+    await tester.tap(find.text('Xem trước'));
+    await tester.pumpAndSettle();
+    expect(choice!.selected,['11111111-1111-4111-8111-111111111111']);
+    expect(tester.takeException(),isNull);
+  });
+
 }

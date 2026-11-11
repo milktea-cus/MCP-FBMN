@@ -77,23 +77,37 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
  void notify(String message){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(message)));}
  Future<void> bulkPlan({List<Map<String,dynamic>>? source})async{
   try{
-   // Use only server-authorized customers, including the cached scoped list when offline.
-   List<FieldCustomer> customers;
-   try{customers=await widget.service.list();await widget.queue.cache('customers:${widget.service.province}',customers.map((c)=>c.toJson()).toList());}
-   catch(e){if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;customers=(await widget.queue.cached('customers:${widget.service.province}')).map(FieldCustomer.fromJson).toList();}
-   customers=customers.where((c)=>c.owner==widget.queue.identity&&(district.isEmpty||c.district==district)).toList();
+   // Open the planner immediately: fetching permission-scoped customers does
+   // not block the first animation frame of its dialog.
+   final available=()async{
+    List<FieldCustomer> customers;
+    try{
+     customers=await widget.service.list();
+     unawaited(widget.queue.cache('customers:${widget.service.province}',
+       customers.map((c)=>c.toJson()).toList()).catchError((_){ }));
+    }catch(e){
+     if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;
+     customers=(await widget.queue.cached('customers:${widget.service.province}'))
+       .map(FieldCustomer.fromJson).toList();
+    }
+    return customers.where((c)=>c.owner==widget.queue.identity&&
+      (district.isEmpty||c.district==district)).toList();
+   }();
    if(!mounted)return;
-   var date=day;
-   final selected=<String>[];
-   if(source!=null){for(final r in source){final id=r['customer_id'].toString();if(customers.any((c)=>c.id==id)&&!selected.contains(id))selected.add(id);}}
-   final ok=await showDialog<bool>(context:context,builder:(c)=>StatefulBuilder(builder:(c,local)=>AlertDialog(
-    title:Text(source==null?'Lập tuyến nhiều khách':'Xem trước tuyến sao chép'),
-    content:SizedBox(width:460,height:440,child:Column(children:[
-     OutlinedButton.icon(onPressed:()async{final d=await showDatePicker(context:c,initialDate:date,firstDate:DateTime(2020),lastDate:DateTime(2100));if(d!=null)local(()=>date=d);},icon:const Icon(Icons.calendar_today),label:Text('${dayKey(date)} · Kỳ ${planningPeriod(date)}')),
-     Text('${selected.length} khách · thứ tự theo thứ tự chọn'),
-     Expanded(child:ListView(children:[for(final customer in customers)CheckboxListTile(value:selected.contains(customer.id),title:Text(customer.name),subtitle:Text('${customer.district}, ${customer.province}'),secondary:selected.contains(customer.id)?CircleAvatar(child:Text('${selected.indexOf(customer.id)+1}')):null,onChanged:(v)=>local((){if(v==true){selected.add(customer.id);}else{selected.remove(customer.id);}}))])),
-    ])),actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Hủy')),FilledButton(onPressed:selected.isEmpty?null:()=>Navigator.pop(c,true),child:const Text('Xem trước'))])));
-   if(ok!=true||!mounted)return;
+   final choice=await showDialog<SalesBulkCustomerSelection>(
+    context:context,
+    builder:(_)=>SalesBulkCustomerPicker(
+     customers:available,
+     initialDate:day,
+     copying:source!=null,
+     preselectedIds:[
+      for(final entry in source??<Map<String,dynamic>>[])
+       entry['customer_id'].toString(),
+     ],
+    ),
+   );
+   if(choice==null||!mounted)return;
+   final date=choice.date,customers=choice.customers,selected=choice.selected;
    final key=dayKey(date);
    List<Map<String,dynamic>> existing;
    final cacheKey='routes-v2:day:$key:${widget.service.province}';
@@ -267,4 +281,100 @@ class SalesStopCustomerPicker extends StatelessWidget {
   actions:[TextButton(onPressed:()=>Navigator.pop(context),
    child:const Text('Đóng'))],
  );
+}
+
+/// Selection carries exactly the account- and district-filtered customer rows
+/// used for the preview; order remains the tap order, not an implicit sorting.
+class SalesBulkCustomerSelection {
+ final DateTime date;
+ final List<FieldCustomer> customers;
+ final List<String> selected;
+ const SalesBulkCustomerSelection(this.date,this.customers,this.selected);
+}
+
+/// Render the multi-stop planner before network data arrives. No data from a
+/// denied request is displayed; offline fallback is still scoped by the queue.
+class SalesBulkCustomerPicker extends StatefulWidget {
+ final Future<List<FieldCustomer>> customers;
+ final DateTime initialDate;
+ final bool copying;
+ final List<String> preselectedIds;
+ const SalesBulkCustomerPicker({
+  super.key,required this.customers,required this.initialDate,
+  this.copying=false,this.preselectedIds=const [],
+ });
+ @override State<SalesBulkCustomerPicker> createState()=>_SalesBulkCustomerPickerState();
+}
+class _SalesBulkCustomerPickerState extends State<SalesBulkCustomerPicker> {
+ late final Future<List<FieldCustomer>> _available;
+ late DateTime date;
+ final selected=<String>[];
+ @override void initState(){
+  super.initState();
+  date=widget.initialDate;
+  // The FutureBuilder rebuilds after the allowed preselection is ready.
+  _available=widget.customers.then((rows){
+   for(final id in widget.preselectedIds){
+    if(rows.any((c)=>c.id==id)&&!selected.contains(id))selected.add(id);
+   }
+   return rows;
+  });
+ }
+ @override Widget build(BuildContext context)=>FutureBuilder<List<FieldCustomer>>(
+  future:_available,
+  builder:(context,snapshot){
+   final customers=snapshot.data??<FieldCustomer>[];
+   return AlertDialog(
+    title:Text(widget.copying?'Xem trước tuyến sao chép':'Lập tuyến nhiều khách'),
+    content:SizedBox(width:460,height:440,child:
+     snapshot.connectionState!=ConnectionState.done
+      ?const Center(child:Column(mainAxisSize:MainAxisSize.min,children:[
+        CircularProgressIndicator(),SizedBox(height:16),
+        Text('Đang mở danh sách khách hàng…'),
+       ]))
+      :snapshot.hasError
+       ?const Center(child:Text('Không tải được khách hàng. Kiểm tra mạng rồi thử lại.'))
+       :Column(children:[
+        OutlinedButton.icon(
+         onPressed:()async{
+          final chosen=await showDatePicker(context:context,
+           initialDate:date,firstDate:DateTime(2020),lastDate:DateTime(2100));
+          if(chosen!=null&&mounted)setState(()=>date=chosen);
+         },
+         icon:const Icon(Icons.calendar_today),
+         label:Text('${dayKey(date)} · Kỳ ${planningPeriod(date)}'),
+        ),
+        Text('${selected.length} khách · thứ tự theo thứ tự chọn'),
+        Expanded(child:ListView.builder(
+         itemCount:customers.length,
+         itemBuilder:(context,index){
+          final customer=customers[index];
+          final position=selected.indexOf(customer.id);
+          return CheckboxListTile(
+           value:position>=0,
+           title:Text(customer.name),
+           subtitle:Text('${customer.district}, ${customer.province}'),
+           secondary:position>=0?CircleAvatar(child:Text('${position+1}')):null,
+           onChanged:(checked)=>setState((){
+            if(checked==true){
+             if(!selected.contains(customer.id))selected.add(customer.id);
+            }else{
+             selected.remove(customer.id);
+            }
+           }),
+          );
+         })),
+       ])),
+    actions:[
+     TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Hủy')),
+     FilledButton(
+      onPressed:snapshot.hasData&&selected.isNotEmpty
+       ?()=>Navigator.pop(context,SalesBulkCustomerSelection(
+         date,customers,List<String>.of(selected)))
+       :null,
+      child:const Text('Xem trước'),
+     ),
+    ],
+   );
+  });
 }
