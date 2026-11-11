@@ -9,12 +9,20 @@ import 'package:uuid/uuid.dart';
 import 'models.dart';
 import 'session.dart';
 import 'offline_queue.dart';
-import 'editor.dart';
-import 'surveys.dart';
 import 'customer_categories.dart';
 import 'customer_assortment.dart';
+import 'theme.dart';
 import 'survey_media.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+/// A contact action accepts telephone numbers only, never arbitrary URLs.
+Uri? customerCallUri(String? raw) {
+  final original=raw?.trim()??'';
+  if(!RegExp(r'^\+?[0-9 ().-]{8,20}$').hasMatch(original))return null;
+  final number=original.replaceAll(RegExp(r'[ ().-]'),'');
+  if(!RegExp(r'^\+?[0-9]{8,15}$').hasMatch(number))return null;
+  return Uri(scheme:'tel',path:number);
+}
 
 class FieldCustomer {
   final String id, name, address, province, district, category, status;
@@ -101,9 +109,10 @@ class CustomerService {
     decode(res,201);
   }
   Future<void> setCover(String customerId,String photoId) async {
-    final res=await http.patch(uri('/api/v1/customers/$customerId/cover'),
-      headers:{...headers,'Content-Type':'application/json'},
-      body:jsonEncode({'photo_id':photoId})).timeout(const Duration(seconds:20));
+    final request=uri('/api/v1/customers/$customerId/cover');
+    final res=await (client?.patch(request,headers:headers,body:jsonEncode({'photo_id':photoId})) ??
+      http.patch(request,headers:headers,body:jsonEncode({'photo_id':photoId})))
+      .timeout(const Duration(seconds:20));
     decode(res);
   }
   Future<List<Map<String,dynamic>>> media(String customerId) async {
@@ -388,6 +397,19 @@ class _CustomerEditorState extends State<CustomerEditor> {
     ])));
 }
 
+/// The shop photo scrolls offscreen; three FBMN tabs remain pinned.
+class CustomerProfileTabHeader extends SliverPersistentHeaderDelegate {
+  final Widget child;
+  final Color background;
+  const CustomerProfileTabHeader({required this.child,required this.background});
+  @override double get minExtent=>56;
+  @override double get maxExtent=>56;
+  @override Widget build(BuildContext context,double shrinkOffset,bool overlapsContent)=>
+    ColoredBox(color:background,child:SizedBox.expand(child:child));
+  @override bool shouldRebuild(covariant CustomerProfileTabHeader oldDelegate)=>
+    oldDelegate.child!=child||oldDelegate.background!=background;
+}
+
 class CustomerDetail extends StatefulWidget {
   final CustomerService service;
   final FieldCustomer customer;
@@ -419,9 +441,7 @@ class _CustomerDetailState extends State<CustomerDetail> {
     final day='${d.day.toString().padLeft(2,'0')}/${d.month.toString().padLeft(2,'0')}/${d.year}';
     return '$day · ${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}';
   }
-  String _label(Map<String,dynamic> item)=>item['source']=='customer'
-    ?'Ảnh điểm bán'
-    :photoLabels[item['kind']]??'Ảnh khảo sát';
+  String _label(Map<String,dynamic> item)=>'Ảnh cửa hàng';
   List<Map<String,dynamic>> get pendingPhotos{
     final prefix='/api/v1/customers/${widget.customer.id}';
     return (widget.queue?.pending??[]).where((r)=>
@@ -488,13 +508,6 @@ class _CustomerDetailState extends State<CustomerDetail> {
       actions:[TextButton(onPressed:()=>Navigator.pop(dialogContext),child:const Text('Đóng'))],
     ));
   }
-  Future<void> addRecord(String kind)async{
-    final queue=widget.queue;if(queue==null)return;
-    await Navigator.push(context,MaterialPageRoute(builder:(_)=>RecordEditor(
-      kind:kind,catalog:widget.regions,linkedCustomer:widget.customer.toJson(),
-      onSave:(data)async{await queue.enqueue('/api/v1/records',data);},
-    )));
-  }
   Future<void> addPhoto(ImageSource source)async{
     if(busy)return;
     setState(()=>busy=true);
@@ -511,25 +524,6 @@ class _CustomerDetailState extends State<CustomerDetail> {
       }else{
         await widget.service.uploadPhoto(widget.customer.id,photo);
         await load();
-      }
-    }catch(e){if(mounted)setState(()=>message='$e');}
-    finally{if(mounted)setState(()=>busy=false);}
-  }
-  Future<void> checkin()async{
-    if(busy)return;
-    setState(()=>busy=true);
-    try{
-      final pos=await captureGps(context);
-      if(pos.accuracy>100)throw StateError('Độ chính xác GPS lớn hơn 100m');
-      if(widget.queue!=null){
-        await widget.queue!.enqueue('/api/v1/customers/${widget.customer.id}/visits',{
-          'latitude':pos.latitude,'longitude':pos.longitude,
-          'accuracy_m':pos.accuracy,'captured_at':pos.timestamp.toUtc().toIso8601String(),
-        });
-        if(mounted)setState(()=>message='Đã lưu check-in trên máy · chờ xác minh');
-      }else{
-        await widget.service.checkin(widget.customer.id,pos,const Uuid().v4());
-        if(mounted){setState(()=>message='Check-in thành công');await load();}
       }
     }catch(e){if(mounted)setState(()=>message='$e');}
     finally{if(mounted)setState(()=>busy=false);}
@@ -561,10 +555,10 @@ class _CustomerDetailState extends State<CustomerDetail> {
     finally{if(mounted)setState(()=>busy=false);}
   }
   Future<void> _call()async{
-    final phone=widget.customer.phone?.replaceAll(RegExp(r'[^0-9+]'),'')??'';
-    if(phone.isEmpty)return;
+    final uri=customerCallUri(widget.customer.phone);
+    if(uri==null)return;
     try{
-      if(!await launchUrl(Uri(scheme:'tel',path:phone),mode:LaunchMode.externalApplication)){
+      if(!await launchUrl(uri,mode:LaunchMode.externalApplication)){
         throw StateError('Thiết bị không hỗ trợ gọi điện');
       }
     }catch(e){if(mounted)setState(()=>message='$e');}
@@ -679,7 +673,7 @@ class _CustomerDetailState extends State<CustomerDetail> {
     final cover=_coverPhoto;
     final gps=c.latitude==null||c.longitude==null?'Chưa ghi nhận':
       '${c.latitude!.toStringAsFixed(6)}, ${c.longitude!.toStringAsFixed(6)}';
-    final phone=c.phone?.replaceAll(RegExp(r'[^0-9+]'),'')??'';
+    final callUri=customerCallUri(c.phone);
     return DefaultTabController(length:3,child:Scaffold(
       appBar:AppBar(title:const Text('Hồ sơ điểm bán'),actions:[
         if(own)IconButton(tooltip:'Sửa thông tin',icon:const Icon(Icons.edit_outlined),onPressed:()async{
@@ -688,7 +682,9 @@ class _CustomerDetailState extends State<CustomerDetail> {
           if(changed==true&&context.mounted)Navigator.pop(context,true);
         }),
       ]),
-      body:Column(children:[
+      body:NestedScrollView(
+        headerSliverBuilder:(context,innerBoxIsScrolled)=>[
+          SliverToBoxAdapter(child:Column(children:[
         Padding(padding:const EdgeInsets.fromLTRB(12,8,12,4),child:Card(
           clipBehavior:Clip.antiAlias,margin:EdgeInsets.zero,
           child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
@@ -722,7 +718,7 @@ class _CustomerDetailState extends State<CustomerDetail> {
                   style:Theme.of(context).textTheme.bodySmall),
               ])),
             Padding(padding:const EdgeInsets.fromLTRB(12,6,12,12),child:Row(children:[
-              Expanded(child:OutlinedButton.icon(onPressed:phone.isEmpty?null:_call,
+              Expanded(child:OutlinedButton.icon(onPressed:callUri==null?null:_call,
                 icon:const Icon(Icons.call_outlined,size:18),label:const Text('Gọi điện'))),
               const SizedBox(width:8),
               Expanded(child:OutlinedButton.icon(onPressed:_map,
@@ -733,15 +729,18 @@ class _CustomerDetailState extends State<CustomerDetail> {
         if(message!=null)Padding(padding:const EdgeInsets.symmetric(horizontal:14,vertical:2),
           child:Text(message!,maxLines:2,overflow:TextOverflow.ellipsis,
             style:Theme.of(context).textTheme.bodySmall)),
-        Padding(padding:const EdgeInsets.symmetric(horizontal:12,vertical:4),
-          child:Material(
-            color:Theme.of(context).colorScheme.surface,
-            borderRadius:BorderRadius.circular(9),
-            child:const TabBar(tabs:[
-              Tab(text:'Thông tin'),Tab(text:'Sản phẩm'),Tab(text:'Hình ảnh'),
-            ]),
+          ])),
+          SliverPersistentHeader(pinned:true,delegate:CustomerProfileTabHeader(
+            background:Theme.of(context).scaffoldBackgroundColor,
+            child:Padding(padding:const EdgeInsets.symmetric(horizontal:12,vertical:4),
+              child:Material(color:Theme.of(context).colorScheme.surface,
+                borderRadius:BorderRadius.circular(SalesTheme.controlRadius),
+                child:const TabBar(tabs:[
+                  Tab(text:'Thông tin'),Tab(text:'Sản phẩm'),Tab(text:'Hình ảnh'),
+                ]))),
           )),
-        Expanded(child:TabBarView(children:[
+        ],
+        body:TabBarView(children:[
           ListView(key:const PageStorageKey('customer-info'),
             padding:const EdgeInsets.fromLTRB(12,4,12,16),children:[
               _section('Thông tin liên hệ',Icons.contact_phone_outlined,Column(children:[
@@ -755,13 +754,6 @@ class _CustomerDetailState extends State<CustomerDetail> {
                   _line(Icons.gps_fixed_outlined,'GPS',gps),
                 ],
               )),
-              if(own&&widget.queue!=null)Padding(padding:const EdgeInsets.symmetric(vertical:6),
-                child:Wrap(spacing:8,runSpacing:8,children:[
-                  OutlinedButton.icon(onPressed:()=>addRecord('forecast'),
-                    icon:const Icon(Icons.payments_outlined),label:const Text('Dự kiến doanh thu')),
-                  FilledButton.icon(onPressed:busy?null:checkin,
-                    icon:const Icon(Icons.location_pin),label:const Text('Check-in')),
-                ])),
               if(!own)const Padding(padding:EdgeInsets.all(8),
                 child:Text('Chế độ xem theo phân quyền.')),
               _section('Lịch sử ghé thăm',Icons.history_outlined,
@@ -784,8 +776,8 @@ class _CustomerDetailState extends State<CustomerDetail> {
             ]),
           ListView(key:const PageStorageKey('customer-photos'),
             padding:const EdgeInsets.fromLTRB(12,4,12,16),children:[_gallery()]),
-        ])),
-      ]),
+        ]),
+      ),
     ));
   }
 }
