@@ -9,6 +9,7 @@ import {catalogImportRoutes} from './catalog_import';
 import {inventoryRoutes} from './inventory';
 import {targetRoutes} from './targets';
 import {actualRoutes} from './actuals';
+import {orderRoutes} from './orders';
 import {performanceRoutes} from './performance';
 
 interface Env {
@@ -112,6 +113,8 @@ export default {
       if (productResponse) return productResponse;
       const performanceResponse=await performanceRoutes(req,env,user,url);
       if(performanceResponse)return performanceResponse;
+      const orderResponse=await orderRoutes(req,env,user,url);
+      if(orderResponse)return orderResponse;
       const actualResponse=await actualRoutes(req,env,user,url);
       if(actualResponse)return actualResponse;
       const targetResponse=await targetRoutes(req,env,user,url);
