@@ -100,6 +100,12 @@ class CustomerService {
         'sha256':media.hash,'thumbnail_sha256':media.thumbnailHash})).timeout(const Duration(seconds:30));
     decode(res,201);
   }
+  Future<void> setCover(String customerId,String photoId) async {
+    final res=await http.patch(uri('/api/v1/customers/$customerId/cover'),
+      headers:{...headers,'Content-Type':'application/json'},
+      body:jsonEncode({'photo_id':photoId})).timeout(const Duration(seconds:20));
+    decode(res);
+  }
   Future<List<Map<String,dynamic>>> media(String customerId) async {
     final res=await http.get(uri('/api/v1/customers/$customerId/media'),headers:headers).timeout(const Duration(seconds:20));
     final data=decode(res);
@@ -392,11 +398,11 @@ class CustomerDetail extends StatefulWidget {
 }
 
 class _CustomerDetailState extends State<CustomerDetail> {
-  List<Map<String,dynamic>> gallery=[],visits=[],sessions=[];
+  List<Map<String,dynamic>> gallery=[],visits=[];
+  String? selectedCoverId;
   final Map<String,Future<Uint8List>> imageTasks={};
   String? message;
   bool busy=false;
-  String filter='all';
   @override void initState(){
     super.initState();
     widget.queue?.addListener(_queueChanged);
@@ -426,17 +432,15 @@ class _CustomerDetailState extends State<CustomerDetail> {
     try{
       final pictures=await widget.service.media(cid);
       final history=await widget.service.visits(cid);
-      final surveyHistory=await widget.service.sessions(cid);
       final queue=widget.queue;
       if(queue!=null){
         await queue.cache('customer-media:$cid',pictures);
         await queue.cache('visits:$cid',history);
-        await queue.cache('customer-sessions:$cid',surveyHistory);
       }
-      if(mounted)setState((){gallery=pictures;visits=history;sessions=surveyHistory;imageTasks.clear();message=null;});
+      if(mounted)setState((){gallery=pictures;visits=history;selectedCoverId=null;imageTasks.clear();message=null;});
     }catch(e){
       if(e is ApiFailure&&(e.status==401||e.status==403)){
-        if(mounted)setState((){gallery=[];visits=[];sessions=[];imageTasks.clear();message='Không có quyền xem dữ liệu này';});
+        if(mounted)setState((){gallery=[];visits=[];imageTasks.clear();message='Không có quyền xem dữ liệu này';});
         return;
       }
       final queue=widget.queue;
@@ -444,8 +448,7 @@ class _CustomerDetailState extends State<CustomerDetail> {
         try{
           final cachedMedia=await queue.cached('customer-media:$cid');
           final cachedVisits=await queue.cached('visits:$cid');
-          final cachedSessions=await queue.cached('customer-sessions:$cid');
-          if(mounted)setState((){gallery=cachedMedia;visits=cachedVisits;sessions=cachedSessions;message='Đang ngoại tuyến · hiển thị dữ liệu đã lưu trên máy';});
+          if(mounted)setState((){gallery=cachedMedia;visits=cachedVisits;message='Đang ngoại tuyến · hiển thị dữ liệu đã lưu trên máy';});
           return;
         }catch(_){}
       }
@@ -531,6 +534,41 @@ class _CustomerDetailState extends State<CustomerDetail> {
     }catch(e){if(mounted)setState(()=>message='$e');}
     finally{if(mounted)setState(()=>busy=false);}
   }
+  Map<String,dynamic>? get _coverPhoto{
+    final photos=gallery.where((p)=>p['source']=='customer').toList();
+    final pending=(widget.queue?.pending??<Map<String,dynamic>>[])
+      .where((r)=>r['path']=='/api/v1/customers/${widget.customer.id}/cover').toList();
+    final queuedId=pending.isEmpty?null:(pending.last['payload'] as Map?)?['photo_id']?.toString();
+    final id=selectedCoverId??queuedId;
+    return photos.where((p)=>p['id'].toString()==id).firstOrNull
+      ??photos.where((p)=>p['is_cover']==true).firstOrNull
+      ??photos.firstOrNull;
+  }
+  Future<void> _setCover(Map<String,dynamic> photo)async{
+    if(busy||widget.customer.owner!=widget.service.identity)return;
+    setState(()=>busy=true);
+    try{
+      final id=photo['id'].toString();
+      if(widget.queue!=null){
+        await widget.queue!.enqueue('/api/v1/customers/${widget.customer.id}/cover',
+          {'photo_id':id},method:'PATCH');
+        if(mounted)setState((){selectedCoverId=id;message='Đã lưu lựa chọn ảnh đại diện · chờ đồng bộ';});
+      }else{
+        await widget.service.setCover(widget.customer.id,id);
+        if(mounted)setState((){selectedCoverId=id;message='Đã cập nhật ảnh đại diện';});
+      }
+    }catch(e){if(mounted)setState(()=>message='$e');}
+    finally{if(mounted)setState(()=>busy=false);}
+  }
+  Future<void> _call()async{
+    final phone=widget.customer.phone?.replaceAll(RegExp(r'[^0-9+]'),'')??'';
+    if(phone.isEmpty)return;
+    try{
+      if(!await launchUrl(Uri(scheme:'tel',path:phone),mode:LaunchMode.externalApplication)){
+        throw StateError('Thiết bị không hỗ trợ gọi điện');
+      }
+    }catch(e){if(mounted)setState(()=>message='$e');}
+  }
   Future<void> _map()async{
     final c=widget.customer;
     final query=c.latitude!=null&&c.longitude!=null
@@ -562,36 +600,47 @@ class _CustomerDetailState extends State<CustomerDetail> {
     ]),
   );
   Widget _photoTile(Map<String,dynamic> item){
+    final chosen=_coverPhoto?['id']==item['id'];
+    final own=widget.customer.owner==widget.service.identity;
     return Card(clipBehavior:Clip.antiAlias,margin:EdgeInsets.zero,
-      child:InkWell(onTap:()=>_fullScreen(item),child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-        Expanded(child:FutureBuilder<Uint8List>(future:_thumbnail(item),builder:(context,s)=>
-          s.hasData?Image.memory(s.data!,fit:BoxFit.cover)
-          :Center(child:Icon(s.hasError?Icons.broken_image_outlined:Icons.image_outlined)))),
-        Padding(padding:const EdgeInsets.all(8),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-          Text(_label(item),maxLines:1,overflow:TextOverflow.ellipsis,style:Theme.of(context).textTheme.labelMedium),
-          Text(_date(item['captured_at']),maxLines:1,overflow:TextOverflow.ellipsis,style:Theme.of(context).textTheme.labelSmall),
-          if(item['session_id']!=null)Text('Phiên ${item['session_id'].toString().substring(0,8)}',style:Theme.of(context).textTheme.labelSmall),
+      child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+        Expanded(child:Stack(fit:StackFit.expand,children:[
+          InkWell(onTap:()=>_fullScreen(item),child:FutureBuilder<Uint8List>(
+            future:_thumbnail(item),builder:(context,s)=>s.hasData
+              ?Image.memory(s.data!,fit:BoxFit.cover)
+              :Center(child:Icon(s.hasError?Icons.broken_image_outlined:Icons.image_outlined)))),
+          if(own)Positioned(top:4,right:4,child:IconButton.filledTonal(
+            tooltip:chosen?'Ảnh đại diện hiện tại':'Chọn làm ảnh đại diện',
+            onPressed:chosen||busy?null:()=>_setCover(item),
+            icon:Icon(chosen?Icons.star:Icons.star_border),
+          )),
         ])),
-      ])),
+        Padding(padding:const EdgeInsets.all(8),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+          Text(chosen?'Ảnh đại diện':'Ảnh cửa hàng',maxLines:1,overflow:TextOverflow.ellipsis,
+            style:Theme.of(context).textTheme.labelMedium),
+          Text(_date(item['captured_at']),maxLines:1,overflow:TextOverflow.ellipsis,
+            style:Theme.of(context).textTheme.labelSmall),
+        ])),
+      ]),
     );
   }
   Widget _gallery(){
-    final items=gallery.where((p)=>filter=='all'||p['source']==filter).toList();
+    final items=gallery.where((p)=>p['source']=='customer').toList();
     final groups=<String,List<Map<String,dynamic>>>{};
     for(final p in items){
       final date=_date(p['captured_at']).split(' · ').first;
       groups.putIfAbsent(date,()=>[]).add(p);
     }
     final pending=pendingPhotos;
-    return _section('Thư viện ảnh · ${gallery.length} đã đồng bộ',Icons.photo_library_outlined,Column(
+    return _section('Hình ảnh cửa hàng · ${items.length}',Icons.photo_library_outlined,Column(
       crossAxisAlignment:CrossAxisAlignment.stretch,children:[
         Wrap(spacing:8,runSpacing:6,children:[
-          for(final f in const [('all','Tất cả'),('customer','Điểm bán'),('survey','Khảo sát')])
-            ChoiceChip(label:Text(f.$2),selected:filter==f.$1,onSelected:(_)=>setState(()=>filter=f.$1)),
           if(widget.customer.owner==widget.service.identity)
-            OutlinedButton.icon(onPressed:busy?null:()=>addPhoto(ImageSource.camera),icon:const Icon(Icons.camera_alt_outlined),label:const Text('Chụp ảnh')),
+            OutlinedButton.icon(onPressed:busy?null:()=>addPhoto(ImageSource.camera),
+              icon:const Icon(Icons.camera_alt_outlined),label:const Text('Chụp ảnh')),
           if(widget.customer.owner==widget.service.identity)
-            OutlinedButton.icon(onPressed:busy?null:()=>addPhoto(ImageSource.gallery),icon:const Icon(Icons.add_photo_alternate_outlined),label:const Text('Thêm ảnh')),
+            OutlinedButton.icon(onPressed:busy?null:()=>addPhoto(ImageSource.gallery),
+              icon:const Icon(Icons.add_photo_alternate_outlined),label:const Text('Thêm ảnh')),
           IconButton(onPressed:busy?null:load,tooltip:'Tải lại ảnh',icon:const Icon(Icons.refresh)),
         ]),
         if(pending.isNotEmpty)...[
@@ -599,16 +648,17 @@ class _CustomerDetailState extends State<CustomerDetail> {
           Text('Ảnh chờ đồng bộ (${pending.length})',style:Theme.of(context).textTheme.titleSmall),
           for(final p in pending)ListTile(
             leading:const Icon(Icons.cloud_upload_outlined),
-            title:const Text('Ảnh điểm bán lưu trên thiết bị'),
+            title:const Text('Ảnh cửa hàng lưu trên thiết bị'),
             subtitle:Text(p['status']=='blocked'?'Cần thử đồng bộ lại':'Đang chờ mạng'),
-            onTap:()=>_fullScreen(const {},local:Uint8List.fromList((p['thumbnail']??p['photo'] as List).cast<int>())),
+            onTap:()=>_fullScreen(const {},local:Uint8List.fromList(
+              (p['thumbnail']??p['photo'] as List).cast<int>())),
             trailing:p['status']=='blocked'&&widget.queue!=null?IconButton(
               tooltip:'Thử lại',onPressed:()=>widget.queue!.retryBlocked(p['key'] as String),
               icon:const Icon(Icons.refresh)):null,
           ),
         ],
         if(groups.isEmpty&&pending.isEmpty)const Padding(
-          padding:EdgeInsets.all(12),child:Text('Chưa có ảnh điểm bán hoặc ảnh khảo sát.')),
+          padding:EdgeInsets.all(12),child:Text('Chưa có ảnh cửa hàng. Hãy thêm ảnh mặt tiền hoặc quầy kệ.')),
         for(final group in groups.entries)...[
           const SizedBox(height:12),
           Text(group.key,style:Theme.of(context).textTheme.titleSmall),
@@ -626,11 +676,11 @@ class _CustomerDetailState extends State<CustomerDetail> {
   }
   @override Widget build(BuildContext context){
     final c=widget.customer,own=c.owner==widget.service.identity;
-    final cover=gallery.where((p)=>p['source']=='survey'&&p['kind']=='front').firstOrNull
-      ??gallery.where((p)=>p['source']=='customer').firstOrNull;
+    final cover=_coverPhoto;
     final gps=c.latitude==null||c.longitude==null?'Chưa ghi nhận':
       '${c.latitude!.toStringAsFixed(6)}, ${c.longitude!.toStringAsFixed(6)}';
-    return Scaffold(
+    final phone=c.phone?.replaceAll(RegExp(r'[^0-9+]'),'')??'';
+    return DefaultTabController(length:3,child:Scaffold(
       appBar:AppBar(title:const Text('Hồ sơ điểm bán'),actions:[
         if(own)IconButton(tooltip:'Sửa thông tin',icon:const Icon(Icons.edit_outlined),onPressed:()async{
           final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>
@@ -638,77 +688,104 @@ class _CustomerDetailState extends State<CustomerDetail> {
           if(changed==true&&context.mounted)Navigator.pop(context,true);
         }),
       ]),
-      body:ListView(padding:const EdgeInsets.all(12),children:[
-        Card(child:Padding(padding:const EdgeInsets.all(14),child:Row(
-          crossAxisAlignment:CrossAxisAlignment.start,children:[
-            SizedBox(width:76,height:76,child:ClipRRect(borderRadius:BorderRadius.circular(10),
-              child:cover==null?Center(child:CustomerCategoryAvatar(category:c.category))
-                :FutureBuilder<Uint8List>(future:_thumbnail(cover),builder:(context,s)=>s.hasData
-                  ?Image.memory(s.data!,width:76,height:76,fit:BoxFit.cover)
-                  :Center(child:CustomerCategoryAvatar(category:c.category))))),
-            const SizedBox(width:12),
-            Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-              Text(c.name,style:Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height:5),
-              CustomerCategoryLabel(category:c.category),
-              const SizedBox(height:5),
-              Text('Trạng thái: ${switch(c.status){'active'=>'Đang hoạt động','inactive'=>'Ngừng hoạt động','potential'=>'Tiềm năng',_=>c.status}}'),
-              Text('Mã Field Work: ${c.fieldCode??'Đang cấp sau đồng bộ'}'),
-              if(c.code?.isNotEmpty==true)Text('Mã khách CTY: ${c.code}'),
+      body:Column(children:[
+        Padding(padding:const EdgeInsets.fromLTRB(12,8,12,4),child:Card(
+          clipBehavior:Clip.antiAlias,margin:EdgeInsets.zero,
+          child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+            SizedBox(height:MediaQuery.sizeOf(context).width<=780?148:196,
+              child:cover==null
+                ?ColoredBox(color:Theme.of(context).colorScheme.primaryContainer,child:Center(
+                    child:Column(mainAxisSize:MainAxisSize.min,children:[
+                      CustomerCategoryAvatar(category:c.category),
+                      const SizedBox(height:8),const Text('Chưa có ảnh cửa hàng'),
+                    ])))
+                :InkWell(onTap:()=>_fullScreen(cover),child:FutureBuilder<Uint8List>(
+                    future:_thumbnail(cover),builder:(context,s)=>s.hasData
+                      ?Image.memory(s.data!,width:double.infinity,fit:BoxFit.cover)
+                      :ColoredBox(color:Theme.of(context).colorScheme.primaryContainer,
+                        child:Center(child:CustomerCategoryAvatar(category:c.category)))))),
+            Padding(padding:const EdgeInsets.fromLTRB(12,10,12,4),
+              child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+                Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
+                  Expanded(child:Text(c.name,style:Theme.of(context).textTheme.titleMedium,
+                    maxLines:2,overflow:TextOverflow.ellipsis)),
+                  const SizedBox(width:8),
+                  Text(switch(c.status){'active'=>'Đang hoạt động','inactive'=>'Ngừng hoạt động',
+                    'potential'=>'Tiềm năng',_=>c.status},
+                    style:Theme.of(context).textTheme.labelSmall),
+                ]),
+                const SizedBox(height:3),
+                CustomerCategoryLabel(category:c.category),
+                Text('Mã Field Work: ${c.fieldCode??'Đang cấp sau đồng bộ'}',
+                  style:Theme.of(context).textTheme.bodySmall),
+                if(c.code?.isNotEmpty==true)Text('Mã khách CTY: ${c.code}',
+                  style:Theme.of(context).textTheme.bodySmall),
+              ])),
+            Padding(padding:const EdgeInsets.fromLTRB(12,6,12,12),child:Row(children:[
+              Expanded(child:OutlinedButton.icon(onPressed:phone.isEmpty?null:_call,
+                icon:const Icon(Icons.call_outlined,size:18),label:const Text('Gọi điện'))),
+              const SizedBox(width:8),
+              Expanded(child:OutlinedButton.icon(onPressed:_map,
+                icon:const Icon(Icons.map_outlined,size:18),label:const Text('Google Maps'))),
             ])),
-          ],
-        ))),
-        _section('Thông tin liên hệ',Icons.contact_phone_outlined,Column(children:[
-          _line(Icons.person_outline,'Chủ điểm bán / người liên hệ',c.contact??''),
-          _line(Icons.phone_outlined,'Số điện thoại',c.phone??''),
-        ])),
-        _section('Địa chỉ & định vị',Icons.location_on_outlined,Column(
-          crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-            _line(Icons.map_outlined,'Tỉnh/TP · Quận/Huyện','${c.province} · ${c.district}'),
-            _line(Icons.place_outlined,'Địa chỉ chi tiết',c.address),
-            _line(Icons.gps_fixed_outlined,'GPS',gps),
-            Align(alignment:Alignment.centerLeft,child:TextButton.icon(
-              onPressed:_map,icon:const Icon(Icons.open_in_new_outlined),label:const Text('Xem trên Google Maps'))),
-          ],
+          ]),
         )),
-        _section('Sản phẩm khách đang kinh doanh',Icons.inventory_2_outlined,
-          CustomerAssortmentSection(
-            customerId:c.id,ownerSub:c.owner??'',editable:own,queue:widget.queue,
-            api:CustomerAssortmentApi(widget.service.endpoint,widget.service.token,
-              identity:widget.service.identity,revision:widget.service.revision,client:widget.service.client),
+        if(message!=null)Padding(padding:const EdgeInsets.symmetric(horizontal:14,vertical:2),
+          child:Text(message!,maxLines:2,overflow:TextOverflow.ellipsis,
+            style:Theme.of(context).textTheme.bodySmall)),
+        Padding(padding:const EdgeInsets.symmetric(horizontal:12,vertical:4),
+          child:Material(
+            color:Theme.of(context).colorScheme.surface,
+            borderRadius:BorderRadius.circular(9),
+            child:const TabBar(tabs:[
+              Tab(text:'Thông tin'),Tab(text:'Sản phẩm'),Tab(text:'Hình ảnh'),
+            ]),
           )),
-        if(own&&widget.queue!=null)Padding(padding:const EdgeInsets.symmetric(vertical:6),
-          child:Wrap(spacing:8,runSpacing:8,children:[
-            OutlinedButton.icon(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>
-              Scaffold(appBar:AppBar(title:Text(c.name)),body:SurveyPage(queue:widget.queue!,service:widget.service,regions:widget.regions,initialCustomer:c.id)))),
-              icon:const Icon(Icons.assignment_outlined),label:const Text('Phiên khảo sát')),
-            OutlinedButton.icon(onPressed:()=>addRecord('forecast'),icon:const Icon(Icons.payments_outlined),label:const Text('Dự kiến doanh thu')),
-            FilledButton.icon(onPressed:busy?null:checkin,icon:const Icon(Icons.location_pin),label:const Text('Check-in')),
-          ])),
-        if(!own)const Padding(padding:EdgeInsets.all(8),child:Text('Chế độ xem dữ liệu theo phân quyền.')),
-        if(message!=null)Padding(padding:const EdgeInsets.all(8),
-          child:Text(message!,style:Theme.of(context).textTheme.bodySmall)),
-        _gallery(),
-        _section('Lịch sử ghé thăm',Icons.history_outlined,Column(children:[
-          if(visits.isEmpty)const Text('Chưa có lượt check-in được xác minh.'),
-          for(final v in visits)ListTile(
-            dense:true,leading:const Icon(Icons.verified_outlined),
-            title:Text(_date(v['checkin_at'])),
-            subtitle:Text('Khoảng cách: ${v['distance_m']??'?'} m · GPS: ${v['accuracy_m']??'?'} m'),
-          ),
-        ])),
-        _section('Lịch sử phiên khảo sát',Icons.assignment_turned_in_outlined,Column(children:[
-          if(sessions.isEmpty)const Text('Chưa có phiên khảo sát.'),
-          for(final sess in sessions)ListTile(
-            dense:true,leading:const Icon(Icons.fact_check_outlined),
-            title:Text(_date(sess['started_at'])),
-            subtitle:Text(sess['status']=='completed'?'Đã hoàn thành':'Đang thực hiện'),
-            trailing:own&&widget.queue!=null?const Icon(Icons.chevron_right):null,
-            onTap:own&&widget.queue!=null?()=>Navigator.push(context,MaterialPageRoute(
-              builder:(_)=>SurveyDetail(queue:widget.queue!,service:widget.service,initial:sess))):null,
-          ),
+        Expanded(child:TabBarView(children:[
+          ListView(key:const PageStorageKey('customer-info'),
+            padding:const EdgeInsets.fromLTRB(12,4,12,16),children:[
+              _section('Thông tin liên hệ',Icons.contact_phone_outlined,Column(children:[
+                _line(Icons.person_outline,'Chủ điểm bán / người liên hệ',c.contact??''),
+                _line(Icons.phone_outlined,'Số điện thoại',c.phone??''),
+              ])),
+              _section('Địa chỉ & định vị',Icons.location_on_outlined,Column(
+                crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+                  _line(Icons.map_outlined,'Tỉnh/TP · Quận/Huyện','${c.province} · ${c.district}'),
+                  _line(Icons.place_outlined,'Địa chỉ chi tiết',c.address),
+                  _line(Icons.gps_fixed_outlined,'GPS',gps),
+                ],
+              )),
+              if(own&&widget.queue!=null)Padding(padding:const EdgeInsets.symmetric(vertical:6),
+                child:Wrap(spacing:8,runSpacing:8,children:[
+                  OutlinedButton.icon(onPressed:()=>addRecord('forecast'),
+                    icon:const Icon(Icons.payments_outlined),label:const Text('Dự kiến doanh thu')),
+                  FilledButton.icon(onPressed:busy?null:checkin,
+                    icon:const Icon(Icons.location_pin),label:const Text('Check-in')),
+                ])),
+              if(!own)const Padding(padding:EdgeInsets.all(8),
+                child:Text('Chế độ xem theo phân quyền.')),
+              _section('Lịch sử ghé thăm',Icons.history_outlined,
+                ExpansionTile(title:Text('${visits.length} lượt check-in'),
+                  tilePadding:EdgeInsets.zero,children:[
+                    if(visits.isEmpty)const ListTile(title:Text('Chưa có lượt check-in được xác minh.')),
+                    for(final v in visits)ListTile(dense:true,
+                      leading:const Icon(Icons.verified_outlined),
+                      title:Text(_date(v['checkin_at'])),
+                      subtitle:Text('Khoảng cách: ${v['distance_m']??'?'} m · GPS: ${v['accuracy_m']??'?'} m')),
+                  ])),
+            ]),
+          ListView(key:const PageStorageKey('customer-products'),
+            padding:const EdgeInsets.fromLTRB(12,4,12,16),children:[
+              CustomerAssortmentSection(
+                customerId:c.id,ownerSub:c.owner??'',editable:own,queue:widget.queue,
+                api:CustomerAssortmentApi(widget.service.endpoint,widget.service.token,
+                  identity:widget.service.identity,revision:widget.service.revision,client:widget.service.client),
+              ),
+            ]),
+          ListView(key:const PageStorageKey('customer-photos'),
+            padding:const EdgeInsets.fromLTRB(12,4,12,16),children:[_gallery()]),
         ])),
       ]),
-    );
+    ));
   }
 }

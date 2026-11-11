@@ -126,7 +126,7 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
     }
     return fail('Method not allowed',405);
   }
-  const match=/^\/api\/v1\/customers\/([a-f0-9-]{36})(?:\/(visits|photos|media)(?:\/([a-f0-9-]{36}))?)?$/i.exec(url.pathname);
+  const match=/^\/api\/v1\/customers\/([a-f0-9-]{36})(?:\/(visits|photos|media|cover)(?:\/([a-f0-9-]{36}))?)?$/i.exec(url.pathname);
   if (!match || !uuid.test(match[1])) return fail('Endpoint không tồn tại',404);
   const id=match[1];
   const current=await fetchCustomer(db,actor,id);
@@ -152,21 +152,34 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
     await db`INSERT INTO field_audit_events(actor_sub,action,entity_type,entity_id) VALUES (${actor.sub},'update','customer',${id}::uuid)`;
     return response({item:rows[0]});
   }
+  if(match[2]==='cover') {
+    if(req.method!=='PATCH'||match[3])return fail('Method not allowed',405);
+    if(current.owner_sub!==actor.sub)return fail('Chỉ chủ điểm bán được chọn ảnh đại diện',403);
+    let data:ObjectBody;try{data=await input(req);}catch{return fail('JSON không hợp lệ');}
+    const photoId=String(data.photo_id??'');
+    if(!uuid.test(photoId))return fail('Mã ảnh không hợp lệ');
+    if(current.cover_photo_id===photoId)return response({item:{id,cover_photo_id:photoId},idempotent:true});
+    const rows=await db`UPDATE customers c SET cover_photo_id=${photoId}::uuid
+      WHERE c.id=${id}::uuid AND c.owner_sub=${actor.sub}
+        AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)
+        AND EXISTS(SELECT 1 FROM customer_photos p WHERE p.id=${photoId}::uuid
+          AND p.customer_id=c.id AND p.owner_sub=c.owner_sub)
+      RETURNING c.id,c.cover_photo_id`;
+    if(!rows.length)return fail('Ảnh không thuộc điểm bán hoặc không có quyền',404);
+    await db`INSERT INTO field_audit_events(actor_sub,action,entity_type,entity_id)
+      VALUES (${actor.sub},'set_cover','customer',${id}::uuid)`;
+    return response({item:rows[0]});
+  }
   if(match[2]==='media') {
     if(req.method!=='GET'||match[3])return fail('Method not allowed',405);
-    // Survey files remain attached to their original session: metadata union only.
-    const rows=await db`
-      SELECT p.id,'customer'::text AS source,'store'::text AS kind,NULL::uuid AS session_id,
-        p.created_at AS captured_at,p.mime_type,p.bytes
-      FROM customer_photos p WHERE p.customer_id=${id}::uuid
-        AND public.sales_can_access(${actor.sub},p.owner_sub,${current.province},${current.district})
-      UNION ALL
-      SELECT p.id,'survey'::text AS source,p.kind,s.id AS session_id,
-        p.captured_at,p.mime_type,p.bytes
-      FROM field_survey_photos p JOIN field_survey_sessions s ON s.id=p.session_id
-      WHERE s.customer_id=${id}::uuid AND p.status='ready'
-        AND public.sales_can_access(${actor.sub},s.owner_sub,s.province,s.district)
-      ORDER BY captured_at DESC,id DESC LIMIT 300`;
+    // Customer profile photos only. Survey media lives inside its owning session.
+    const rows=await db`SELECT p.id,'customer'::text AS source,'store'::text AS kind,
+      NULL::uuid AS session_id,p.created_at AS captured_at,p.mime_type,p.bytes,
+      (p.id=c.cover_photo_id) AS is_cover
+      FROM customer_photos p JOIN customers c ON c.id=p.customer_id
+      WHERE p.customer_id=${id}::uuid
+        AND public.sales_can_access(${actor.sub},p.owner_sub,c.province,c.district)
+      ORDER BY captured_at DESC,p.id DESC LIMIT 300`;
     return response({items:rows});
   }
   if (match[2]==='visits') {

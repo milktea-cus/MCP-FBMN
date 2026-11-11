@@ -105,6 +105,16 @@ class SalesTheme {
         foregroundColor: dark ? scheme.onSurface : headingInk,
         scrolledUnderElevation: 0,
       ),
+      // Shared FBMN tab style: same 13px controls, lavender active surface and 9px radius.
+      tabBarTheme: TabBarThemeData(
+        labelColor:scheme.primary,
+        unselectedLabelColor:scheme.onSurfaceVariant,
+        labelStyle:const TextStyle(fontSize:controlFontSize,fontWeight:FontWeight.w700),
+        unselectedLabelStyle:const TextStyle(fontSize:controlFontSize),
+        indicator:BoxDecoration(color:heading,borderRadius:BorderRadius.circular(controlRadius)),
+        indicatorSize:TabBarIndicatorSize.tab,
+        dividerColor:Colors.transparent,
+      ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: surface,
         indicatorColor: heading,
