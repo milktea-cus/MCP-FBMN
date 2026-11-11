@@ -7,7 +7,7 @@ RETURNS text LANGUAGE plpgsql IMMUTABLE SET search_path=pg_catalog,public AS $ro
 DECLARE a text; n text; p text[]; w text[]; place text; who text;
 BEGIN
  a:=regexp_replace(translate(lower(coalesce(p_province,'')),'àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ','aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyyd'),'[^a-z0-9]+',' ','g');
- n:=regexp_replace(translate(lower(coalesce(p_name,'')),'~FROM~','~TO~'),'[^a-z0-9]+',' ','g');
+ n:=regexp_replace(translate(lower(coalesce(p_name,'')),'àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ','aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyyd'),'[^a-z0-9]+',' ','g');
  p:=regexp_split_to_array(btrim(a),'\s+');
  w:=regexp_split_to_array(btrim(n),'\s+');
  IF array_length(p,1)>1 THEN
