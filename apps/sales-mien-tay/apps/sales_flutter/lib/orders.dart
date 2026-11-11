@@ -287,7 +287,7 @@ class _OrdersPageState extends State<OrdersPage>{
     for(var i=0;i<lines.length;i++)Card(child:ListTile(
      title:Text('${lines[i]['company_code']} · ${lines[i]['name']}'),
      subtitle:Text('SL: ${lines[i]['quantity']} ${lines[i]['unit']} · ${orderStockMessage(lines[i])}'),
-     trailing:canEdit?Wrap(mainAxisSize:MainAxisSize.min,children:[
+     trailing:canEdit?Row(mainAxisSize:MainAxisSize.min,children:[
       IconButton(tooltip:'Sửa số lượng',onPressed:()=>changeQuantity(i),icon:const Icon(Icons.edit_outlined)),
       IconButton(tooltip:'Bỏ dòng',onPressed:(){lines.removeAt(i);localChanged();},icon:const Icon(Icons.delete_outline))]):null,
     )),
