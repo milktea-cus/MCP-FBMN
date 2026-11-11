@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:idb_shim/idb_shim.dart';
 import 'package:sales_mien_tay/offline_queue.dart';
@@ -44,4 +45,35 @@ void main(){
   final reopened=OfflineQueue(Disconnected(),'a','1',factory:factory);await reopened.reload();expect(reopened.pending.single['payload']['kind'],'survey');
   a.dispose();b.dispose();revised.dispose();reopened.dispose();
  });
+
+  test('customer media survives restart and stays scoped to user and revision',()async{
+    final factory=newIdbFactoryMemory();
+    final first=OfflineQueue(Disconnected(),'photo-owner','7',factory:factory);
+    final image=Uint8List.fromList([255,216,1,2,255,217]);
+    final thumbnail=Uint8List.fromList([255,216,3,4,255,217]);
+    const customerId='33333333-3333-4333-8333-333333333333';
+    final sha=List.filled(64,'a').join(),thumbSha=List.filled(64,'b').join();
+    await first.enqueue('/api/v1/customers/$customerId/photos',{},
+      photo:image,thumbnail:thumbnail,sha256:sha,thumbnailSha256:thumbSha,mime:'image/jpeg');
+    final reopened=OfflineQueue(Disconnected(),'photo-owner','7',factory:factory);
+    await reopened.reload();
+    final entry=reopened.pending.single;
+    expect((entry['photo'] as List).cast<int>(),image);
+    expect((entry['thumbnail'] as List).cast<int>(),thumbnail);
+    expect(entry['sha256'],sha);
+    expect(entry['thumbnail_sha256'],thumbSha);
+    expect(entry['upload_id'],isNotEmpty);
+    await reopened.cache('customer-image:$customerId:customer:photo:thumb',[{'bytes':thumbnail}]);
+    final another=OfflineQueue(Disconnected(),'other-owner','7',factory:factory);
+    expect(await another.cached('customer-image:$customerId:customer:photo:thumb'),isEmpty);
+    await another.reload();expect(another.pending,isEmpty);
+    final revised=OfflineQueue(Disconnected(),'photo-owner','8',factory:factory);
+    await revised.reload();expect(revised.pending,isEmpty);
+    expect(await revised.cached('customer-image:$customerId:customer:photo:thumb'),isEmpty);
+    final reread=OfflineQueue(Disconnected(),'photo-owner','7',factory:factory);
+    final cached=await reread.cached('customer-image:$customerId:customer:photo:thumb');
+    expect((cached.single['bytes'] as List).cast<int>(),thumbnail);
+    first.dispose();reopened.dispose();another.dispose();revised.dispose();reread.dispose();
+  });
+
 }

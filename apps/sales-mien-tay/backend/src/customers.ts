@@ -1,5 +1,6 @@
 import {neon, type NeonQueryFunction} from '@neondatabase/serverless';
 import districts from './districts_old.json';
+import {cleanJpeg} from './surveys';
 
 export interface CustomerEnv {
   DATABASE_URL: string;
@@ -14,6 +15,15 @@ const response = (body: unknown, status = 200) => new Response(JSON.stringify(bo
 const fail = (error: string, status = 400) => response({error}, status);
 type Db = NeonQueryFunction<false, false>;
 type ObjectBody = Record<string, unknown>;
+async function photoDigest(bytes:ArrayBuffer):Promise<string>{
+  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');
+}
+function photoBase64(value:unknown,max:number):ArrayBuffer{
+  if(typeof value!=='string'||value.length>Math.ceil(max/3)*4+4||!/^[A-Za-z0-9+/]+={0,2}$/.test(value))throw Error('base64');
+  const bytes=Uint8Array.from(atob(value),c=>c.charCodeAt(0));
+  if(!bytes.length||bytes.length>max)throw Error('size');
+  return bytes.buffer;
+}
 
 function str(x: unknown, max = 240): string | null {
   if (typeof x !== 'string') return null;
@@ -116,7 +126,7 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
     }
     return fail('Method not allowed',405);
   }
-  const match=/^\/api\/v1\/customers\/([a-f0-9-]{36})(?:\/(visits|photos)(?:\/([a-f0-9-]{36}))?)?$/i.exec(url.pathname);
+  const match=/^\/api\/v1\/customers\/([a-f0-9-]{36})(?:\/(visits|photos|media)(?:\/([a-f0-9-]{36}))?)?$/i.exec(url.pathname);
   if (!match || !uuid.test(match[1])) return fail('Endpoint không tồn tại',404);
   const id=match[1];
   const current=await fetchCustomer(db,actor,id);
@@ -141,6 +151,23 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
     if(!rows.length)return fail('Xung đột phiên bản',409);
     await db`INSERT INTO field_audit_events(actor_sub,action,entity_type,entity_id) VALUES (${actor.sub},'update','customer',${id}::uuid)`;
     return response({item:rows[0]});
+  }
+  if(match[2]==='media') {
+    if(req.method!=='GET'||match[3])return fail('Method not allowed',405);
+    // Survey files remain attached to their original session: metadata union only.
+    const rows=await db`
+      SELECT p.id,'customer'::text AS source,'store'::text AS kind,NULL::uuid AS session_id,
+        p.created_at AS captured_at,p.mime_type,p.bytes
+      FROM customer_photos p WHERE p.customer_id=${id}::uuid
+        AND public.sales_can_access(${actor.sub},p.owner_sub,${current.province},${current.district})
+      UNION ALL
+      SELECT p.id,'survey'::text AS source,p.kind,s.id AS session_id,
+        p.captured_at,p.mime_type,p.bytes
+      FROM field_survey_photos p JOIN field_survey_sessions s ON s.id=p.session_id
+      WHERE s.customer_id=${id}::uuid AND p.status='ready'
+        AND public.sales_can_access(${actor.sub},s.owner_sub,s.province,s.district)
+      ORDER BY captured_at DESC,id DESC LIMIT 300`;
+    return response({items:rows});
   }
   if (match[2]==='visits') {
     if (req.method==='GET') {
@@ -180,28 +207,58 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       if(!env.PHOTOS_BUCKET)return fail('Kho ảnh chưa được cấu hình',503);
       const rows=await db`SELECT object_key,mime_type FROM customer_photos WHERE id=${match[3]}::uuid AND customer_id=${id}::uuid AND public.sales_can_access(${actor.sub},owner_sub,${current.province},${current.district}) LIMIT 1`;
       if(!rows.length)return fail('Không tìm thấy ảnh',404);
-      const blob=await env.PHOTOS_BUCKET.get(rows[0].object_key);
+      const thumb=url.searchParams.get('thumbnail')==='1'
+        ?await env.PHOTOS_BUCKET.get(rows[0].object_key+'/thumbnail'):null;
+      const blob=thumb??await env.PHOTOS_BUCKET.get(rows[0].object_key);
       if(!blob)return fail('Ảnh không còn trên kho',404);
-      return new Response(blob.body,{headers:{'Content-Type':rows[0].mime_type,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
+      return new Response(blob.body,{headers:{'Content-Type':thumb?'image/jpeg':rows[0].mime_type,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
     }
     if(req.method==='POST' && !match[3]) {
       if(current.owner_sub!==actor.sub)return fail('Chỉ thêm ảnh cho khách hàng của mình',403);
       if(!env.PHOTOS_BUCKET)return fail('Kho ảnh chưa được cấu hình',503);
       const uploadId=req.headers.get('X-Upload-Id');
       if(!uploadId || !uuid.test(uploadId))return fail('Thiếu X-Upload-Id UUID');
-      const prior=await db`SELECT id,mime_type,bytes FROM customer_photos WHERE id=${uploadId}::uuid AND customer_id=${id}::uuid LIMIT 1`;
-      if(prior.length)return response({item:prior[0],idempotent:true});
-      const mime=req.headers.get('content-type')?.toLowerCase()??'';
+      const headerMime=req.headers.get('content-type')?.toLowerCase()??'';
+      const modern=headerMime==='application/json';
+      const mime=modern?'image/jpeg':headerMime;
       if(!['image/jpeg','image/png','image/webp'].includes(mime))return fail('Chỉ nhận JPG/PNG/WebP',415);
-      const bytes=await req.arrayBuffer();
-      if(bytes.byteLength<1 || bytes.byteLength>5*1024*1024)return fail('Ảnh cần nhỏ hơn 5MB',413);
-      const binary=new Uint8Array(bytes);
-      const isJpeg=mime==='image/jpeg'&&binary[0]===0xff&&binary[1]===0xd8;
-      const isPng=mime==='image/png'&&binary[0]===0x89&&binary[1]===0x50&&binary[2]===0x4e&&binary[3]===0x47;
-      const isWebp=mime==='image/webp'&&String.fromCharCode(...binary.slice(0,4))==='RIFF'&&String.fromCharCode(...binary.slice(8,12))==='WEBP';
-      if(!isJpeg&&!isPng&&!isWebp)return fail('Nội dung ảnh không đúng định dạng',415);
+      let bytes:ArrayBuffer,thumbnail:ArrayBuffer|null=null,sha:string,thumbHash:string|null=null;
+      if(modern){
+        try {
+          if(Number(req.headers.get('content-length')??0)>3200000)return fail('Ảnh quá giới hạn',413);
+          const body=await req.text();if(body.length>3200000)return fail('Ảnh quá giới hạn',413);
+          const data=JSON.parse(body);
+          bytes=photoBase64(data.image,2097152);thumbnail=photoBase64(data.thumbnail,153600);
+          if(!cleanJpeg(new Uint8Array(bytes),1600)||!cleanJpeg(new Uint8Array(thumbnail),320))
+            return fail('JPEG có metadata hoặc kích thước không hợp lệ',415);
+          sha=await photoDigest(bytes);thumbHash=await photoDigest(thumbnail);
+          if(data.sha256!==sha||data.thumbnail_sha256!==thumbHash)return fail('Checksum không khớp',422);
+        }catch{return fail('Dữ liệu ảnh không hợp lệ',422);}
+      }else{
+        bytes=await req.arrayBuffer();
+        if(bytes.byteLength<1||bytes.byteLength>5*1024*1024)return fail('Ảnh cần nhỏ hơn 5MB',413);
+        const binary=new Uint8Array(bytes);
+        const isJpeg=mime==='image/jpeg'&&binary[0]===0xff&&binary[1]===0xd8;
+        const isPng=mime==='image/png'&&binary[0]===0x89&&binary[1]===0x50&&binary[2]===0x4e&&binary[3]===0x47;
+        const isWebp=mime==='image/webp'&&String.fromCharCode(...binary.slice(0,4))==='RIFF'&&String.fromCharCode(...binary.slice(8,12))==='WEBP';
+        if(!isJpeg&&!isPng&&!isWebp)return fail('Nội dung ảnh không đúng định dạng',415);
+        sha=await photoDigest(bytes);
+      }
+      const prior=await db`SELECT id,mime_type,bytes,object_key FROM customer_photos WHERE id=${uploadId}::uuid AND customer_id=${id}::uuid LIMIT 1`;
+      if(prior.length){
+        const existing=await env.PHOTOS_BUCKET.head(prior[0].object_key);
+        if(modern&&existing?.customMetadata?.sha256!==sha)return fail('UUID ảnh đã sử dụng với nội dung khác',409);
+        return response({item:prior[0],idempotent:true});
+      }
       const key=`customers/${id}/${uploadId}`;
-      await env.PHOTOS_BUCKET.put(key,binary,{httpMetadata:{contentType:mime}});
+      await env.PHOTOS_BUCKET.put(key,bytes,{onlyIf:{etagDoesNotMatch:'*'},httpMetadata:{contentType:mime},customMetadata:{sha256:sha}});
+      const head=await env.PHOTOS_BUCKET.head(key);
+      if(!head||head.size!==bytes.byteLength||head.customMetadata?.sha256!==sha)return fail('Kho ảnh chưa xác nhận; thử lại',503);
+      if(thumbnail&&thumbHash){
+        await env.PHOTOS_BUCKET.put(key+'/thumbnail',thumbnail,{onlyIf:{etagDoesNotMatch:'*'},httpMetadata:{contentType:'image/jpeg'},customMetadata:{sha256:thumbHash}});
+        const h=await env.PHOTOS_BUCKET.head(key+'/thumbnail');
+        if(!h||h.size!==thumbnail.byteLength||h.customMetadata?.sha256!==thumbHash)return fail('Thumbnail chưa xác nhận; thử lại',503);
+      }
       try {
         const rows=await db`INSERT INTO customer_photos(id,customer_id,owner_sub,object_key,mime_type,bytes)
           SELECT ${uploadId}::uuid,${id}::uuid,${actor.sub},${key},${mime},${bytes.byteLength} WHERE EXISTS(SELECT 1 FROM customers c WHERE c.id=${id}::uuid AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)) ON CONFLICT(id) DO NOTHING RETURNING id,mime_type,bytes,created_at`;
