@@ -53,6 +53,28 @@ void main(){
   expect(seen.single.headers['X-Sync-Revision'],'scope-1');
   mock.close();
  });
+ test('P0-D pagination returns all unique SKU pages, not just first 60',()async{
+  final cursors=<String>[];
+  final client=MockClient((req)async{
+   final after=req.url.queryParameters['after']??'';
+   cursors.add(after);
+   if(after.isEmpty)return reply({'items':[
+    {...assortment('ordered'),'company_code':'0009'},
+   ],'next_cursor':'0009'});
+   return reply({'items':[
+    {...assortment('imported'),'company_code':'0010',
+     'product_id':'44444444-4444-4444-8444-444444444444'},
+   ],'next_cursor':null});
+  });
+  final snapshots=<int>[];
+  final api=CustomerAssortmentApi('https://example.test','',client:client);
+  final rows=await api.products(customerId,onPage:(page)=>snapshots.add(page.length));
+  expect(rows.length,2);
+  expect(cursors,['','0009']);
+  expect(snapshots,[1,2]);
+  expect(rows.last['status'],'imported');
+  client.close();
+ });
  test('P0-D manual audit and catalog version support re-verification',()async{
   final seen=<Uri>[];
   final mock=MockClient((req)async{

@@ -51,13 +51,24 @@ class CustomerAssortmentApi{
  }
  Future<List<Map<String,dynamic>>> products(String customerId,{
   String search='',String status='',String after='',
+  void Function(List<Map<String,dynamic>> partial)? onPage,
  }) async{
-  final data=await get('/api/v1/customers/$customerId/products',{
-   'limit':'60',if(search.trim().isNotEmpty)'q':search.trim(),
-   if(status.isNotEmpty)'status':status,if(after.isNotEmpty)'after':after,
-  });
-  return (data['items'] as List)
-    .map((v)=>Map<String,dynamic>.from(v as Map)).toList();
+  final rows=<Map<String,dynamic>>[];
+  var cursor=after;
+  for(var page=0;page<100;page++){
+   final data=await get('/api/v1/customers/$customerId/products',{
+    'limit':'60',if(search.trim().isNotEmpty)'q':search.trim(),
+    if(status.isNotEmpty)'status':status,if(cursor.isNotEmpty)'after':cursor,
+   });
+   rows.addAll((data['items'] as List)
+     .map((v)=>Map<String,dynamic>.from(v as Map)));
+   onPage?.call(List<Map<String,dynamic>>.unmodifiable(rows));
+   final next=data['next_cursor']?.toString()??'';
+   if(next.isEmpty)return rows;
+   if(next==cursor)throw const ApiFailure(502,'Phân trang SKU không hợp lệ');
+   cursor=next;
+  }
+  throw const ApiFailure(502,'Danh sách SKU vượt giới hạn an toàn');
  }
  Future<List<Map<String,dynamic>>> catalog(String customerId,{String search=''})async{
   final data=await get('/api/v1/customers/$customerId/products/catalog',{
@@ -128,10 +139,14 @@ class _CustomerAssortmentSectionState extends State<CustomerAssortmentSection>{
  }
  Future<void> refresh()async{
   final request=++generation;
+  final previous=List<Map<String,dynamic>>.from(items);
   if(mounted)setState((){loading=true;error=null;});
   try{
    final data=await widget.api.products(widget.customerId,
-    search:search.text,status:status);
+    search:search.text,status:status,
+    onPage:(partial){
+     if(mounted&&generation==request)setState(()=>items=partial);
+    });
    if(!mounted||generation!=request)return;
    setState((){items=data;offline=false;error=null;});
    // Persist complete account-scoped snapshots only, not a search subset.
@@ -147,6 +162,7 @@ class _CustomerAssortmentSectionState extends State<CustomerAssortmentSection>{
      items=[];
      error='Phiên hoặc quyền xem sản phẩm khách đã thay đổi.';
     }else{
+     items=previous;
      error=items.isEmpty?'Không tải được danh mục SKU. Kiểm tra mạng.':
        'Đang xem SKU đã lưu trên máy · chưa cập nhật.';
     }
@@ -171,6 +187,13 @@ class _CustomerAssortmentSectionState extends State<CustomerAssortmentSection>{
   final reason=await _reason(action);
   if(reason==null||!mounted)return;
   final id=product['product_id']?.toString()??'';
+  if(widget.queue!=null&&widget.queue!.pending.any((job)=>
+    job['path']=='/api/v1/customers/${widget.customerId}/products'&&
+    (job['payload'] as Map?)?['product_id']==id)){
+   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+    content:Text('SKU này đã có thay đổi chờ đồng bộ.')));
+   return;
+  }
   final version=(product['manual_version'] as num?)?.toInt()??0;
   final payload=<String,dynamic>{
    'client_ref':const Uuid().v4(),
@@ -201,7 +224,7 @@ class _CustomerAssortmentSectionState extends State<CustomerAssortmentSection>{
   if(!widget.editable||busy)return;
   final selected=await showDialog<Map<String,dynamic>>(
    context:context,builder:(_)=>_AssortmentProductPicker(
-    customerId:widget.customerId,api:widget.api));
+    customerId:widget.customerId,api:widget.api,queue:widget.queue));
   if(selected!=null&&mounted)await _change(selected,'verify');
  }
  Future<void> _audit()async{
@@ -318,7 +341,8 @@ class _AssortmentReasonDialogState extends State<_AssortmentReasonDialog>{
 class _AssortmentProductPicker extends StatefulWidget{
  final String customerId;
  final CustomerAssortmentApi api;
- const _AssortmentProductPicker({required this.customerId,required this.api});
+ final OfflineQueue? queue;
+ const _AssortmentProductPicker({required this.customerId,required this.api,this.queue});
  @override State<_AssortmentProductPicker> createState()=>_AssortmentProductPickerState();
 }
 class _AssortmentProductPickerState extends State<_AssortmentProductPicker>{
@@ -327,7 +351,16 @@ class _AssortmentProductPickerState extends State<_AssortmentProductPicker>{
  List<Map<String,dynamic>> items=[];
  bool loading=false;
  int generation=0;
- @override void initState(){super.initState();unawaited(load());}
+ @override void initState(){super.initState();unawaited(_open());}
+ Future<void> _open()async{
+  if(widget.queue!=null){
+   try{
+    final cached=await widget.queue!.cached('customer-product-catalog:${widget.customerId}');
+    if(mounted)setState(()=>items=cached);
+   }catch(_){}
+  }
+  if(mounted)unawaited(load());
+ }
  @override void dispose(){search.dispose();debounce?.cancel();super.dispose();}
  Future<void> load()async{
   final id=++generation;
@@ -335,8 +368,15 @@ class _AssortmentProductPickerState extends State<_AssortmentProductPicker>{
   try{
    final result=await widget.api.catalog(widget.customerId,search:search.text);
    if(mounted&&id==generation)setState(()=>items=result);
-  }catch(_){if(mounted&&id==generation)setState(()=>items=[]);}
-  finally{if(mounted&&id==generation)setState(()=>loading=false);}
+   if(widget.queue!=null&&search.text.trim().isEmpty){
+    try{
+     await widget.queue!.cache('customer-product-catalog:${widget.customerId}',result);
+    }catch(_){}
+   }
+  }catch(e){
+   if(mounted&&id==generation&&e is ApiFailure&&
+     (e.status==401||e.status==403))setState(()=>items=[]);
+  }finally{if(mounted&&id==generation)setState(()=>loading=false);}
  }
  @override Widget build(BuildContext context)=>AlertDialog(
   title:const Text('Chọn SKU xác minh'),
@@ -347,8 +387,21 @@ class _AssortmentProductPickerState extends State<_AssortmentProductPicker>{
     onChanged:(_){debounce?.cancel();debounce=Timer(
       const Duration(milliseconds:250),(){if(mounted)unawaited(load());});}),
    if(loading)const LinearProgressIndicator(minHeight:2),
-   Expanded(child:ListView.builder(itemCount:items.length,itemBuilder:(ctx,i){
-    final item=items[i];
+   Expanded(child:ListView.builder(
+    itemCount:items.where((item){
+     final q=search.text.trim().toLowerCase();
+     return q.isEmpty||[
+      item['company_code'],item['name'],item['sku'],item['brand']
+     ].any((v)=>(v?.toString()??'').toLowerCase().contains(q));
+    }).length,
+    itemBuilder:(ctx,i){
+    final filtered=items.where((item){
+     final q=search.text.trim().toLowerCase();
+     return q.isEmpty||[
+      item['company_code'],item['name'],item['sku'],item['brand']
+     ].any((v)=>(v?.toString()??'').toLowerCase().contains(q));
+    }).toList();
+    final item=filtered[i];
     return ListTile(
      title:Text('${item['company_code']??''} · ${item['name']??''}',
       maxLines:2,overflow:TextOverflow.ellipsis),
