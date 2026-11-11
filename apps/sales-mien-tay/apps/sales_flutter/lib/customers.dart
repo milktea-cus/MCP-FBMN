@@ -757,7 +757,8 @@ class _CustomerDetailState extends State<CustomerDetail> {
               if(!own)const Padding(padding:EdgeInsets.all(8),
                 child:Text('Chế độ xem theo phân quyền.')),
               _section('Lịch sử ghé thăm',Icons.history_outlined,
-                ExpansionTile(title:Text('${visits.length} lượt check-in'),
+                ExpansionTile(key:const PageStorageKey('customer-visit-history'),
+                  title:Text('${visits.length} lượt check-in'),
                   tilePadding:EdgeInsets.zero,children:[
                     if(visits.isEmpty)const ListTile(title:Text('Chưa có lượt check-in được xác minh.')),
                     for(final v in visits)ListTile(dense:true,
