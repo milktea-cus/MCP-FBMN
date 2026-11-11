@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'models.dart';
@@ -8,7 +9,12 @@ class SalesApi {
   final String baseUrl;
   final String accessToken;
   final String? identity,revision;
-  const SalesApi(this.baseUrl, this.accessToken,{this.identity,this.revision});
+  final http.Client? client;
+  final Duration listTimeout;
+  const SalesApi(this.baseUrl, this.accessToken,{
+    this.identity,this.revision,this.client,
+    this.listTimeout=const Duration(seconds:8),
+  });
 
   Uri _uri(String path, [Map<String, String>? params]) {
     final base = baseUrl.replaceAll(RegExp(r'/$'), '');
@@ -20,7 +26,10 @@ class SalesApi {
   }
   Map<String, String> get _headers => {...sessionHeaders(accessToken),if(identity!=null)'X-Sync-Identity':identity!,if(revision!=null)'X-Sync-Revision':revision!};
   Future<List<SalesRecord>> list(String kind) async {
-    final res = await http.get(_uri('/api/v1/records', {'kind': kind}), headers: _headers);
+    // A single stalled module must never pin the whole Field Work dashboard.
+    final uri=_uri('/api/v1/records', {'kind': kind});
+    final res = await (client?.get(uri,headers:_headers) ??
+      http.get(uri,headers:_headers)).timeout(listTimeout);
     final data = decodeApi(res);
     if (res.statusCode != 200) throw StateError('${data['error'] ?? 'API lỗi'}');
     return (data['items'] as List<dynamic>)

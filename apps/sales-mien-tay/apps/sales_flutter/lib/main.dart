@@ -87,7 +87,7 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
   String get _apiUrl => salesOrigin;
   String get _accessToken => widget.session.cookie;
   String _province = '';
-  bool _loading = false;
+  bool _loading = false, _fetchingRecords = false;
   int _selectedIndex = 0;
   String? _message;
 
@@ -117,21 +117,69 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
   }
 
   Future<void> _refresh() async {
-    setState(() => _loading = true);
+    if(_fetchingRecords)return;
+    _fetchingRecords=true;
+    if(mounted)setState(()=>_loading=true);
     try {
-      final api = SalesApi(_apiUrl, _accessToken,identity:_queue.identity,revision:_queue.revision);
-      bool cachedRead=false;
-      final lists = await Future.wait(moduleKinds.map((kind) async {try{final items=await api.list(kind);await _queue.cache('records:$kind',items.map((r)=>r.toJson()).toList());return items;}catch(e){if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;cachedRead=true;return (await _queue.cached('records:$kind')).map(SalesRecord.fromJson).toList();}}));
-      if (!mounted) return;
-      setState(() {
-        _items..clear()..addAll(lists.expand((list) => list));
-        _message = cachedRead?'Đang dùng dữ liệu đã lưu trên máy. Chưa cập nhật từ máy chủ.':null;
+      // First paint: restore the account/revision-scoped snapshots; never
+      // hold the dashboard waiting for seven independent network requests.
+      final snapshots=await Future.wait(moduleKinds.map((kind) async {
+        try{
+          return (await _queue.cached('records:$kind'))
+              .map(SalesRecord.fromJson).toList();
+        }catch(_){
+          return <SalesRecord>[];
+        }
+      }));
+      if(!mounted)return;
+      if(_items.isEmpty){
+        setState((){
+          _items..clear()..addAll(snapshots.expand((items)=>items));
+        });
+      }
+      // Background requests remain bounded. The app bar/drawer are usable.
+      setState(()=>_loading=false);
+      final api=SalesApi(_apiUrl,_accessToken,
+          identity:_queue.identity,revision:_queue.revision);
+      var cachedRead=false;
+      final lists=await Future.wait(moduleKinds.map((kind) async {
+        try{
+          final items=await api.list(kind);
+          try{
+            await _queue.cache('records:$kind',
+                items.map((r)=>r.toJson()).toList());
+          }catch(_){}
+          return items;
+        }catch(e){
+          if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;
+          cachedRead=true;
+          try{
+            return (await _queue.cached('records:$kind'))
+                .map(SalesRecord.fromJson).toList();
+          }catch(_){
+            return <SalesRecord>[];
+          }
+        }
+      }));
+      if(!mounted)return;
+      setState((){
+        _items..clear()..addAll(lists.expand((items)=>items));
+        _message=cachedRead
+            ? 'Đang dùng dữ liệu lưu máy · chưa cập nhật đầy đủ.'
+            : null;
       });
-      if(!cachedRead)_notify('Đã đồng bộ ${_items.length} bản ghi');
-    } catch (error) {
-      if (mounted) setState(() { _message = 'Lỗi đồng bộ: $error'; });
-    } finally {
-      if (mounted) setState(() => _loading = false);
+    }catch(e){
+      if(!mounted)return;
+      final denied=e is ApiFailure&&(e.status==401||e.status==403);
+      setState((){
+        if(denied)_items.clear();
+        _message=denied
+          ? 'Phiên hoặc quyền truy cập đã thay đổi.'
+          : 'Không đồng bộ được. Dữ liệu đã lưu trên máy vẫn còn.';
+      });
+    }finally{
+      _fetchingRecords=false;
+      if(mounted)setState(()=>_loading=false);
     }
   }
 
