@@ -5,6 +5,7 @@ import districts from './districts_old.json';
 import {customerRoutes} from './customers';
 import {surveyRoutes} from './surveys';
 import {catalogRoutes} from './catalog';
+import {catalogImportRoutes} from './catalog_import';
 import {inventoryRoutes} from './inventory';
 
 interface Env {
@@ -108,6 +109,8 @@ export default {
       if (productResponse) return productResponse;
       const inventoryResponse=await inventoryRoutes(req,env,user,url);
       if(inventoryResponse)return inventoryResponse;
+      const catalogImportResponse=await catalogImportRoutes(req,env,user,url);
+      if(catalogImportResponse)return catalogImportResponse;
       const catalogResponse=await catalogRoutes(req,env,user,url);
       if(catalogResponse)return catalogResponse;
       const surveyResponse=await surveyRoutes(req,env,user,url);
