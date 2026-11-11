@@ -45,7 +45,7 @@ CREATE FUNCTION public.field_order_apply(
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 DECLARE actor_role text; old public.field_orders%ROWTYPE; saved public.field_orders%ROWTYPE;
  prior public.field_order_ops%ROWTYPE; request_json jsonb; prev_json jsonb;
- line record; count_lines integer; rec record; stock_issue text; customer_code text;
+ line record; count_lines integer; rec record; stock_issue text; customer_code text; is_new boolean;
  BEGIN
  SELECT role INTO actor_role FROM public.staff_members WHERE user_sub=a AND active;
  IF actor_role IS NULL OR op IS NULL OR order_id IS NULL THEN RAISE EXCEPTION 'order_forbidden';END IF;
@@ -66,7 +66,8 @@ DECLARE actor_role text; old public.field_orders%ROWTYPE; saved public.field_ord
     public.sales_can_access(owner_id,owner_id,c.province,c.district)) THEN RAISE EXCEPTION 'order_forbidden';END IF;
  IF actor_role='sales' AND owner_id<>a THEN RAISE EXCEPTION 'order_forbidden';END IF;
  SELECT * INTO old FROM public.field_orders WHERE id=order_id FOR UPDATE;
- IF NOT FOUND THEN
+ is_new:=NOT FOUND;
+ IF is_new THEN
   IF action<>'save' OR expected<>0 OR jsonb_array_length(items)<1 THEN RAISE EXCEPTION 'order_invalid';END IF;
  ELSE
   IF old.version<>expected THEN RAISE EXCEPTION 'order_stale';END IF;
@@ -87,7 +88,7 @@ DECLARE actor_role text; old public.field_orders%ROWTYPE; saved public.field_ord
      OR NOT EXISTS(SELECT 1 FROM public.catalog_products p WHERE p.id=line.product_id AND p.active
        AND p.unit=line.unit) THEN RAISE EXCEPTION 'order_invalid_unit'; END IF;
   END LOOP;
-  IF NOT FOUND THEN
+  IF is_new THEN
    INSERT INTO public.field_orders(id,owner_sub,customer_id,note,created_by,updated_by)
     VALUES(order_id,owner_id,cid,memo,a,a) RETURNING * INTO saved;
   ELSE
