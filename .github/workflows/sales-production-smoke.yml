@@ -49,4 +49,16 @@ jobs:
           echo "/api/auth/login (invalid) => HTTP $code"
           test "$code" = 400
           jq -e '.error | type=="string"' /tmp/login.json
-          echo 'PASS: frontend HTML/Flutter bootstrap, JSON auth proxy and unauthenticated 401'
+          # Fake cookie must reach the Worker unchanged; this never uses a real session.
+          code=$(curl -sS --max-time 30 -o /tmp/cookie.json -w '%{http_code}' \
+            -H 'Cookie: __Host-sales-session=invalid-session' "$site/api/v1/me")
+          echo "/api/v1/me (invalid cookie) => HTTP $code"
+          test "$code" = 401
+          jq -e '.error=="Phiên đăng nhập không hợp lệ"' /tmp/cookie.json
+          # A stateless logout validates Set-Cookie forwarding through the Vercel proxy.
+          curl --fail --max-time 30 -sS -D /tmp/logout-headers -o /tmp/logout.json \
+            -H 'Origin: https://sales-mien-tay.vercel.app' \
+            -H 'Content-Type: application/json' --data '{}' "$site/api/auth/logout"
+          jq -e '.ok==true' /tmp/logout.json
+          grep -qi '^set-cookie: __Host-sales-session=' /tmp/logout-headers
+          echo 'PASS: frontend HTML/Flutter bootstrap, JSON auth proxy, cookie forwarding and logout cookie'
