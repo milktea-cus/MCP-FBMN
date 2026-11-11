@@ -9,8 +9,8 @@ export async function targetRoutes(req:Request,env:{DATABASE_URL:string},u:User,
  const sql=neon(env.DATABASE_URL);
  const owner=url.searchParams.get('owner')??'';
  if(req.method==='GET'){
-  const staff=await sql`SELECT user_sub,full_name,employee_code FROM staff_members WHERE active AND role='sales' AND public.sales_can_access(${u.sub},user_sub,NULL,NULL) ORDER BY full_name,user_sub`;
-  const chosen=owner||staff[0]?.user_sub||'';
+  const staff=await sql`SELECT user_sub,full_name,employee_code FROM staff_members WHERE active AND public.sales_can_access(${u.sub},user_sub,NULL,NULL) ORDER BY full_name,user_sub`;
+  const chosen=owner||staff.find(s=>s.user_sub===u.sub)?.user_sub||staff[0]?.user_sub||'';
   if(chosen&&!staff.some(s=>s.user_sub===chosen))return bad('Không có quyền nhân viên',403);
   if(url.pathname.endsWith('/options')){
    const d=url.searchParams.get('dimension'),q=(url.searchParams.get('q')??'').slice(0,120);

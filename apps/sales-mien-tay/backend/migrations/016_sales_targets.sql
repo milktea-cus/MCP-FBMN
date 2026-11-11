@@ -22,7 +22,7 @@ DECLARE rec record; old public.sales_targets%ROWTYPE; saved public.sales_targets
  prior public.sales_target_mutations%ROWTYPE; req jsonb; before_rows jsonb:='[]'; after_rows jsonb:='[]'; total bigint; m date;
 BEGIN
  IF NOT EXISTS(SELECT 1 FROM public.staff_members WHERE user_sub=a AND active AND role IN ('admin','manager'))
- OR NOT EXISTS(SELECT 1 FROM public.staff_members WHERE user_sub=o AND active AND role='sales')
+ OR NOT EXISTS(SELECT 1 FROM public.staff_members WHERE user_sub=o AND active)
  OR NOT public.sales_can_access(a,o,NULL,NULL) THEN RAISE EXCEPTION 'target_forbidden'; END IF;
  IF yr NOT BETWEEN 2000 AND 2100 OR d NOT IN ('employee','customer','product') OR e IS NULL
  OR (d='employee' AND e<>'') OR (d<>'employee' AND e='') OR jsonb_typeof(rows)<>'array'

@@ -86,7 +86,7 @@ class _TargetPageState extends State<TargetPage>{
    if(busy)const LinearProgressIndicator(),
    if(cached)const Text('Dữ liệu đã lưu trên máy · chỉ xem, cần mạng để giao/sửa Target.'),
    if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
-   if(!busy&&error==null&&owner.isEmpty)const Text('Chưa có nhân viên Sales thuộc phạm vi quản lý.'),
+   if(!busy&&error==null&&owner.isEmpty)const Text('Chưa có nhân viên thuộc phạm vi quản lý.'),
    if(!busy&&error==null&&owner.isNotEmpty)...[
     Card(child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
      Row(children:[const Expanded(child:Text('Target nhân viên')),if(canEdit)TextButton(onPressed:()=>choose('employee'),child:const Text('Giao / sửa'))]),
@@ -97,7 +97,7 @@ class _TargetPageState extends State<TargetPage>{
      const Text('Target khách và SKU là hai nhóm phân bổ riêng; không cộng vào Target nhân viên.'),
     ]))),
     allocationCard('customer','Khách hàng',total),allocationCard('product','Sản phẩm / SKU',total),
-    const Padding(padding:EdgeInsets.all(8),child:Text('Chỉ tiêu quý/năm cộng từ các tháng. Chỉ Admin/Manager được giao hoặc sửa chỉ tiêu; Sales xem chỉ tiêu của mình.')),
+    const Padding(padding:EdgeInsets.all(8),child:Text('Chỉ tiêu quý/năm cộng từ các tháng. Mỗi nhân viên có Target cá nhân riêng, kể cả Admin/Manager trực tiếp bán hàng. Admin/Manager giao hoặc sửa trong phạm vi quyền; Sales chỉ xem của mình.')),
    ],
   ]);
  }
