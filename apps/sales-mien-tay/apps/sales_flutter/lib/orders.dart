@@ -407,45 +407,12 @@ class _OrdersPageState extends State<OrdersPage>{
   }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('$e')));}
   finally{if(mounted)setState(()=>busy=false);}
  }
- Future<String?> lifecycleReason(String mode)async{
-  final controller=TextEditingController();
-  String value='';
-  final replacing=mode=='replace';
-  final state=selected?['status']?.toString()??'';
-  final result=await showDialog<String>(
-   context:context,barrierDismissible:false,
-   builder:(ctx)=>StatefulBuilder(builder:(ctx,update)=>AlertDialog(
-    title:Text(replacing?'Tạo đơn thay thế / điều chỉnh':'Hủy đơn có nhật ký'),
-    content:SizedBox(width:440,child:Column(
-     mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
-      Text(replacing
-       ?state=='imported'
-        ?'Đơn đã nhập công ty được giữ nguyên. Admin tạo nháp điều chỉnh riêng; không tự sửa chứng từ hoặc doanh số công ty.'
-        :'Đơn đã xuất chuyển thành Đã thay thế. File đã gửi công ty không tự thu hồi.'
-       :state=='exported'
-        ?'Đơn đã xuất chỉ Admin được hủy nội bộ. File đã gửi công ty không tự thu hồi.'
-        :'Đơn nháp sẽ được hủy mềm và lưu lịch sử.'),
-      const SizedBox(height:12),
-      TextField(
-       controller:controller,maxLength:300,minLines:2,maxLines:4,
-       onChanged:(v)=>update(()=>value=v.trim()),
-       decoration:const InputDecoration(
-        labelText:'Lý do bắt buộc',hintText:'Nhập ít nhất 8 ký tự'),
-      ),
-     ])),
-    actions:[
-     TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Đóng')),
-     FilledButton(
-      onPressed:value.length>=8&&value.length<=300
-       ?()=>Navigator.pop(ctx,value):null,
-      child:Text(replacing?'Tạo nháp điều chỉnh':'Xác nhận hủy'),
-     ),
-    ],
-   )),
-  );
-  controller.dispose();
-  return result;
- }
+ Future<String?> lifecycleReason(String mode)=>showDialog<String>(
+  context:context,barrierDismissible:false,
+  builder:(_)=>_OrderLifecycleReasonDialog(
+   mode:mode,status:selected?['status']?.toString()??'',
+  ),
+ );
  Future<void> lifecycle(String mode)async{
   if(selected==null||busy)return;
   final state=selected!['status']?.toString()??'local';
@@ -675,5 +642,51 @@ class _OrdersPageState extends State<OrdersPage>{
    ],
    const Padding(padding:EdgeInsets.all(8),child:Text('Excel xuất là mẫu CHUẨN BỊ nhập công ty, chưa được đối chiếu mẫu chính thức. Tồn là snapshot, không được giữ chỗ khi ra đơn.')),
   ]);
+ }
+}
+
+/// The modal owns its controller until the route finishes its closing
+/// animation. Never dispose TextEditingController immediately after pop().
+class _OrderLifecycleReasonDialog extends StatefulWidget{
+ final String mode,status;
+ const _OrderLifecycleReasonDialog({required this.mode,required this.status});
+ @override State<_OrderLifecycleReasonDialog> createState()=>_OrderLifecycleReasonDialogState();
+}
+class _OrderLifecycleReasonDialogState extends State<_OrderLifecycleReasonDialog>{
+ final controller=TextEditingController();
+ String reason='';
+ @override void dispose(){controller.dispose();super.dispose();}
+ @override Widget build(BuildContext context){
+  final replacing=widget.mode=='replace';
+  return AlertDialog(
+   title:Text(replacing?'Tạo đơn thay thế / điều chỉnh':'Hủy đơn có nhật ký'),
+   content:SizedBox(width:440,child:Column(
+    mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,
+    children:[
+     Text(replacing
+      ?widget.status=='imported'
+       ?'Đơn đã nhập công ty được giữ nguyên. Admin tạo nháp điều chỉnh riêng; không tự sửa chứng từ hoặc doanh số công ty.'
+       :'Đơn đã xuất chuyển thành Đã thay thế. File đã gửi công ty không tự thu hồi.'
+      :widget.status=='exported'
+       ?'Đơn đã xuất chỉ Admin được hủy nội bộ. File đã gửi công ty không tự thu hồi.'
+       :'Đơn nháp sẽ được hủy mềm và lưu lịch sử.'),
+     const SizedBox(height:12),
+     TextField(
+      controller:controller,maxLength:300,minLines:2,maxLines:4,
+      onChanged:(v)=>setState(()=>reason=v.trim()),
+      decoration:const InputDecoration(
+       labelText:'Lý do bắt buộc',hintText:'Nhập ít nhất 8 ký tự'),
+     ),
+    ],
+   )),
+   actions:[
+    TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Đóng')),
+    FilledButton(
+     onPressed:reason.length>=8&&reason.length<=300
+      ?()=>Navigator.pop(context,reason):null,
+     child:Text(replacing?'Tạo nháp điều chỉnh':'Xác nhận hủy'),
+    ),
+   ],
+  );
  }
 }
