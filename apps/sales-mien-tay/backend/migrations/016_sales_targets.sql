@@ -4,7 +4,7 @@ CREATE TABLE public.sales_targets (
  month date NOT NULL CHECK (extract(day from month)=1),
  dimension text NOT NULL CHECK (dimension IN ('employee','customer','product')),
  entity_id text NOT NULL,
- amount bigint NOT NULL CHECK (amount BETWEEN 0 AND 1000000000000000),
+ amount bigint NOT NULL CHECK (amount BETWEEN 0 AND 1000000000000),
  version integer NOT NULL DEFAULT 1,
  updated_at timestamptz NOT NULL DEFAULT now(),
  PRIMARY KEY(owner_sub,month,dimension,entity_id),
@@ -40,7 +40,7 @@ BEGIN
  IF (SELECT count(DISTINCT x.month) FROM jsonb_to_recordset(rows) AS x(month integer,amount bigint,version integer))<>jsonb_array_length(rows)
  THEN RAISE EXCEPTION 'target_invalid'; END IF;
  FOR rec IN SELECT * FROM jsonb_to_recordset(rows) AS x(month integer,amount bigint,version integer) ORDER BY month LOOP
-  IF rec.month IS NULL OR rec.month NOT BETWEEN 1 AND 12 OR rec.amount IS NULL OR rec.amount NOT BETWEEN 0 AND 1000000000000000
+  IF rec.month IS NULL OR rec.month NOT BETWEEN 1 AND 12 OR rec.amount IS NULL OR rec.amount NOT BETWEEN 0 AND 1000000000000
   OR rec.version IS NULL OR rec.version<0 THEN RAISE EXCEPTION 'target_invalid'; END IF;
   m:=make_date(yr,rec.month,1);
   SELECT * INTO old FROM public.sales_targets WHERE owner_sub=o AND month=m AND dimension=d AND entity_id=e;

@@ -30,14 +30,15 @@ export async function targetRoutes(req:Request,env:{DATABASE_URL:string},u:User,
     WHERE t.owner_sub=${chosen} AND t.month>=make_date(${year},1,1) AND t.month<make_date(${year+1},1,1)
     AND (t.dimension<>'customer' OR (c.owner_sub=t.owner_sub AND public.sales_can_access(${u.sub},c.owner_sub,c.province,c.district)))
     ORDER BY t.dimension,t.entity_id,t.month`:[];
-  return json({staff,owner:chosen,items,actual_available:false,can_edit:u.admin||u.manager});
+  const allocations=chosen?await sql`SELECT extract(month from month)::int AS month,dimension,sum(amount)::text AS amount FROM sales_targets WHERE owner_sub=${chosen} AND month>=make_date(${year},1,1) AND month<make_date(${year+1},1,1) AND dimension<>'employee' GROUP BY 1,2`:[];
+  return json({staff,owner:chosen,items,allocations,actual_available:false,can_edit:u.admin||u.manager});
  }
  if(req.method!=='POST'||url.pathname.endsWith('/options'))return bad('Method not allowed',405);
  if(!u.admin&&!u.manager)return bad('Chỉ Admin/Manager được giao chỉ tiêu',403);
  let b:any;try{const raw=await req.text();if(raw.length>16000)throw Error();b=JSON.parse(raw);}catch{return bad('Dữ liệu không hợp lệ');}
  if(!b||!uuid.test(String(b.client_ref))||typeof b.owner!=='string'||!Number.isInteger(b.year)||b.year<2000||b.year>2100||
  !['employee','customer','product'].includes(b.dimension)||typeof b.entity_id!=='string'||(b.dimension==='employee'?b.entity_id!=='':!uuid.test(b.entity_id))||
- !Array.isArray(b.months)||b.months.length<1||b.months.length>12||b.months.some((r:any)=>!r||!Number.isInteger(r.month)||r.month<1||r.month>12||!Number.isSafeInteger(r.amount)||r.amount<0||r.amount>1e15||!Number.isInteger(r.version)||r.version<0||r.version>2147483646)||
+ !Array.isArray(b.months)||b.months.length<1||b.months.length>12||b.months.some((r:any)=>!r||!Number.isInteger(r.month)||r.month<1||r.month>12||!Number.isSafeInteger(r.amount)||r.amount<0||r.amount>1e12||!Number.isInteger(r.version)||r.version<0||r.version>2147483646)||
  new Set(b.months.map((r:any)=>r.month)).size!==b.months.length)return bad('Chỉ tiêu hoặc phiên bản không hợp lệ');
  try{
   const result=await sql`SELECT public.sales_target_apply(${u.sub},${b.client_ref}::uuid,${b.owner},${b.year},${b.dimension},${b.entity_id},${JSON.stringify(b.months)}::jsonb) AS items`;

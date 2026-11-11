@@ -52,7 +52,7 @@ class SalesRecord {
 const moduleKinds = <String>['survey', 'target', 'forecast', 'visit', 'dealer', 'competitor', 'support'];
 const moduleLabels = <String, String>{
   'survey': 'Khảo sát điểm bán',
-  'target': 'Chỉ tiêu tháng',
+  'target': 'Quản lý Target',
   'forecast': 'Doanh thu dự kiến',
   'visit': 'Lịch di chuyển',
   'dealer': 'Cơ hội đại lý',
