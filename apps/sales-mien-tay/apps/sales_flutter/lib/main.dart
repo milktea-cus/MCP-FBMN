@@ -376,11 +376,11 @@ class SalesBrandCoverageTable extends StatelessWidget {
           child:Text('Mỗi điểm bán tính một lần trong cột KH; các nhãn hàng có thể cùng xuất hiện tại một điểm bán.',
             style:TextStyle(fontSize:12))),
         SingleChildScrollView(scrollDirection:Axis.horizontal,
-          child:DataTable(columnSpacing:22,columns:const[
-            DataColumn(label:Text('Tỉnh/TP')),DataColumn(label:Text('KH')),
+          child:DataTable(columnSpacing:22,columns:[
+            const DataColumn(label:Text('Tỉnh/TP')),const DataColumn(label:Text('KH')),
             for(final brand in _surveyBrands)DataColumn(label:Text(brand)),
-            DataColumn(label:Text('≥1 nhãn')),
-            DataColumn(label:Text('Nhãn khác')),DataColumn(label:Text('% Thành Đạt')),
+            const DataColumn(label:Text('≥1 nhãn')),
+            const DataColumn(label:Text('Nhãn khác')),const DataColumn(label:Text('% Thành Đạt')),
           ],rows:rows)),
       ])));
   }
