@@ -40,7 +40,7 @@ REVOKE ALL ON public.field_orders,public.field_order_lines,public.field_order_op
 GRANT SELECT ON public.field_orders,public.field_order_lines,public.field_order_ops TO sales_api;
 
 CREATE FUNCTION public.field_order_apply(
- a text,op uuid,order_id uuid,expected integer,owner_id text,cid uuid,
+ a text,op uuid,order_key uuid,expected integer,owner_id text,cid uuid,
  action text,items jsonb,memo text,stale_ack boolean,import_ref text
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 DECLARE actor_role text; old public.field_orders%ROWTYPE; saved public.field_orders%ROWTYPE;
@@ -48,13 +48,13 @@ DECLARE actor_role text; old public.field_orders%ROWTYPE; saved public.field_ord
  line record; count_lines integer; rec record; stock_issue text; customer_code text; is_new boolean;
  BEGIN
  SELECT role INTO actor_role FROM public.staff_members WHERE user_sub=a AND active;
- IF actor_role IS NULL OR op IS NULL OR order_id IS NULL THEN RAISE EXCEPTION 'order_forbidden';END IF;
+ IF actor_role IS NULL OR op IS NULL OR order_key IS NULL THEN RAISE EXCEPTION 'order_forbidden';END IF;
  IF owner_id IS NULL OR cid IS NULL OR action NOT IN ('save','export','imported') OR
     expected IS NULL OR expected<0 OR memo IS NULL OR length(memo)>500 OR
     jsonb_typeof(items)<>'array' OR jsonb_array_length(items)>100 THEN RAISE EXCEPTION 'order_invalid'; END IF;
- request_json:=jsonb_build_object('id',order_id,'expected',expected,'owner',owner_id,
+ request_json:=jsonb_build_object('id',order_key,'expected',expected,'owner',owner_id,
   'customer',cid,'action',action,'items',items,'memo',memo,'ack',stale_ack,'reference',import_ref);
- PERFORM pg_advisory_xact_lock(hashtext('field_order:'||order_id::text));
+ PERFORM pg_advisory_xact_lock(hashtext('field_order:'||order_key::text));
  SELECT * INTO prior FROM public.field_order_ops WHERE op_id=op;
  IF FOUND THEN
   IF prior.actor_sub<>a OR prior.request_data<>request_json THEN RAISE EXCEPTION 'order_conflict';END IF;
@@ -65,7 +65,7 @@ DECLARE actor_role text; old public.field_orders%ROWTYPE; saved public.field_ord
     public.sales_can_access(a,owner_id,c.province,c.district) AND
     public.sales_can_access(owner_id,owner_id,c.province,c.district)) THEN RAISE EXCEPTION 'order_forbidden';END IF;
  IF actor_role='sales' AND owner_id<>a THEN RAISE EXCEPTION 'order_forbidden';END IF;
- SELECT * INTO old FROM public.field_orders WHERE id=order_id FOR UPDATE;
+ SELECT * INTO old FROM public.field_orders WHERE id=order_key FOR UPDATE;
  is_new:=NOT FOUND;
  IF is_new THEN
   IF action<>'save' OR expected<>0 OR jsonb_array_length(items)<1 THEN RAISE EXCEPTION 'order_invalid';END IF;
@@ -90,27 +90,27 @@ DECLARE actor_role text; old public.field_orders%ROWTYPE; saved public.field_ord
   END LOOP;
   IF is_new THEN
    INSERT INTO public.field_orders(id,owner_sub,customer_id,note,created_by,updated_by)
-    VALUES(order_id,owner_id,cid,memo,a,a) RETURNING * INTO saved;
+    VALUES(order_key,owner_id,cid,memo,a,a) RETURNING * INTO saved;
   ELSE
    UPDATE public.field_orders SET note=memo,updated_by=a,version=version+1,updated_at=now()
-    WHERE id=order_id RETURNING * INTO saved;
-   DELETE FROM public.field_order_lines WHERE field_order_lines.order_id=order_id;
+    WHERE id=order_key RETURNING * INTO saved;
+   DELETE FROM public.field_order_lines WHERE field_order_lines.order_id=order_key;
   END IF;
   INSERT INTO public.field_order_lines(order_id,line_id,product_id,quantity,unit)
-  SELECT order_id,x.line_id,x.product_id,x.quantity,x.unit
+  SELECT order_key,x.line_id,x.product_id,x.quantity,x.unit
   FROM jsonb_to_recordset(items) AS x(line_id uuid,product_id uuid,quantity bigint,unit text);
  ELSIF action='export' THEN
   IF jsonb_array_length(items)<>0 THEN RAISE EXCEPTION 'order_invalid'; END IF;
   SELECT coalesce(nullif(btrim(m.company_code),''),nullif(btrim(c.code),'')) INTO customer_code
     FROM public.customers c LEFT JOIN public.catalog_customer_mapping m ON m.customer_id=c.id WHERE c.id=cid;
   IF customer_code IS NULL THEN RAISE EXCEPTION 'order_customer_code';END IF;
-  IF NOT EXISTS(SELECT 1 FROM public.field_order_lines WHERE field_order_lines.order_id=order_id)
+  IF NOT EXISTS(SELECT 1 FROM public.field_order_lines WHERE field_order_lines.order_id=order_key)
   THEN RAISE EXCEPTION 'order_invalid'; END IF;
   FOR rec IN SELECT l.quantity,l.unit,p.company_code,p.name,p.active,p.unit AS stock_unit,
     st.quantity AS available,st.snapshot_at
     FROM public.field_order_lines l JOIN public.catalog_products p ON p.id=l.product_id
     LEFT JOIN public.inventory_stock st ON st.product_id=p.id
-    WHERE l.order_id=order_id LOOP
+    WHERE l.order_id=order_key LOOP
    IF NOT rec.active OR rec.stock_unit IS NULL OR rec.unit<>rec.stock_unit THEN
     RAISE EXCEPTION 'order_invalid_unit';END IF;
    IF rec.available IS NULL OR rec.snapshot_at IS NULL THEN RAISE EXCEPTION 'order_stock_missing'; END IF;
@@ -120,17 +120,17 @@ DECLARE actor_role text; old public.field_orders%ROWTYPE; saved public.field_ord
      RAISE EXCEPTION 'order_stock_stale';END IF;
   END LOOP;
   UPDATE public.field_orders SET status='exported',version=version+1,updated_by=a,
-   updated_at=now(),exported_at=now() WHERE id=order_id RETURNING * INTO saved;
+   updated_at=now(),exported_at=now() WHERE id=order_key RETURNING * INTO saved;
  ELSIF action='imported' THEN
   IF actor_role<>'admin' OR import_ref IS NULL OR length(btrim(import_ref)) NOT BETWEEN 1 AND 120
     THEN RAISE EXCEPTION 'order_invalid';END IF;
   UPDATE public.field_orders SET status='imported',version=version+1,updated_by=a,
    updated_at=now(),import_reference=btrim(import_ref),imported_at=now()
-   WHERE id=order_id RETURNING * INTO saved;
+   WHERE id=order_key RETURNING * INTO saved;
  END IF;
  prev_json:=CASE WHEN old.id IS NULL THEN NULL ELSE to_jsonb(old) END;
  INSERT INTO public.field_order_ops(op_id,order_id,actor_sub,request_data,before_data,after_data)
- VALUES(op,order_id,a,request_json,prev_json,to_jsonb(saved));
+ VALUES(op,order_key,a,request_json,prev_json,to_jsonb(saved));
  RETURN to_jsonb(saved);
  END $fn$;
 REVOKE ALL ON FUNCTION public.field_order_apply(text,uuid,uuid,integer,text,uuid,text,jsonb,text,boolean,text) FROM PUBLIC;
