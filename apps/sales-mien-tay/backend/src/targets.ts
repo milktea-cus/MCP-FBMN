@@ -1,10 +1,11 @@
 import {neon} from '@neondatabase/serverless';
 import type {userFromRequest} from './auth';
+import {publishNotification} from './notifications';
 type User=Awaited<ReturnType<typeof userFromRequest>>;
 const json=(v:unknown,status=200)=>new Response(JSON.stringify(v),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}});
 const bad=(error:string,status=400)=>json({error},status);
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export async function targetRoutes(req:Request,env:{DATABASE_URL:string},u:User,url:URL):Promise<Response|null>{
+export async function targetRoutes(req:Request,env:{DATABASE_URL:string;VAPID_PUBLIC_KEY?:string;VAPID_PRIVATE_JWK?:string;VAPID_SUBJECT?:string},u:User,url:URL):Promise<Response|null>{
  if(!['/api/v1/targets','/api/v1/targets/options'].includes(url.pathname))return null;
  const sql=neon(env.DATABASE_URL);
  const owner=url.searchParams.get('owner')??'';
@@ -46,6 +47,11 @@ export async function targetRoutes(req:Request,env:{DATABASE_URL:string},u:User,
  new Set(b.months.map((r:any)=>r.month)).size!==b.months.length)return bad('Chỉ tiêu hoặc phiên bản không hợp lệ');
  try{
   const result=await sql`SELECT public.sales_target_apply(${u.sub},${b.client_ref}::uuid,${b.owner},${b.year},${b.dimension},${b.entity_id},${JSON.stringify(b.months)}::jsonb) AS items`;
+  if(b.owner!==u.sub){
+   try{await publishNotification(env,b.owner,'target:'+b.client_ref,
+     'Được giao chỉ tiêu','Có chỉ tiêu kinh doanh mới. Mở Field Work để xem.');}
+   catch{/* A notification outage cannot reverse a committed target assignment. */}
+  }
   return json({items:result[0].items});
  }catch(e){const m=String((e as Error).message);
   if(m.includes('target_forbidden'))return bad('Không có quyền giao chỉ tiêu',403);

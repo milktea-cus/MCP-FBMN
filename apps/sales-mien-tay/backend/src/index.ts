@@ -11,9 +11,13 @@ import {targetRoutes} from './targets';
 import {actualRoutes} from './actuals';
 import {orderRoutes} from './orders';
 import {performanceRoutes} from './performance';
+import {notificationRoutes} from './notifications';
 
 interface Env {
   DATABASE_URL: string;
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_JWK?: string;
+  VAPID_SUBJECT?: string;
   AUTH_ISSUER: string;
   AUTH_AUDIENCE: string;
   AUTH_JWKS_URL: string;
@@ -102,6 +106,8 @@ export default {
       if(syncIdentity!==null&&(syncIdentity!==user.sub||req.headers.get('X-Sync-Revision')!==String(user.staff.scope_revision)))return bad('Phiên hoặc địa bàn đồng bộ đã thay đổi',403);
       if (url.pathname === '/api/v1/me' && req.method === 'GET') return json({identity: user.sub, role: user.staff.role, employee_code: user.staff.employee_code, full_name: user.staff.full_name, email: user.staff.email, scope_revision: String(user.staff.scope_revision), scopes: user.scopes, permissions: user.admin ? ['staff:manage','records:all'] : user.manager ? ['records:team','records:own'] : ['records:own']});
       if(url.pathname==='/api/v1/admin/identity')return provisionIdentity(req,env,user);
+      const notifications = await notificationRoutes(req,env,user,url);
+      if(notifications)return notifications;
       const staffResponse = await staffRoutes(req, env, user, url);
       if (staffResponse) return staffResponse;
       if (url.pathname === '/api/v1/meta' && req.method === 'GET') {
