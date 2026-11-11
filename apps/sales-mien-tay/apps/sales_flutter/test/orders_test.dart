@@ -93,20 +93,20 @@ void main(){
    if(request.method=='GET'&&request.url.path=='/api/v1/orders'){
     return http.Response.bytes(utf8.encode(jsonEncode({'items':[
       if(serverOrder!=null)serverOrder
-    ]})),200);
+    ]})),200,headers:{'content-type':'application/json; charset=utf-8'});
    }
    if(request.url.path=='/api/v1/orders/customers'){
     return http.Response.bytes(utf8.encode(jsonEncode({'items':[
       {'id':customerId,'owner_sub':'owner','name':'Nhà sách Demo','export_code':'CTY-01'}
-    ]})),200);
+    ]})),200,headers:{'content-type':'application/json; charset=utf-8'});
    }
    if(request.url.path=='/api/v1/orders/products'){
-    return http.Response.bytes(utf8.encode(jsonEncode({'items':products,'next_cursor':null})),200);
+    return http.Response.bytes(utf8.encode(jsonEncode({'items':products,'next_cursor':null})),200,headers:{'content-type':'application/json; charset=utf-8'});
    }
    if(request.method=='POST'&&request.url.path=='/api/v1/orders'){
     final payload=Map<String,dynamic>.from(jsonDecode(request.body) as Map);
     saves.add(payload);
-    if(failFirst){failFirst=false;return http.Response('{"error":"Kết nối đứt"}',503);}
+    if(failFirst){failFirst=false;return http.Response.bytes(utf8.encode('{"error":"Kết nối đứt"}'),503,headers:{'content-type':'application/json; charset=utf-8'});}
     serverOrder={
       'id':payload['id'],'owner_sub':'owner','customer_id':customerId,
       'customer_name':'Nhà sách Demo','customer_code':'CTY-01',
@@ -120,7 +120,7 @@ void main(){
     return http.Response.bytes(utf8.encode(jsonEncode({'item':{
       'id':payload['id'],'owner_sub':'owner','customer_id':customerId,
       'status':'draft','version':1,'note':payload['note'],
-    }})),201);
+    }})),201,headers:{'content-type':'application/json; charset=utf-8'});
    }
    return http.Response('{"error":"Unexpected endpoint"}',404);
   });
