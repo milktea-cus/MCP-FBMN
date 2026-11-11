@@ -282,18 +282,13 @@ class _SalesHomeState extends State<SalesHome> {
   Widget build(BuildContext context) {
     final narrow = MediaQuery.of(context).size.width < 850;
     return Scaffold(
-      appBar: AppBar(
-        title: Row(mainAxisSize:MainAxisSize.min,children:[Image.asset('assets/fbmn-transparent-logo.webp',height:28),const SizedBox(width:8),const Text('Filed Work',style:TextStyle(fontWeight:FontWeight.w700))]),
-        actions: [
-          IconButton(tooltip:'Tra tồn',icon:const Icon(Icons.inventory_outlined),onPressed:()=>setState(()=>_selectedIndex=11)),
-          IconButton(tooltip:'Danh mục SKU',icon:const Icon(Icons.inventory_2_outlined),onPressed:()=>setState(()=>_selectedIndex=10)),
-          if (_loading) const Padding(padding: EdgeInsets.all(16),
-            child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
-          IconButton(onPressed: _loading ? null : (){unawaited(_queue.sync());_refresh();},
-            tooltip: 'Tải lại dữ liệu', icon: const Icon(Icons.sync)),
-          if(widget.me['role']=='admin') IconButton(tooltip:'Quản lý nhân viên',icon:const Icon(Icons.manage_accounts_outlined),onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>StaffPage(session:widget.session)))),
-          IconButton(onPressed: _profile,tooltip:'Hồ sơ nhân viên',icon:const Icon(Icons.account_circle_outlined)),
-        ],
+      appBar: SalesHomeBar(
+        compact:narrow, loading:_loading, admin:widget.me['role']=='admin',
+        onStock:()=>setState(()=>_selectedIndex=11),
+        onCatalog:()=>setState(()=>_selectedIndex=10),
+        onRefresh:(){unawaited(_queue.sync());_refresh();},
+        onStaff:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>StaffPage(session:widget.session))),
+        onProfile:_profile,
       ),
       bottomNavigationBar: narrow ? NavigationBar(
         selectedIndex: const [0,1,2,5,9].contains(_selectedIndex)?const [0,1,2,5,9].indexOf(_selectedIndex):0,
@@ -328,6 +323,66 @@ class _SalesHomeState extends State<SalesHome> {
               : _selectedIndex==5||_selectedIndex==9?FieldWorkPage(key:ValueKey('field:$_selectedIndex:$_province'),queue:_queue,regions:_catalog,service:_customerService,report:_selectedIndex==9):_records(moduleKinds[_selectedIndex - 2])),
         ])),
       ]),
+    );
+  }
+}
+enum _HomeAction { catalog, refresh, staff, profile }
+
+/// Compact toolbar shares the FBMN AppBar theme; secondary actions remain
+/// reachable by label rather than competing with the title on small screens.
+class SalesHomeBar extends StatelessWidget implements PreferredSizeWidget {
+  final bool compact,loading,admin;
+  final VoidCallback onStock,onCatalog,onRefresh,onStaff,onProfile;
+  const SalesHomeBar({super.key,required this.compact,required this.loading,
+    required this.admin,required this.onStock,required this.onCatalog,
+    required this.onRefresh,required this.onStaff,required this.onProfile});
+  @override Size get preferredSize=>Size.fromHeight(kToolbarHeight+(loading?2:0));
+
+  @override Widget build(BuildContext context){
+    final title=Text('Filed Work',maxLines:1,overflow:TextOverflow.ellipsis,
+      style:TextStyle(fontWeight:FontWeight.w700,fontSize:compact?18:null));
+    final stock=IconButton(tooltip:'Tra tồn',icon:const Icon(Icons.inventory_outlined),onPressed:onStock);
+    return AppBar(
+      centerTitle:false,
+      titleSpacing:compact?0:null,
+      title:compact?title:Row(mainAxisSize:MainAxisSize.min,children:[
+        Image.asset('assets/fbmn-transparent-logo.webp',height:28),
+        const SizedBox(width:8),Flexible(child:title),
+      ]),
+      bottom:loading?const PreferredSize(preferredSize:Size.fromHeight(2),
+        child:LinearProgressIndicator(minHeight:2)):null,
+      actions:[
+        stock,
+        if(compact)
+          PopupMenuButton<_HomeAction>(
+            tooltip:'Thêm thao tác',
+            icon:const Icon(Icons.more_vert),
+            onSelected:(action){
+              switch(action){
+                case _HomeAction.catalog:onCatalog();break;
+                case _HomeAction.refresh:if(!loading)onRefresh();break;
+                case _HomeAction.staff:if(admin)onStaff();break;
+                case _HomeAction.profile:onProfile();break;
+              }
+            },
+            itemBuilder:(_)=>[
+              const PopupMenuItem(value:_HomeAction.catalog,child:ListTile(
+                leading:Icon(Icons.inventory_2_outlined),title:Text('Danh mục sản phẩm'))),
+              PopupMenuItem(value:_HomeAction.refresh,enabled:!loading,child:const ListTile(
+                leading:Icon(Icons.sync),title:Text('Tải lại dữ liệu'))),
+              if(admin)const PopupMenuItem(value:_HomeAction.staff,child:ListTile(
+                leading:Icon(Icons.manage_accounts_outlined),title:Text('Quản lý nhân viên'))),
+              const PopupMenuItem(value:_HomeAction.profile,child:ListTile(
+                leading:Icon(Icons.account_circle_outlined),title:Text('Hồ sơ / Đăng xuất'))),
+            ],
+          )
+        else ...[
+          IconButton(tooltip:'Danh mục SKU',icon:const Icon(Icons.inventory_2_outlined),onPressed:onCatalog),
+          IconButton(tooltip:'Tải lại dữ liệu',icon:const Icon(Icons.sync),onPressed:loading?null:onRefresh),
+          if(admin)IconButton(tooltip:'Quản lý nhân viên',icon:const Icon(Icons.manage_accounts_outlined),onPressed:onStaff),
+          IconButton(tooltip:'Hồ sơ nhân viên',icon:const Icon(Icons.account_circle_outlined),onPressed:onProfile),
+        ],
+      ],
     );
   }
 }
