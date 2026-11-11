@@ -163,6 +163,8 @@ class _OrderPickerState extends State<OrderPicker> {
           cached = [];
           rows = [];
           cursor = null;
+          busy = false;
+          loadingMore = false;
           error = 'Quyền truy cập đã thay đổi. Vui lòng đăng nhập lại.';
         });
         unawaited(widget.queue.cache(cacheKey, []).catchError((_) {}));
@@ -229,6 +231,8 @@ class _OrderPickerState extends State<OrderPicker> {
           cached = [];
           rows = [];
           cursor = null;
+          busy = false;
+          loadingMore = false;
           error = 'Quyền truy cập đã thay đổi. Vui lòng đăng nhập lại.';
         });
         unawaited(widget.queue.cache(cacheKey, []).catchError((_) {}));
