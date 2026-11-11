@@ -4,53 +4,51 @@ import '../lib/main.dart';
 import '../lib/theme.dart';
 
 void main(){
-  for(final width in [320.0,360.0,390.0,768.0]){
-    testWidgets('compact toolbar fits $width with drawer and admin actions',(tester)async{
-      tester.view.devicePixelRatio=1;
-      tester.view.physicalSize=Size(width,800);
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
+  const sections=['Tổng quan','Khách hàng','Khảo sát','Target','Dự kiến','Lịch trình','Hỗ trợ','Chính sách','Yêu cầu','Báo cáo','Danh mục SKU','Tra tồn'];
+  Widget shell({required bool admin,required bool loading,required List<String> calls})=>MaterialApp(
+    theme:SalesTheme.build(),home:Scaffold(
+      appBar:SalesHomeBar(loading:loading,onNotifications:()=>calls.add('bell')),
+      drawer:SalesHomeDrawer(admin:admin,loading:loading,selectedIndex:0,sections:sections,
+        icons:List.filled(sections.length,Icons.dashboard_outlined),
+        onSection:(i)=>calls.add('section:$i'),onRefresh:()=>calls.add('refresh'),
+        onStaff:()=>calls.add('staff'),onProfile:()=>calls.add('profile')),
+      body:const SizedBox.expand(),
+    ));
+  for(final width in [320.0,360.0,390.0,768.0,1280.0]){
+    testWidgets('logo and one notification action fit $width',(tester)async{
+      tester.view.devicePixelRatio=1;tester.view.physicalSize=Size(width,800);
+      addTearDown(tester.view.resetPhysicalSize);addTearDown(tester.view.resetDevicePixelRatio);
       final calls=<String>[];
-      await tester.pumpWidget(MaterialApp(theme:SalesTheme.build(width:width),home:Scaffold(
-        drawer:const Drawer(),
-        appBar:SalesHomeBar(compact:true,loading:false,admin:true,
-          onStock:()=>calls.add('stock'),onCatalog:()=>calls.add('catalog'),
-          onRefresh:()=>calls.add('refresh'),onStaff:()=>calls.add('staff'),onProfile:()=>calls.add('profile')),
-      )));
+      await tester.pumpWidget(shell(admin:true,loading:false,calls:calls));
+      await tester.pumpAndSettle();
       expect(tester.takeException(),isNull);
+      expect(find.byType(Image),findsOneWidget);
       expect(find.text('Filed Work'),findsOneWidget);
-      expect(find.byTooltip('Tra tồn'),findsOneWidget);
-      expect(find.byTooltip('Thêm thao tác'),findsOneWidget);
-      expect(find.byTooltip('Danh mục SKU'),findsNothing);
-      final title=tester.getRect(find.text('Filed Work'));
-      expect(title.left,greaterThanOrEqualTo(56));
-      expect(title.right,lessThanOrEqualTo(tester.getRect(find.byTooltip('Tra tồn')).left));
-      await tester.tap(find.byTooltip('Tra tồn'));
-      expect(calls,['stock']);
-      await tester.tap(find.byTooltip('Thêm thao tác'));
-      await tester.pumpAndSettle();
-      expect(find.text('Danh mục sản phẩm'),findsOneWidget);
+      expect(find.byTooltip('Thông báo'),findsOneWidget);
+      final bar=tester.widget<AppBar>(find.byType(AppBar));
+      expect(bar.actions!.length,1);
+      expect(tester.getRect(find.byType(Image)).right,lessThanOrEqualTo(tester.getRect(find.text('Filed Work')).left));
+      expect(tester.getRect(find.text('Filed Work')).right,lessThanOrEqualTo(tester.getRect(find.byTooltip('Thông báo')).left));
+      await tester.tap(find.byTooltip('Thông báo'));expect(calls,['bell']);
+      await tester.tap(find.byTooltip('Open navigation menu'));await tester.pumpAndSettle();
       expect(find.text('Quản lý nhân viên'),findsOneWidget);
-      await tester.tap(find.text('Danh mục sản phẩm'));
-      await tester.pumpAndSettle();
-      expect(calls,['stock','catalog']);
+      expect(find.text('Tra tồn'),findsOneWidget);
+      expect(find.text('Danh mục SKU'),findsOneWidget);
+      await tester.tap(find.text('Quản lý nhân viên'));await tester.pumpAndSettle();
+      expect(calls,['bell','staff']);expect(find.text('Quản lý nhân viên'),findsNothing);
       expect(tester.takeException(),isNull);
     });
   }
-  testWidgets('sales menu hides staff management and loading disables refresh',(tester)async{
-    tester.view.devicePixelRatio=1;
-    tester.view.physicalSize=const Size(360,800);
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(MaterialApp(home:Scaffold(drawer:const Drawer(),
-      appBar:SalesHomeBar(compact:true,loading:true,admin:false,
-        onStock:(){},onCatalog:(){},onRefresh:(){},onStaff:(){},onProfile:(){}))));
-    expect(find.byType(LinearProgressIndicator),findsOneWidget);
-    await tester.tap(find.byTooltip('Thêm thao tác'));
+  testWidgets('sales cannot see staff; drawer retains stock and profile; loading disables refresh',(tester)async{
+    final calls=<String>[];
+    await tester.pumpWidget(shell(admin:false,loading:true,calls:calls));
+    await tester.tap(find.byTooltip('Open navigation menu'));
     await tester.pump(const Duration(milliseconds:350));
     expect(find.text('Quản lý nhân viên'),findsNothing);
-    final items=tester.widgetList<PopupMenuItem>(find.byWidgetPredicate((w)=>w is PopupMenuItem));
-    expect(items.where((w)=>!w.enabled).length,1);
-    expect(tester.takeException(),isNull);
+    expect(find.text('Hồ sơ / Đăng xuất'),findsOneWidget);
+    final refresh=tester.widget<ListTile>(find.ancestor(of:find.text('Tải lại dữ liệu'),matching:find.byType(ListTile)));
+    expect(refresh.enabled,isFalse);
+    await tester.tap(find.text('Tra tồn'));await tester.pump(const Duration(milliseconds:350));
+    expect(calls,['section:11']);
   });
 }

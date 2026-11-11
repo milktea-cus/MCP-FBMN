@@ -272,33 +272,29 @@ class _SalesHomeState extends State<SalesHome> {
   }
 
   CustomerService get _customerService=>CustomerService(_apiUrl,_accessToken,province:_province,identity:_queue.identity,revision:_queue.revision);
-  Widget _navItem(int i) => ListTile(
-    leading: Icon(_icons[i]), title: Text(_sections[i]),
-    selected: _selectedIndex == i,
-    onTap: () { Navigator.maybePop(context); setState(() => _selectedIndex = i); },
-  );
 
   @override
   Widget build(BuildContext context) {
     final narrow = MediaQuery.of(context).size.width < 850;
     return Scaffold(
-      appBar: SalesHomeBar(
-        compact:narrow, loading:_loading, admin:widget.me['role']=='admin',
-        onStock:()=>setState(()=>_selectedIndex=11),
-        onCatalog:()=>setState(()=>_selectedIndex=10),
-        onRefresh:(){unawaited(_queue.sync());_refresh();},
-        onStaff:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>StaffPage(session:widget.session))),
-        onProfile:_profile,
+      appBar: SalesHomeBar(loading:_loading, onNotifications:()=>showDialog<void>(
+        context:context,builder:(c)=>AlertDialog(title:const Text('Thông báo'),
+          content:const Text('Tính năng thông báo đang được chuẩn bị. Chưa có hộp thư thông báo.'),
+          actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng'))])),
       ),
       bottomNavigationBar: narrow ? NavigationBar(
         selectedIndex: const [0,1,2,5,9].contains(_selectedIndex)?const [0,1,2,5,9].indexOf(_selectedIndex):0,
         onDestinationSelected:(i)=>setState(()=>_selectedIndex=const [0,1,2,5,9][i]),
         destinations:const [NavigationDestination(icon:Icon(Icons.dashboard_outlined),label:'Tổng quan'),NavigationDestination(icon:Icon(Icons.storefront_outlined),label:'Khách hàng'),NavigationDestination(icon:Icon(Icons.assignment_outlined),label:'Khảo sát'),NavigationDestination(icon:Icon(Icons.route_outlined),label:'Lịch trình'),NavigationDestination(icon:Icon(Icons.analytics_outlined),label:'Báo cáo')],
       ):null,
-      drawer: narrow ? Drawer(child: SafeArea(child: ListView(children: [
-        const ListTile(title: Text('PHÂN HỆ SALES')),
-        for (var i = 0; i < _sections.length; i++) _navItem(i),
-      ]))) : null,
+      drawer: SalesHomeDrawer(
+        admin:widget.me['role']=='admin', loading:_loading, selectedIndex:_selectedIndex,
+        sections:_sections, icons:_icons,
+        onSection:(i)=>setState(()=>_selectedIndex=i),
+        onRefresh:(){unawaited(_queue.sync());_refresh();},
+        onStaff:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>StaffPage(session:widget.session))),
+        onProfile:_profile,
+      ),
       body: Row(children: [
         if (!narrow) NavigationRail(
           scrollable: true,
@@ -326,63 +322,55 @@ class _SalesHomeState extends State<SalesHome> {
     );
   }
 }
-enum _HomeAction { catalog, refresh, staff, profile }
 
-/// Compact toolbar shares the FBMN AppBar theme; secondary actions remain
-/// reachable by label rather than competing with the title on small screens.
 class SalesHomeBar extends StatelessWidget implements PreferredSizeWidget {
-  final bool compact,loading,admin;
-  final VoidCallback onStock,onCatalog,onRefresh,onStaff,onProfile;
-  const SalesHomeBar({super.key,required this.compact,required this.loading,
-    required this.admin,required this.onStock,required this.onCatalog,
-    required this.onRefresh,required this.onStaff,required this.onProfile});
+  final bool loading;
+  final VoidCallback onNotifications;
+  const SalesHomeBar({super.key,required this.loading,required this.onNotifications});
   @override Size get preferredSize=>Size.fromHeight(kToolbarHeight+(loading?2:0));
+  @override Widget build(BuildContext context)=>AppBar(
+    centerTitle:false, titleSpacing:0,
+    title:Row(mainAxisSize:MainAxisSize.min,children:[
+      Image.asset('assets/fbmn-transparent-logo.webp',height:28,width:88,fit:BoxFit.contain,
+        semanticLabel:'Futurebook'),
+      const SizedBox(width:6),
+      const Flexible(child:Text('Filed Work',maxLines:1,overflow:TextOverflow.ellipsis,
+        style:TextStyle(fontWeight:FontWeight.w700,fontSize:18))),
+    ]),
+    bottom:loading?const PreferredSize(preferredSize:Size.fromHeight(2),
+      child:LinearProgressIndicator(minHeight:2)):null,
+    actions:[IconButton(tooltip:'Thông báo',icon:const Icon(Icons.notifications_none_outlined),
+      onPressed:onNotifications)],
+  );
+}
 
+/// All secondary actions live in the same navigation drawer on every width.
+class SalesHomeDrawer extends StatelessWidget {
+  final bool admin,loading;
+  final int selectedIndex;
+  final List<String> sections;
+  final List<IconData> icons;
+  final ValueChanged<int> onSection;
+  final VoidCallback onRefresh,onStaff,onProfile;
+  const SalesHomeDrawer({super.key,required this.admin,required this.loading,
+    required this.selectedIndex,required this.sections,required this.icons,
+    required this.onSection,required this.onRefresh,required this.onStaff,required this.onProfile});
   @override Widget build(BuildContext context){
-    final title=Text('Filed Work',maxLines:1,overflow:TextOverflow.ellipsis,
-      style:TextStyle(fontWeight:FontWeight.w700,fontSize:compact?18:null));
-    final stock=IconButton(tooltip:'Tra tồn',icon:const Icon(Icons.inventory_outlined),onPressed:onStock);
-    return AppBar(
-      centerTitle:false,
-      titleSpacing:compact?0:null,
-      title:compact?title:Row(mainAxisSize:MainAxisSize.min,children:[
-        Image.asset('assets/fbmn-transparent-logo.webp',height:28),
-        const SizedBox(width:8),Flexible(child:title),
-      ]),
-      bottom:loading?const PreferredSize(preferredSize:Size.fromHeight(2),
-        child:LinearProgressIndicator(minHeight:2)):null,
-      actions:[
-        stock,
-        if(compact)
-          PopupMenuButton<_HomeAction>(
-            tooltip:'Thêm thao tác',
-            icon:const Icon(Icons.more_vert),
-            onSelected:(action){
-              switch(action){
-                case _HomeAction.catalog:onCatalog();break;
-                case _HomeAction.refresh:if(!loading)onRefresh();break;
-                case _HomeAction.staff:if(admin)onStaff();break;
-                case _HomeAction.profile:onProfile();break;
-              }
-            },
-            itemBuilder:(_)=>[
-              const PopupMenuItem(value:_HomeAction.catalog,child:ListTile(
-                leading:Icon(Icons.inventory_2_outlined),title:Text('Danh mục sản phẩm'))),
-              PopupMenuItem(value:_HomeAction.refresh,enabled:!loading,child:const ListTile(
-                leading:Icon(Icons.sync),title:Text('Tải lại dữ liệu'))),
-              if(admin)const PopupMenuItem(value:_HomeAction.staff,child:ListTile(
-                leading:Icon(Icons.manage_accounts_outlined),title:Text('Quản lý nhân viên'))),
-              const PopupMenuItem(value:_HomeAction.profile,child:ListTile(
-                leading:Icon(Icons.account_circle_outlined),title:Text('Hồ sơ / Đăng xuất'))),
-            ],
-          )
-        else ...[
-          IconButton(tooltip:'Danh mục SKU',icon:const Icon(Icons.inventory_2_outlined),onPressed:onCatalog),
-          IconButton(tooltip:'Tải lại dữ liệu',icon:const Icon(Icons.sync),onPressed:loading?null:onRefresh),
-          if(admin)IconButton(tooltip:'Quản lý nhân viên',icon:const Icon(Icons.manage_accounts_outlined),onPressed:onStaff),
-          IconButton(tooltip:'Hồ sơ nhân viên',icon:const Icon(Icons.account_circle_outlined),onPressed:onProfile),
-        ],
-      ],
-    );
+    void run(VoidCallback action){Navigator.of(context).pop();action();}
+    Widget section(int i)=>ListTile(leading:Icon(icons[i]),title:Text(sections[i]),
+      selected:selectedIndex==i,onTap:()=>run(()=>onSection(i)));
+    return Drawer(child:SafeArea(child:ListView(padding:EdgeInsets.zero,children:[
+      const ListTile(title:Text('PHÂN HỆ SALES')),
+      if(admin)ListTile(leading:const Icon(Icons.manage_accounts_outlined),
+        title:const Text('Quản lý nhân viên'),onTap:()=>run(onStaff)),
+      ListTile(leading:const Icon(Icons.account_circle_outlined),
+        title:const Text('Hồ sơ / Đăng xuất'),onTap:()=>run(onProfile)),
+      ListTile(leading:const Icon(Icons.sync),title:const Text('Tải lại dữ liệu'),
+        enabled:!loading,onTap:loading?null:()=>run(onRefresh)),
+      const Divider(),
+      for(final i in [10,11])section(i),
+      const Divider(),
+      for(var i=0;i<sections.length;i++)if(i!=10&&i!=11)section(i),
+    ])));
   }
 }
