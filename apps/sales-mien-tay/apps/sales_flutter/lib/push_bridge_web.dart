@@ -1,13 +1,21 @@
-import 'dart:js_util' as js;
+import 'dart:js_interop';
 
-Object get _bridge=>js.getProperty(js.globalThis,'FieldWorkPush');
-bool supported(){try{return js.callMethod(_bridge,'supported',[])==true;}catch(_){return false;}}
+@JS('FieldWorkPush.supported')
+external JSBoolean _supported();
+@JS('FieldWorkPush.subscribed')
+external JSPromise<JSBoolean> _subscribed();
+@JS('FieldWorkPush.enable')
+external JSPromise<JSString> _enable(JSString publicKey);
+@JS('FieldWorkPush.disable')
+external JSPromise<JSString> _disable();
+@JS('FieldWorkPush.badge')
+external void _badge(JSNumber unread);
+
+bool supported(){try{return _supported().toDart;}catch(_){return false;}}
 Future<bool> subscribed() async{
- try{return await js.promiseToFuture<bool>(js.callMethod(_bridge,'subscribed',[]));}
+ try{return (await _subscribed().toDart).toDart;}
  catch(_){return false;}
 }
-Future<String> enable(String key) async=>
- (await js.promiseToFuture<Object?>(js.callMethod(_bridge,'enable',[key])))?.toString()??'';
-Future<String> disable() async=>
- (await js.promiseToFuture<Object?>(js.callMethod(_bridge,'disable',[])))?.toString()??'';
-void badge(int count){try{js.callMethod(_bridge,'badge',[count]);}catch(_){}}
+Future<String> enable(String key) async=>(await _enable(key.toJS).toDart).toDart;
+Future<String> disable() async=>(await _disable().toDart).toDart;
+void badge(int unread){try{_badge(unread.toJS);}catch(_){}}
