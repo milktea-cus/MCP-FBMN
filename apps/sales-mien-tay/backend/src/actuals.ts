@@ -121,7 +121,7 @@ export async function actualRoutes(req:Request,env:{DATABASE_URL:string},u:User,
      quantity:row.quantity,amount:row.amount,external_ref:row.external_ref,line_ref:row.line_ref};
    const prior=old.find(o=>o.external_ref===row.external_ref&&o.line_ref===row.line_ref);
    const changed=!!prior&&!(prior.owner_sub===rec.owner_sub&&prior.customer_id===rec.customer_id&&prior.product_id===rec.product_id
-     &&String(prior.sale_date).slice(0,10)===rec.sale_date&&Number(prior.quantity)===rec.quantity&&Number(prior.amount)===rec.amount&&prior.status==='active');
+     &&(prior.sale_date instanceof Date?prior.sale_date.toISOString().slice(0,10):String(prior.sale_date).slice(0,10))===rec.sale_date&&Number(prior.quantity)===rec.quantity&&Number(prior.amount)===rec.amount&&prior.status==='active');
    if(changed){seenErrors.push('Dòng '+row.row_number+': đã tồn tại với nội dung khác, dùng Sửa doanh số');continue;}
    prepared.push(rec);preview.push({...row,duplicate:!!prior,employee_name:employee.employee_code});
   }

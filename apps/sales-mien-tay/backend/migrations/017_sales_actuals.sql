@@ -131,6 +131,7 @@ BEGIN
   SELECT * INTO old FROM public.sales_actuals WHERE id=target FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'actual_not_found'; END IF;
   IF old.version<>expected_version THEN RAISE EXCEPTION 'actual_stale'; END IF;
+  IF o<>old.owner_sub THEN RAISE EXCEPTION 'actual_forbidden'; END IF;
   IF actor_role='sales' AND (old.owner_sub<>a OR old.source<>'manual') THEN RAISE EXCEPTION 'actual_forbidden'; END IF;
   IF old.source='company' AND actor_role NOT IN ('admin','manager') THEN RAISE EXCEPTION 'actual_forbidden'; END IF;
   IF NOT public.sales_actual_authorized(a,old.owner_sub,old.customer_id,old.product_id)
