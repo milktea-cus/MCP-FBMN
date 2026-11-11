@@ -16,6 +16,11 @@
       if(!supported())return false;
       const reg=await worker();return !!(await reg.pushManager.getSubscription());
     },
+    async existing(){
+      if(!supported())return '';
+      const reg=await worker(),subscription=await reg.pushManager.getSubscription();
+      return subscription?JSON.stringify(subscription.toJSON()):'';
+    },
     async enable(key){
       if(!supported())throw Error('Thiết bị không hỗ trợ Web Push.');
       // The permission request starts within the user's direct click.

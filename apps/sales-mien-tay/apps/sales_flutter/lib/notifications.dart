@@ -44,6 +44,11 @@ class FieldNotificationStore extends ChangeNotifier {
     final config=await session.get('/api/v1/notifications/config');
     publicKey=config['supported']==true?config['public_key']?.toString():null;
     pushEnabled=await push.subscribed();
+    if(pushEnabled&&publicKey!=null){
+      final raw=await push.existing();
+      if(raw.isNotEmpty)await session.post('/api/v1/notifications/subscription',
+        Map<String,dynamic>.from(jsonDecode(raw) as Map));
+    }
    }catch(_){}
   }
   changed();
