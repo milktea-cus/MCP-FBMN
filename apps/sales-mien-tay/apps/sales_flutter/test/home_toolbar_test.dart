@@ -43,12 +43,14 @@ void main(){
     final calls=<String>[];
     await tester.pumpWidget(shell(admin:false,loading:true,calls:calls));
     await tester.tap(find.byTooltip('Open navigation menu'));
+    await tester.pump(); // Start the drawer animation before advancing its clock.
     await tester.pump(const Duration(milliseconds:350));
     expect(find.text('Quản lý nhân viên'),findsNothing);
     expect(find.text('Hồ sơ / Đăng xuất'),findsOneWidget);
     final refresh=tester.widget<ListTile>(find.ancestor(of:find.text('Tải lại dữ liệu'),matching:find.byType(ListTile)));
     expect(refresh.enabled,isFalse);
-    await tester.tap(find.text('Tra tồn'));await tester.pump(const Duration(milliseconds:350));
+    expect(find.text('Tra tồn').hitTestable(),findsOneWidget);
+    await tester.tap(find.text('Tra tồn'));await tester.pump();await tester.pump(const Duration(milliseconds:350));
     expect(calls,['section:11']);
   });
 }
