@@ -137,6 +137,7 @@ export async function performanceRoutes(req:Request,env:{DATABASE_URL:string},u:
  const f=parse(url,u.sub,manager);if(!f)return invalid('Kỳ, nhóm hoặc bộ lọc không hợp lệ');
  const forbidden=await validateScope(sql,u,f);if(forbidden)return invalid(forbidden,403);
  const start=f.startMonth,end=f.endMonth,year=f.year,owner=f.owner,province=f.province,customer=f.customer,product=f.product,group=f.group;
+ const endYear=year+(end>12?1:0),endMonth=end>12?1:end;
  const mode=reportTargetMode(f);
  if(action==='detail'||action==='export'){
   const key=action==='detail'?(url.searchParams.get('key')??''):'';
@@ -149,7 +150,7 @@ export async function performanceRoutes(req:Request,env:{DATABASE_URL:string},u:
      a.quantity,a.amount::text AS amount,a.source,a.external_ref,a.line_ref
    FROM sales_actuals a JOIN customers c ON c.id=a.customer_id AND c.owner_sub=a.owner_sub
    JOIN staff_members s ON s.user_sub=a.owner_sub JOIN catalog_products p ON p.id=a.product_id
-   WHERE a.status='active' AND a.sale_date>=make_date(${year},${start},1) AND a.sale_date<make_date(${year},${end},1)
+   WHERE a.status='active' AND a.sale_date>=make_date(${year},${start},1) AND a.sale_date<make_date(${endYear},${endMonth},1)
      AND (${owner==='all'&&manager} OR a.owner_sub=${owner})
      AND (${!province} OR c.province=${province})
      AND (${!customer} OR a.customer_id::text=${customer}) AND (${!product} OR a.product_id::text=${product})
@@ -182,7 +183,7 @@ export async function performanceRoutes(req:Request,env:{DATABASE_URL:string},u:
       sum(a.amount)::text AS amount,sum(a.quantity)::text AS quantity,count(*)::int AS records
     FROM sales_actuals a JOIN customers c ON c.id=a.customer_id AND c.owner_sub=a.owner_sub
     JOIN staff_members s ON s.user_sub=a.owner_sub JOIN catalog_products p ON p.id=a.product_id
-    WHERE a.status='active' AND a.sale_date>=make_date(${year},${start},1) AND a.sale_date<make_date(${year},${end},1)
+    WHERE a.status='active' AND a.sale_date>=make_date(${year},${start},1) AND a.sale_date<make_date(${endYear},${endMonth},1)
       AND (${owner==='all'&&manager} OR a.owner_sub=${owner})
       AND (${!province} OR c.province=${province}) AND (${!customer} OR a.customer_id::text=${customer})
       AND (${!product} OR a.product_id::text=${product})
@@ -190,7 +191,7 @@ export async function performanceRoutes(req:Request,env:{DATABASE_URL:string},u:
     GROUP BY 1 ORDER BY 1 LIMIT 2001`,
   sql`SELECT coalesce(sum(a.amount),0)::text AS amount,count(*)::int AS records,coalesce(sum(a.quantity),0)::text AS quantity
     FROM sales_actuals a JOIN customers c ON c.id=a.customer_id AND c.owner_sub=a.owner_sub
-    WHERE a.status='active' AND a.sale_date>=make_date(${year},${start},1) AND a.sale_date<make_date(${year},${end},1)
+    WHERE a.status='active' AND a.sale_date>=make_date(${year},${start},1) AND a.sale_date<make_date(${endYear},${endMonth},1)
       AND (${owner==='all'&&manager} OR a.owner_sub=${owner})
       AND (${!province} OR c.province=${province}) AND (${!customer} OR a.customer_id::text=${customer})
       AND (${!product} OR a.product_id::text=${product})
@@ -201,7 +202,7 @@ export async function performanceRoutes(req:Request,env:{DATABASE_URL:string},u:
      FROM sales_targets t JOIN staff_members s ON s.user_sub=t.owner_sub
      LEFT JOIN customers c ON t.dimension='customer' AND c.id::text=t.entity_id AND c.owner_sub=t.owner_sub
      LEFT JOIN catalog_products p ON t.dimension='product' AND p.id::text=t.entity_id
-     WHERE t.dimension=${mode} AND t.month>=make_date(${year},${start},1) AND t.month<make_date(${year},${end},1)
+     WHERE t.dimension=${mode} AND t.month>=make_date(${year},${start},1) AND t.month<make_date(${endYear},${endMonth},1)
        AND (${owner==='all'&&manager} OR t.owner_sub=${owner})
        AND public.sales_can_access(${u.sub},t.owner_sub,NULL,NULL)
        AND (${mode!=='customer'} OR (c.id IS NOT NULL AND public.sales_can_access(${u.sub},t.owner_sub,c.province,c.district)))
