@@ -95,9 +95,14 @@ void main(){
     await tester.pump();
     await tester.tap(find.text('Hình ảnh'));
     await tester.pumpAndSettle();
+    // The second dated group is below the phone viewport; scroll before tapping.
+    await tester.drag(find.byKey(const PageStorageKey('customer-photos')),
+      const Offset(0,-520));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Chọn làm ảnh đại diện'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Chọn làm ảnh đại diện'));
-    await tester.pump();
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(queue.pending.length,1);
     expect(queue.pending.single['path'],'/api/v1/customers/$customerId/cover');
     expect(queue.pending.single['method'],'PATCH');
