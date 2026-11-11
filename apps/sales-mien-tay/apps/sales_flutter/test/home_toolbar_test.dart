@@ -40,6 +40,20 @@ void main(){
       expect(tester.takeException(),isNull);
     });
   }
+  testWidgets('red unread badge uses one header action and caps at 99',(tester)async{
+    await tester.pumpWidget(MaterialApp(home:Scaffold(
+      appBar:SalesHomeBar(loading:false,unreadCount:12,onNotifications:(){}),
+      body:const SizedBox.expand())));
+    expect(find.byType(Badge),findsOneWidget);
+    expect(find.text('12'),findsOneWidget);
+    expect(tester.widget<AppBar>(find.byType(AppBar)).actions!.length,1);
+    await tester.pumpWidget(MaterialApp(home:Scaffold(
+      appBar:SalesHomeBar(loading:false,unreadCount:120,onNotifications:(){}))));
+    expect(find.text('99'),findsOneWidget);
+    await tester.pumpWidget(MaterialApp(home:Scaffold(
+      appBar:SalesHomeBar(loading:false,unreadCount:0,onNotifications:(){}))));
+    expect(find.byType(Badge),findsNothing);
+  });
   testWidgets('drawer dark mode toggle stays independent of bottom navigation',(tester)async{
     final calls=<String>[];
     await tester.pumpWidget(MaterialApp(theme:SalesTheme.build(),

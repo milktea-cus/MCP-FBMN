@@ -71,6 +71,8 @@ jobs:
           rm test/offline_browser_test.dart
       - run: flutter build web --release --pwa-strategy=none --no-web-resources-cdn
       - run: python3 scripts/build_offline_shell.py
+      - name: Verify Web Push Service Worker and offline shell
+        run: python3 scripts/check_push_shell.py
       - name: Export verified frontend source for production deployment
         if: github.ref == 'refs/heads/main'
         run: |
