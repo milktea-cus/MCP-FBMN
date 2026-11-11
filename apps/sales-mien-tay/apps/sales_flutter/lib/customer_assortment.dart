@@ -109,6 +109,7 @@ class _CustomerAssortmentSectionState extends State<CustomerAssortmentSection>{
  bool loading=false,busy=false,offline=false;
  String? error;
  String status='';
+ int visibleLimit=24;
  int previousPending=0,generation=0;
  String get cacheKey=>'customer-products:${widget.customerId}';
  @override void initState(){
@@ -286,7 +287,7 @@ class _CustomerAssortmentSectionState extends State<CustomerAssortmentSection>{
     if(error!=null)Text(error!,style:Theme.of(context).textTheme.bodySmall),
     if(display.isEmpty&&!loading)const Padding(
      padding:EdgeInsets.all(8),child:Text('Chưa có SKU phù hợp.')),
-    for(final product in display)ListTile(
+    for(final product in display.take(visibleLimit))ListTile(
      dense:true,
      leading:Icon(assortmentIcon(product['status']?.toString())),
      title:Text('${product['company_code']??''} · ${product['name']??''}',
@@ -300,6 +301,10 @@ class _CustomerAssortmentSectionState extends State<CustomerAssortmentSection>{
         icon:const Icon(Icons.remove_circle_outline))
       :null,
     ),
+    if(display.length>visibleLimit)TextButton.icon(
+     onPressed:()=>setState(()=>visibleLimit+=24),
+     icon:const Icon(Icons.expand_more),
+     label:Text('Xem thêm SKU (${display.length-visibleLimit} còn lại)')),
     if(widget.queue!=null)...[
      for(final job in widget.queue!.pending.where((x)=>
        x['path']=='/api/v1/customers/${widget.customerId}/products'))

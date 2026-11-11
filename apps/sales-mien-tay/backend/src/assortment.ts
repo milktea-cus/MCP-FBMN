@@ -76,7 +76,9 @@ export async function assortmentRoutes(
      a.last_ordered_at,a.last_imported_at,a.evidence_at
     FROM public.customer_product_assortment a
     WHERE a.customer_id=${customerId}::uuid AND a.company_code>${after}
-     AND (${status}='' OR a.status=${status})
+     AND (${status}='' OR (${status}='trading' AND a.is_trading)
+      OR (${status}='imported' AND a.imported_orders>0)
+      OR (${status}='ordered' AND a.ordered_orders>0))
      AND (${q}='' OR a.name ILIKE '%'||${q}||'%'
       OR a.company_code ILIKE '%'||${q}||'%'
       OR a.sku ILIKE '%'||${q}||'%'

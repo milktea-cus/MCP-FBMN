@@ -99,7 +99,8 @@ BEGIN
  IF NOT FOUND THEN RAISE EXCEPTION 'assortment_forbidden'; END IF;
  IF role_name='sales' AND customer_owner<>a THEN
   RAISE EXCEPTION 'assortment_forbidden'; END IF;
- IF NOT EXISTS(SELECT 1 FROM public.catalog_products p WHERE p.id=pid AND p.active)
+ IF NOT EXISTS(SELECT 1 FROM public.catalog_products p WHERE p.id=pid
+   AND (mode='unverify' OR p.active))
   THEN RAISE EXCEPTION 'assortment_product'; END IF;
  request_json:=jsonb_build_object('customer_id',cid,'product_id',pid,
   'expected_version',expected,'action',mode,'reason',clean_reason);
