@@ -37,7 +37,8 @@ function mapError(err:unknown):Response|null {
  if(message.includes('order_stock_stale'))return bad('Bản tồn quá 24 giờ; phải xác nhận dùng tồn cũ trước khi xuất',409);
  if(message.includes('order_stock_expired'))return bad('Tồn đã quá 7 ngày; phải cập nhật file tồn mới trước khi xuất',409);
  if(message.includes('order_invalid_unit'))return bad('Đơn vị tính không khớp tồn kho hoặc mã sản phẩm đã ngừng bán',409);
- if(message.includes('order_invalid'))return bad('Đơn hàng hoặc số lượng không hợp lệ',400);
+ if(message.includes('order_missing'))return bad('Không tìm thấy đơn hàng',404);
+ if(message.includes('order_invalid'))return bad('Đơn hàng hoặc lý do không hợp lệ',400);
  return null;
 }
 export async function orderRoutes(req:Request,env:{DATABASE_URL:string},u:User,url:URL):Promise<Response|null>{
@@ -80,8 +81,23 @@ export async function orderRoutes(req:Request,env:{DATABASE_URL:string},u:User,u
   }
   const detail=/^\/api\/v1\/orders\/([a-f0-9-]{36})(\/export|\/audit)?$/i.exec(path);
   if(path==='/api/v1/orders'){
+   const q=(url.searchParams.get('q')??'').trim();
+   const status=url.searchParams.get('status')??'';
+   const from=url.searchParams.get('from')??'';
+   const to=url.searchParams.get('to')??'';
+   if(q.length>120||!['','local','draft','exported','imported','cancelled','superseded'].includes(status)
+     ||(from!==''&&!/^\d{4}-\d{2}-\d{2}$/.test(from))
+     ||(to!==''&&!/^\d{4}-\d{2}-\d{2}$/.test(to))
+     ||(from!==''&&to!==''&&from>to)){
+    return bad('Bộ lọc đơn hàng không hợp lệ',400);
+   }
+   const fromDate=from||null,toDate=to||null;
    const items=await sql`SELECT o.id::text AS id,o.owner_sub,o.customer_id::text AS customer_id,
     o.status,o.version,o.note,o.import_reference,o.created_at,o.updated_at,o.exported_at,
+    o.cancel_reason,o.cancelled_at,o.replaces_order_id::text AS replaces_order_id,
+    o.replacement_reason,o.superseded_at,
+    (SELECT successor.id::text FROM field_orders successor
+      WHERE successor.replaces_order_id=o.id) AS replaced_by_id,
     c.name AS customer_name,c.province,c.district,
     coalesce(nullif(btrim(m.company_code),''),nullif(btrim(c.code),'')) AS customer_code,
     coalesce((SELECT jsonb_agg(jsonb_build_object('line_id',l.line_id,'product_id',l.product_id,
@@ -93,6 +109,13 @@ export async function orderRoutes(req:Request,env:{DATABASE_URL:string},u:User,u
     FROM field_orders o JOIN customers c ON c.id=o.customer_id AND c.owner_sub=o.owner_sub
     LEFT JOIN catalog_customer_mapping m ON m.customer_id=c.id
     WHERE public.sales_can_access(${u.sub},o.owner_sub,c.province,c.district)
+      AND (${status}='' OR o.status=${status})
+      AND (${q}='' OR c.name ILIKE '%'||${q}||'%'
+       OR c.code ILIKE '%'||${q}||'%'
+       OR m.company_code ILIKE '%'||${q}||'%'
+       OR o.id::text ILIKE '%'||${q}||'%')
+      AND (${fromDate}::date IS NULL OR o.created_at>=${fromDate}::date)
+      AND (${toDate}::date IS NULL OR o.created_at<(${toDate}::date+interval '1 day'))
     ORDER BY o.updated_at DESC LIMIT 100`;
    return respond({items,can_mark_imported:u.admin});
   }
@@ -100,6 +123,10 @@ export async function orderRoutes(req:Request,env:{DATABASE_URL:string},u:User,u
    const id=detail[1];
    const rows=await sql`SELECT o.id::text AS id,o.owner_sub,o.customer_id::text AS customer_id,
     o.status,o.version,o.note,o.import_reference,o.created_at,o.exported_at,o.updated_at,
+    o.cancel_reason,o.cancelled_at,o.replaces_order_id::text AS replaces_order_id,
+    o.replacement_reason,o.superseded_at,
+    (SELECT successor.id::text FROM field_orders successor
+      WHERE successor.replaces_order_id=o.id) AS replaced_by_id,
     c.name AS customer_name,c.province,c.district,
     coalesce(nullif(btrim(m.company_code),''),nullif(btrim(c.code),'')) AS customer_code,
     coalesce((SELECT jsonb_agg(jsonb_build_object('line_id',l.line_id,'product_id',l.product_id,
@@ -125,6 +152,35 @@ export async function orderRoutes(req:Request,env:{DATABASE_URL:string},u:User,u
    return respond({item:rows[0]});
   }
   return bad('Endpoint không tồn tại',404);
+ }
+ if(path==='/api/v1/orders/lifecycle'&&req.method==='POST'){
+  let data:Json;
+  try{
+   const raw=await req.text();
+   if(raw.length>3000)throw Error('large');
+   data=JSON.parse(raw) as Json;
+   if(!data||typeof data!=='object'||Array.isArray(data))throw Error('invalid');
+  }catch{return bad('JSON vòng đời đơn không hợp lệ');}
+  const mode=data.action, reason=data.reason;
+  const target=data.order_id, ref=data.client_ref;
+  const replacement=data.replacement_id;
+  const version=data.expected_version;
+  if(!isUuid(target)||!isUuid(ref)||
+    (mode!=='cancel'&&mode!=='replace')||
+    !Number.isInteger(version)||Number(version)<1||
+    typeof reason!=='string'||reason.trim().length<8||reason.trim().length>300||
+    (mode==='cancel'&&replacement!==null&&replacement!==undefined)||
+    (mode==='replace'&&(!isUuid(replacement)||replacement===target))){
+   return bad('Thiếu mã đơn, phiên bản, lý do (8–300 ký tự) hoặc mã thay thế',400);
+  }
+  if(mode==='replace'&&!u.admin)return bad('Chỉ Admin tạo đơn điều chỉnh hoặc thay thế',403);
+  try{
+   const [row]=await sql`SELECT public.field_order_lifecycle(
+      ${u.sub},${ref}::uuid,${target}::uuid,${Number(version)},
+      ${mode},${reason.trim()},${mode==='replace'?String(replacement):null}::uuid
+     ) AS result`;
+   return respond(row.result);
+  }catch(e){const known=mapError(e);if(known)return known;throw e;}
  }
  if(path!=='/api/v1/orders'||req.method!=='POST')return bad('Endpoint không tồn tại',404);
  let doc:Json;
