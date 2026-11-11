@@ -1,4 +1,4 @@
-import {neon} from '@neondatabase/serverless';
+import {neon,type NeonQueryFunction} from '@neondatabase/serverless';
 import type {userFromRequest} from './auth';
 type User=Awaited<ReturnType<typeof userFromRequest>>;
 type Group='employee'|'province'|'customer'|'product'|'month';
@@ -48,7 +48,7 @@ function parse(url:URL,sub:string,manager:boolean):ReportFilters|null{
  return {year,period:period as ReportFilters['period'],month,quarter,group:group as Group,owner,
    province,customer,product,startMonth:dates.start,endMonth:dates.end};
 }
-type Db=ReturnType<typeof neon>;
+type Db=NeonQueryFunction<false,false>;
 async function validateScope(sql:Db,u:User,f:ReportFilters):Promise<string|null>{
  const ownerList=await sql`SELECT user_sub FROM staff_members WHERE active AND public.sales_can_access(${u.sub},user_sub,NULL,NULL)`;
  if(f.owner==='all'&&!u.admin&&!u.manager)return 'Không có quyền xem toàn đội';
