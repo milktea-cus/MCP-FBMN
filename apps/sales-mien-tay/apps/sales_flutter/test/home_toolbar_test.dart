@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import '../lib/main.dart';
 import '../lib/theme.dart';
+import '../lib/notifications.dart';
+import '../lib/session.dart';
+import '../lib/offline_queue.dart';
 
 void main(){
   const sections=['Tổng quan','Khách hàng','Khảo sát','Target','Dự kiến','Lịch trình','Hỗ trợ','Chính sách','Yêu cầu','Báo cáo','Danh mục SKU','Tra tồn','Ra đơn'];
@@ -54,6 +57,42 @@ void main(){
       appBar:SalesHomeBar(loading:false,unreadCount:0,onNotifications:(){}))));
     expect(find.byType(Badge),findsNothing);
   });
+  testWidgets('notification updates never rebuild the active business screen',
+    (tester)async{
+    final session=SalesSession();
+    final queue=OfflineQueue(session,'seller-a','scope-1');
+    final notifications=FieldNotificationStore(session,queue);
+    var contentBuilds=0;
+    var opens=0;
+    await tester.pumpWidget(MaterialApp(home:Scaffold(
+      appBar:SalesLiveHomeBar(
+        store:notifications,loading:false,
+        onNotifications:()=>opens++,
+      ),
+      body:Builder(builder:(context){
+        contentBuilds++;
+        return const Center(child:Text('Giỏ và biểu mẫu đang mở'));
+      }),
+    )));
+    expect(contentBuilds,1);
+    notifications.items=[FieldNotification(
+      'notice-1','Thông báo mới','Đã đồng bộ',DateTime(2026,11,11),null)];
+    notifications.changed();
+    await tester.pump();
+    expect(contentBuilds,1,reason:
+      'Chuông cập nhật không được dựng lại biểu mẫu đang thao tác');
+    expect(find.text('1'),findsOneWidget);
+    await tester.tap(find.byTooltip('Thông báo'));
+    expect(opens,1);
+    notifications.items=[];
+    notifications.changed();
+    await tester.pump();
+    expect(contentBuilds,1);
+    expect(find.byType(Badge),findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    notifications.dispose();queue.dispose();
+  });
+
   testWidgets('drawer dark mode toggle stays independent of bottom navigation',(tester)async{
     final calls=<String>[];
     await tester.pumpWidget(MaterialApp(theme:SalesTheme.build(),

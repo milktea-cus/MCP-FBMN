@@ -27,8 +27,31 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
  DateTime day=DateTime.now().toUtc().add(const Duration(hours:7));bool weekly=false,monthly=false;int period=0;String employee='',district='',status='';List<Map<String,dynamic>> rows=[];bool busy=false,cached=false;String? error;
  String get keyName=>widget.report?'report:${monthKey(day)}:${widget.service.province}':'routes-v2:${monthly?'month':weekly?'week':'day'}:${dayKey(day)}:${widget.service.province}';
  int previousPending=0;
- @override void initState(){super.initState();previousPending=widget.queue.pending.length;widget.queue.addListener(queueChanged);load();}
- void queueChanged(){if(!mounted)return;final n=widget.queue.pending.length;if(n<previousPending&&!busy)load();previousPending=n;setState((){});}
+ String _queueSignature='';
+ String _signature(){
+  final pending=widget.queue.pending;
+  return '${pending.length}:${widget.queue.quarantined}:${widget.queue.error}:'
+   '${[for(final p in pending) '${p['key']}:${p['status']}:${p['error']}'].join('|')}';
+ }
+ @override void initState(){
+  super.initState();
+  previousPending=widget.queue.pending.length;
+  _queueSignature=_signature();
+  widget.queue.addListener(queueChanged);
+  load();
+ }
+ // Sync progress with unchanged rows must not rebuild every route/card/control.
+ void queueChanged(){
+  if(!mounted)return;
+  final n=widget.queue.pending.length;
+  if(n<previousPending&&!busy)unawaited(load());
+  previousPending=n;
+  final signature=_signature();
+  if(_queueSignature!=signature){
+   _queueSignature=signature;
+   setState((){});
+  }
+ }
  @override void dispose(){widget.queue.removeListener(queueChanged);super.dispose();}
  Future<void> load()async{
   if(busy)return;

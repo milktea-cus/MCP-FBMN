@@ -70,17 +70,23 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
   late final OfflineQueue _queue;
   late final FieldNotificationStore _notifications;
   Timer? _notificationsTimer;
-  void _notificationChanged(){if(mounted)setState((){});}
   @override void didChangeAppLifecycleState(AppLifecycleState state){
     if(state==AppLifecycleState.resumed){
       unawaited(_queue.sync());unawaited(_notifications.refresh());
     }
   }
   int _lastPending=0;
-  void _queueChanged(){if(!mounted)return;final count=_queue.pending.length;if(_lastPending>count)unawaited(_refresh());_lastPending=count;setState((){});}
+  // The queue indicator listens to its own notifier. A sync tick must never
+  // rebuild the current business screen during a tap or page transition.
+  void _queueChanged(){
+    if(!mounted)return;
+    final count=_queue.pending.length;
+    if(_lastPending>count)unawaited(_refresh());
+    _lastPending=count;
+  }
   @override void dispose(){
     WidgetsBinding.instance.removeObserver(this);_notificationsTimer?.cancel();
-    _notifications.removeListener(_notificationChanged);_notifications.dispose();
+    _notifications.dispose();
     _queue.removeListener(_queueChanged);_queue.dispose();super.dispose();
   }
   RegionCatalog get _catalog => widget.catalog;
@@ -105,7 +111,6 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _queue.addListener(_queueChanged);unawaited(_queue.start());
     _notifications=FieldNotificationStore(widget.session,_queue);
-    _notifications.addListener(_notificationChanged);
     unawaited(_notifications.start());
     _notificationsTimer=Timer.periodic(const Duration(seconds:60),
       (_)=>unawaited(_notifications.refresh()));
@@ -291,13 +296,27 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
 
   CustomerService get _customerService=>CustomerService(_apiUrl,_accessToken,province:_province,identity:_queue.identity,revision:_queue.revision);
 
+  Widget _syncBanner()=>AnimatedBuilder(
+    animation:_queue,
+    builder:(context,_){
+      if(_queue.pending.isEmpty&&_queue.quarantined==0&&_queue.error==null){
+        return const SizedBox.shrink();
+      }
+      return Material(color:Theme.of(context).colorScheme.primaryContainer,child:ListTile(leading:Icon(Icons.cloud_upload_outlined,color:Theme.of(context).colorScheme.onPrimaryContainer),title:Text('Chờ đồng bộ: ${_queue.pending.length} · Cách ly: ${_queue.quarantined}'),subtitle:Text(_queue.error??(_queue.syncing?'Đang đồng bộ':'Đã lưu trên máy')),trailing:IconButton(tooltip:'Đồng bộ ngay',onPressed:_queue.syncing?null:()=>unawaited(_queue.sync()),icon:const Icon(Icons.sync)),onTap:()=>showDialog<void>(context:context,builder:(c)=>AlertDialog(title:const Text('Hàng đợi đồng bộ'),content:SizedBox(width:420,child:ListView(shrinkWrap:true,children:[for(final r in _queue.pending)ListTile(title:Text((r['payload'] as Map)['name']?.toString()??(r['payload'] as Map)['customer_name']?.toString()??(r['payload'] as Map)['kind'].toString()),subtitle:Text(r['error']?.toString()??'Đã lưu máy · chờ đồng bộ'),
+    trailing:r['status']=='blocked'?IconButton(
+      tooltip:'Thử gửi lại mục bị lỗi',
+      onPressed:()=>unawaited(_queue.retryBlocked(r['key'] as String)),
+      icon:const Icon(Icons.refresh)):null)])),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng'))]))));
+    },
+  );
+
   @override
   Widget build(BuildContext context) {
     final narrow = MediaQuery.of(context).size.width < 850;
     return Scaffold(
-      appBar: SalesHomeBar(
+      appBar: SalesLiveHomeBar(
         loading:_loading,
-        unreadCount:_notifications.unread,
+        store:_notifications,
         onNotifications:()=>Navigator.push(context,MaterialPageRoute(
           builder:(_)=>FieldNotificationInbox(store:_notifications))),
       ),
@@ -329,11 +348,7 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
         ),
         Expanded(child: Column(children: [
           if(_selectedIndex!=3&&_selectedIndex!=10&&_selectedIndex!=11&&_selectedIndex!=12)Padding(padding:const EdgeInsets.all(12),child:DropdownButtonFormField<String>(initialValue:_province,isExpanded:true,decoration:const InputDecoration(labelText:'Địa bàn'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả địa bàn của tôi')),for(final p in _catalog.provinces)DropdownMenuItem(value:p,child:Text(p))],onChanged:(p)=>setState(()=>_province=p??''))),
-          if(_queue.pending.isNotEmpty||_queue.quarantined>0||_queue.error!=null) Material(color:Theme.of(context).colorScheme.primaryContainer,child:ListTile(leading:Icon(Icons.cloud_upload_outlined,color:Theme.of(context).colorScheme.onPrimaryContainer),title:Text('Chờ đồng bộ: ${_queue.pending.length} · Cách ly: ${_queue.quarantined}'),subtitle:Text(_queue.error??(_queue.syncing?'Đang đồng bộ':'Đã lưu trên máy')),trailing:IconButton(tooltip:'Đồng bộ ngay',onPressed:_queue.syncing?null:()=>unawaited(_queue.sync()),icon:const Icon(Icons.sync)),onTap:()=>showDialog<void>(context:context,builder:(c)=>AlertDialog(title:const Text('Hàng đợi đồng bộ'),content:SizedBox(width:420,child:ListView(shrinkWrap:true,children:[for(final r in _queue.pending)ListTile(title:Text((r['payload'] as Map)['name']?.toString()??(r['payload'] as Map)['customer_name']?.toString()??(r['payload'] as Map)['kind'].toString()),subtitle:Text(r['error']?.toString()??'Đã lưu máy · chờ đồng bộ'),
-    trailing:r['status']=='blocked'?IconButton(
-      tooltip:'Thử gửi lại mục bị lỗi',
-      onPressed:()=>unawaited(_queue.retryBlocked(r['key'] as String)),
-      icon:const Icon(Icons.refresh)):null)])),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng'))])))),
+          _syncBanner(),
           if (_message != null) Material(color: const Color(0xFFFBE8E7),
             child: Padding(padding: const EdgeInsets.all(10), child: Text(_message!))),
           Expanded(child: _selectedIndex == 0 ? _overview() : _selectedIndex == 1
@@ -510,6 +525,29 @@ class SalesModuleGrid extends StatelessWidget {
       },
     );
   });
+}
+
+/// Only the notification icon rebuilds on unread/push changes. The selected
+/// module and its forms must not be rebuilt by periodic notification polling.
+class SalesLiveHomeBar extends StatelessWidget implements PreferredSizeWidget {
+  final FieldNotificationStore store;
+  final bool loading;
+  final VoidCallback onNotifications;
+  const SalesLiveHomeBar({
+    super.key,required this.store,required this.loading,
+    required this.onNotifications,
+  });
+  @override
+  Size get preferredSize=>Size.fromHeight(kToolbarHeight+(loading?2:0));
+  @override
+  Widget build(BuildContext context)=>AnimatedBuilder(
+    animation:store,
+    builder:(context,_)=>SalesHomeBar(
+      loading:loading,
+      unreadCount:store.unread,
+      onNotifications:onNotifications,
+    ),
+  );
 }
 
 class SalesHomeBar extends StatelessWidget implements PreferredSizeWidget {
