@@ -289,7 +289,7 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
           if (_message != null) Material(color: const Color(0xFFFBE8E7),
             child: Padding(padding: const EdgeInsets.all(10), child: Text(_message!))),
           Expanded(child: _selectedIndex == 0 ? _overview() : _selectedIndex == 1
-              ? CustomerDirectoryPage(key:ValueKey('$_province:${_queue.pending.length}'),service:CustomerService(_apiUrl,_accessToken,province:_province,identity:_queue.identity,revision:_queue.revision),regions:_catalog,queue:_queue)
+              ? CustomerDirectoryPage(key:ValueKey('customers:${_queue.namespace}:$_province'),service:CustomerService(_apiUrl,_accessToken,province:_province,identity:_queue.identity,revision:_queue.revision),regions:_catalog,queue:_queue)
               : _selectedIndex==2?SurveyPage(key:ValueKey('survey:$_province'),queue:_queue,service:_customerService,regions:_catalog,admin:widget.me['role']=='admin',legacy:(_)=>Scaffold(appBar:AppBar(title:const Text('Biểu mẫu khảo sát cũ')),body:_records('survey',readOnly:true)))
               : _selectedIndex==3?TargetPage(key:ValueKey('target:${_queue.namespace}'),queue:_queue)
               : _selectedIndex==12?OrdersPage(key:ValueKey('orders:${_queue.namespace}'),queue:_queue,admin:widget.me['role']=='admin')

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -33,7 +34,13 @@ class CustomerService {
   final String endpoint, token;
   final String province;
   final String? identity,revision;
-  const CustomerService(this.endpoint, this.token,{this.province='',this.identity,this.revision});
+  final http.Client? client;
+  // Short bounded wait for the list, while retaining scoped local snapshots.
+  final Duration listTimeout;
+  const CustomerService(this.endpoint, this.token,{
+    this.province='',this.identity,this.revision,
+    this.client,this.listTimeout=const Duration(seconds:7),
+  });
   Uri uri(String path, [Map<String, String>? query]) {
     final url = Uri.parse('${endpoint.replaceFirst(RegExp(r'/$'), '')}$path');
     if (url.scheme != 'https' && url.host != 'localhost' && url.host != '127.0.0.1') {
@@ -49,12 +56,21 @@ class CustomerService {
     }
     return data;
   }
-  Future<List<FieldCustomer>> list() async {
+  Future<List<FieldCustomer>> list({
+    void Function(List<FieldCustomer> partial)? onPage,
+  }) async {
     final items=<FieldCustomer>[];
     for(var offset=0;offset<=10000;offset+=100){
-      final data=decode(await http.get(uri('/api/v1/customers',{'province':province,'limit':'100','offset':'$offset'}),headers:headers).timeout(const Duration(seconds:20)));
-      final page=(data['items'] as List).map((e)=>FieldCustomer.fromJson(Map<String,dynamic>.from(e as Map))).toList();
-      items.addAll(page);if(page.length<100)break;
+      final request=uri('/api/v1/customers',{'province':province,'limit':'100','offset':'$offset'});
+      final response=await (client?.get(request,headers:headers) ??
+          http.get(request,headers:headers)).timeout(listTimeout);
+      final data=decode(response);
+      final page=(data['items'] as List)
+          .map((e)=>FieldCustomer.fromJson(Map<String,dynamic>.from(e as Map)))
+          .toList();
+      items.addAll(page);
+      onPage?.call(List<FieldCustomer>.unmodifiable(items));
+      if(page.length<100)break;
     }
     return items;
   }
@@ -126,18 +142,69 @@ class CustomerDirectoryPage extends StatefulWidget {
 
 class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
   List<FieldCustomer> customers = [];
-  bool loading = false;
+  List<FieldCustomer>? completeSnapshot;
+  bool loading = false, openingCache = true;
   String? error;
+  String get cacheKey => 'customers:${widget.service.province}';
+
   @override
-  void initState() {super.initState(); refresh();}
+  void initState() {
+    super.initState();
+    // Render account-scoped IndexedDB/SQLite before contacting the server.
+    unawaited(_openDirectory());
+  }
+
+  Future<void> _openDirectory() async {
+    if(widget.queue!=null){
+      try{
+        final cached=await widget.queue!.cached(cacheKey);
+        if(mounted){
+          final snapshot=cached.map(FieldCustomer.fromJson).toList();
+          completeSnapshot=snapshot;
+          setState(()=>customers=snapshot);
+        }
+      }catch(_){
+        // A local storage error must not block the authorized server request.
+      }
+    }
+    if(!mounted)return;
+    setState(()=>openingCache=false);
+    await refresh();
+  }
+
   Future<void> refresh() async {
-    setState(() => loading = true);
+    if(loading)return;
+    setState(() {loading=true;error=null;});
     try {
-      final items = await widget.service.list();
-      if(widget.queue!=null)await widget.queue!.cache('customers:${widget.service.province}',items.map((r)=>r.toJson()).toList());
-      if (mounted) setState(() {customers = items; error = null;});
-    } catch (e) {if(widget.queue!=null&&!(e is ApiFailure&&(e.status==401||e.status==403))){try{final cached=await widget.queue!.cached('customers:${widget.service.province}');if(mounted)setState(()=>customers=cached.map(FieldCustomer.fromJson).toList());}catch(_) {}}if (mounted) setState(() {error = '$e';});}
-    finally {if (mounted) setState(() => loading = false);}
+      final items=await widget.service.list(onPage:(partial){
+        if(mounted)setState(()=>customers=partial);
+      });
+      if(!mounted)return;
+      setState(() {customers=items;completeSnapshot=items;error=null;});
+      // Local cache write failure must never mask a successful server result.
+      if(widget.queue!=null){
+        try{
+          await widget.queue!.cache(cacheKey,items.map((r)=>r.toJson()).toList());
+        }catch(_){}
+      }
+    } catch(e) {
+      if(!mounted)return;
+      final denied=e is ApiFailure&&(e.status==401||e.status==403);
+      setState((){
+        if(denied){
+          customers=[];
+          completeSnapshot=null;
+          error='Phiên hoặc quyền truy cập đã thay đổi.';
+        } else {
+          if(completeSnapshot!=null)customers=completeSnapshot!;
+          error=customers.isEmpty
+              ? 'Không tải được khách hàng. Kiểm tra mạng rồi thử lại.'
+              : 'Đang xem dữ liệu lưu máy · chưa làm mới.';
+        }
+      });
+    } finally {
+      if(mounted)setState(()=>loading=false);
+    }
   }
   Future<void> add() async {
     final created = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) =>
@@ -153,13 +220,20 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
         Expanded(child:Text(narrow?'Khách hàng':'Khách hàng / Điểm bán',
           maxLines:1,overflow:TextOverflow.ellipsis,
           style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold))),
-        IconButton(onPressed:refresh,tooltip:'Làm mới khách hàng',icon:const Icon(Icons.refresh)),
+        IconButton(onPressed:loading?null:refresh,tooltip:'Làm mới khách hàng',icon:const Icon(Icons.refresh)),
         if(narrow) IconButton(onPressed:add,tooltip:'Thêm điểm bán',icon:const Icon(Icons.add_circle_outline))
         else FilledButton.icon(onPressed:add,icon:const Icon(Icons.add),label:const Text('Thêm điểm bán')),
       ])),
-      if (error != null) Padding(padding: const EdgeInsets.all(12), child: Text(error!,style: const TextStyle(color: Colors.red))),
-      if (loading) const LinearProgressIndicator(),
-      Expanded(child: customers.isEmpty ? const Center(child: Text('Chưa có điểm bán trong phạm vi được cấp'))
+      if (error != null) Padding(padding: const EdgeInsets.symmetric(horizontal:12,vertical:6),
+        child: Row(children:[
+          Expanded(child:Text(error!,style:Theme.of(context).textTheme.bodySmall)),
+          if(!loading) TextButton(onPressed:refresh,child:const Text('Thử lại')),
+        ])),
+      if (loading) const LinearProgressIndicator(minHeight:2),
+      Expanded(child: customers.isEmpty
+        ? Center(child:Text(loading||openingCache
+            ? 'Đang tải khách hàng…'
+            : error!=null ? 'Chưa có dữ liệu đã lưu.' : 'Chưa có điểm bán trong phạm vi được cấp'))
       : ListView.builder(itemCount: customers.length, itemBuilder: (ctx,i) {
         final c = customers[i];
         final category = CustomerCategory.fromId(c.category);
