@@ -49,6 +49,21 @@ class Disconnected extends SalesSession{
   @override Future<Map<String,dynamic>> get(String path) async=>
     throw const ApiFailure(503,'offline');
 }
+class CoverSelectionProbe extends OfflineQueue {
+  CoverSelectionProbe()
+    :super(Disconnected(),'sales-1','scope-1',factory:newIdbFactoryMemory());
+  String? lastPhotoId,lastPath,lastMethod;
+  @override
+  Future<void> enqueue(String path,Map<String,dynamic> data,{
+    Uint8List? photo,Uint8List? thumbnail,String? sha256,
+    String? thumbnailSha256,String? mime,String method='POST',
+  })async{
+    lastPath=path;
+    lastPhotoId=data['photo_id']?.toString();
+    lastMethod=method;
+  }
+}
+
 FieldCustomer customer({String? phone='0912345678'})=>FieldCustomer.fromJson({
   'id':customerId,'name':'Nhà sách Minh Anh','address_line':'2 Lê Lợi',
   'province':'Tiền Giang','district':'Mỹ Tho','category':'nha_sach',
@@ -171,8 +186,7 @@ void main(){
     tester.view.physicalSize=const Size(390,1450);
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final factory=newIdbFactoryMemory();
-    final queue=OfflineQueue(Disconnected(),'sales-1','scope-1',factory:factory);
+    final queue=CoverSelectionProbe();
     await tester.pumpWidget(MaterialApp(home:CustomerDetail(
       service:FakeService(),customer:customer(),
       regions:const RegionCatalog(<String,List<String>>{}),queue:queue)));
@@ -186,8 +200,9 @@ void main(){
     await tester.tap(choose);
     await tester.pump();
     await tester.pump();
-    expect(queue.pending.length,1);
-    expect(queue.pending.single['payload']['photo_id'],secondId);
+    expect(queue.lastPath,'/api/v1/customers/$customerId/cover');
+    expect(queue.lastPhotoId,secondId);
+    expect(queue.lastMethod,'PATCH');
     await tester.pumpWidget(const SizedBox.shrink());
     queue.dispose();
   });
