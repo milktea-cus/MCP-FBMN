@@ -86,7 +86,7 @@ export async function orderRoutes(req:Request,env:{DATABASE_URL:string},u:User,u
     coalesce(nullif(btrim(m.company_code),''),nullif(btrim(c.code),'')) AS customer_code,
     coalesce((SELECT jsonb_agg(jsonb_build_object('line_id',l.line_id,'product_id',l.product_id,
        'company_code',p.company_code,'name',p.name,'unit',l.unit,'quantity',l.quantity)
-       ORDER BY p.company_code) FROM field_order_lines l JOIN catalog_products p ON p.id=l.product_id
+       ORDER BY l.line_position,p.company_code) FROM field_order_lines l JOIN catalog_products p ON p.id=l.product_id
        WHERE l.order_id=o.id),'[]'::jsonb) AS lines
     FROM field_orders o JOIN customers c ON c.id=o.customer_id AND c.owner_sub=o.owner_sub
     LEFT JOIN catalog_customer_mapping m ON m.customer_id=c.id
@@ -103,7 +103,7 @@ export async function orderRoutes(req:Request,env:{DATABASE_URL:string},u:User,u
     coalesce((SELECT jsonb_agg(jsonb_build_object('line_id',l.line_id,'product_id',l.product_id,
        'company_code',p.company_code,'name',p.name,'unit',l.unit,'quantity',l.quantity,
        'available',s.quantity::text,'snapshot_at',s.snapshot_at)
-      ORDER BY p.company_code) FROM field_order_lines l JOIN catalog_products p ON p.id=l.product_id
+      ORDER BY l.line_position,p.company_code) FROM field_order_lines l JOIN catalog_products p ON p.id=l.product_id
       LEFT JOIN inventory_stock s ON s.product_id=l.product_id WHERE l.order_id=o.id),'[]'::jsonb) AS lines
     FROM field_orders o JOIN customers c ON c.id=o.customer_id AND c.owner_sub=o.owner_sub
     LEFT JOIN catalog_customer_mapping m ON m.customer_id=c.id
