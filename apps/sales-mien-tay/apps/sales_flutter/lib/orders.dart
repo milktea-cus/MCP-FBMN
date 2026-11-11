@@ -344,7 +344,7 @@ class _OrdersPageState extends State<OrdersPage>{
   for(final d in drafts){if(!all.any((x)=>x['id']==d['id']))all.insert(0,d);}
   final inCart=selected!=null;
   return ListView(key:ValueKey(inCart?'order-cart-${selected!['id']}':'order-list'),
-   padding:const EdgeInsets.all(12),children:[
+   primary:false,padding:const EdgeInsets.all(12),children:[
    Row(children:[Expanded(child:Text('Ra đơn',style:Theme.of(context).textTheme.titleLarge)),
     IconButton(tooltip:'Tải lại đơn',onPressed:busy?null:load,icon:const Icon(Icons.refresh))]),
    const Text('Chọn khách và sản phẩm để tạo đơn. Không nhập giá, không trừ tồn.'),
