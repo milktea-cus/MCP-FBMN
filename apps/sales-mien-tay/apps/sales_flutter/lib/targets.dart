@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import 'package:http/http.dart' as http;
 import 'offline_queue.dart';
 import 'session.dart';
+import 'actuals.dart';
 
 List<int> targetMonths(String period,int month)=>period=='year'?List.generate(12,(i)=>i+1):
   period=='quarter'?List.generate(3,(i)=>((month-1)~/3)*3+i+1):[month];
@@ -38,16 +39,16 @@ class _TargetPageState extends State<TargetPage>{
  int year=DateTime.now().year,month=DateTime.now().month,_generation=0;
  String period='month',owner='';
  late final TargetClient client=widget.client??TargetClient(widget.queue);
- List<Map<String,dynamic>> staff=[],rows=[],allocations=[];
+ List<Map<String,dynamic>> staff=[],rows=[],allocations=[],actuals=[];
  bool busy=true,cached=false,canEdit=false;
  String? error;
  List<int> get months=>targetMonths(period,month);
  String get path=>Uri(path:'/api/v1/targets',queryParameters:{'year':'$year','owner':owner}).toString();
- String get cacheKey=>'targets-v1:$year:$owner';
+ String get cacheKey=>'targets-v2:$year:$owner';
  @override void initState(){super.initState();owner=widget.queue.identity;load();}
  Future<void> load()async{
   final generation=++_generation,key=cacheKey,request=path;
-  setState((){busy=true;error=null;cached=false;canEdit=false;rows=[];allocations=[];});
+  setState((){busy=true;error=null;cached=false;canEdit=false;rows=[];allocations=[];actuals=[];});
   Map<String,dynamic>? data;bool offline=false;String? failure;
   try{data=await client.get(request);
    try{await widget.queue.cache(key,[data]);}catch(_){}
@@ -58,7 +59,7 @@ class _TargetPageState extends State<TargetPage>{
   if(!mounted||generation!=_generation)return;
   setState((){
    busy=false;cached=offline;error=data==null?failure:null;
-   if(data!=null){staff=targetRows(data['staff']);owner=data['owner'].toString();rows=targetRows(data['items']);allocations=targetRows(data['allocations']);canEdit=!offline&&data['can_edit']==true;}
+   if(data!=null){staff=targetRows(data['staff']);owner=data['owner'].toString();rows=targetRows(data['items']);allocations=targetRows(data['allocations']);actuals=targetRows(data['actuals']);canEdit=!offline&&data['can_edit']==true;}
   });
  }
  Future<void> choose(String dimension)async{
@@ -91,8 +92,13 @@ class _TargetPageState extends State<TargetPage>{
  }
  @override Widget build(BuildContext context){
   final total=targetTotal(rows,months,'employee');
+  final fact=actuals.where((r)=>months.contains(targetAmount(r['month']))).toList();
+  final hasActual=fact.any((r)=>targetAmount(r['records'])>0);
+  final actual=fact.fold<int>(0,(sum,r)=>sum+targetAmount(r['amount']));
   return ListView(padding:const EdgeInsets.all(12),children:[
    Row(children:[Expanded(child:Text('Quản lý Target',style:Theme.of(context).textTheme.titleLarge)),IconButton(tooltip:'Tải lại Target',onPressed:busy?null:load,icon:const Icon(Icons.refresh))]),
+   OutlinedButton.icon(onPressed:()async{await Navigator.push(context,MaterialPageRoute(builder:(_)=>ActualsPage(queue:widget.queue)));if(mounted)load();},
+     icon:const Icon(Icons.receipt_long_outlined),label:const Text('Doanh số thực tế · Nhập tay / Excel')),
    if(staff.isNotEmpty)DropdownButtonFormField<String>(key:ValueKey('owner:$owner'),initialValue:staff.any((s)=>s['user_sub']==owner)?owner:null,isExpanded:true,decoration:const InputDecoration(labelText:'Nhân viên'),
     items:[for(final s in staff)DropdownMenuItem(value:s['user_sub'].toString(),child:Text('${s['employee_code']} · ${s['full_name']}',overflow:TextOverflow.ellipsis))],onChanged:busy?null:(v){if(v!=null){owner=v;load();}}),
    const SizedBox(height:8),
@@ -111,8 +117,8 @@ class _TargetPageState extends State<TargetPage>{
      Row(children:[const Expanded(child:Text('Target nhân viên')),if(canEdit)TextButton(onPressed:()=>choose('employee'),child:const Text('Giao / sửa'))]),
      Text(targetMoney(total),style:Theme.of(context).textTheme.headlineSmall),
      const SizedBox(height:8),
-     const Text('Thực hiện: Chưa có doanh số thực tế (Lô 4B)'),
-     const Text('Hoàn thành: —     Còn thiếu: —'),
+     Text(hasActual?'Thực hiện: ${targetMoney(actual)}':'Thực hiện: Chưa có dữ liệu doanh số thực tế'),
+     Text(hasActual?'Hoàn thành: ${total>0?(100*actual/total).toStringAsFixed(1)+'%':'— (Target = 0)'}   Còn thiếu: ${total>0?targetMoney((total-actual).clamp(0,total).toInt()):'—'}':'Hoàn thành: —     Còn thiếu: —'),
      const Text('Target khách và SKU là hai nhóm phân bổ riêng; không cộng vào Target nhân viên.'),
     ]))),
     allocationCard('customer','Khách hàng',total),allocationCard('product','Sản phẩm / SKU',total),

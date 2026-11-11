@@ -31,7 +31,11 @@ export async function targetRoutes(req:Request,env:{DATABASE_URL:string},u:User,
     AND (t.dimension<>'customer' OR (c.owner_sub=t.owner_sub AND public.sales_can_access(${u.sub},c.owner_sub,c.province,c.district)))
     ORDER BY t.dimension,t.entity_id,t.month`:[];
   const allocations=chosen?await sql`SELECT extract(month from month)::int AS month,dimension,sum(amount)::text AS amount FROM sales_targets WHERE owner_sub=${chosen} AND month>=make_date(${year},1,1) AND month<make_date(${year+1},1,1) AND dimension<>'employee' GROUP BY 1,2`:[];
-  return json({staff,owner:chosen,items,allocations,actual_available:false,can_edit:u.admin||u.manager});
+  const actuals=chosen?await sql`SELECT extract(month from a.sale_date)::int AS month,sum(a.amount)::text AS amount,count(*)::int AS records
+     FROM sales_actuals a JOIN customers c ON c.id=a.customer_id AND c.owner_sub=a.owner_sub
+     WHERE a.owner_sub=${chosen} AND a.status='active' AND a.sale_date>=make_date(${year},1,1) AND a.sale_date<make_date(${year+1},1,1)
+     AND public.sales_can_access(${u.sub},a.owner_sub,c.province,c.district) GROUP BY 1 ORDER BY 1`:[];
+  return json({staff,owner:chosen,items,allocations,actuals,actual_available:actuals.length>0,can_edit:u.admin||u.manager});
  }
  if(req.method!=='POST'||url.pathname.endsWith('/options'))return bad('Method not allowed',405);
  if(!u.admin&&!u.manager)return bad('Chỉ Admin/Manager được giao chỉ tiêu',403);
