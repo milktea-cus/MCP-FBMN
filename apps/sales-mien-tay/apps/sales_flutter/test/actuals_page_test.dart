@@ -21,10 +21,10 @@ void main(){
     'external_ref':'INV-1','line_ref':'1','employee_code':'TEST','customer_name':'Cửa hàng A',
     'product_name':'Vở học sinh','company_code':'000123'}];
   final client=MockClient((r)async{
-   if(r.url.path.endsWith('/options'))return http.Response(jsonEncode({'items':[
-    {'id':'owner','code':'TEST','name':'Admin'}]}),200,headers:{'content-type':'application/json'});
+   if(r.url.path.endsWith('/options'))return http.Response.bytes(utf8.encode(jsonEncode({'items':[
+    {'id':'owner','code':'TEST','name':'Admin'}]})),200,headers:{'content-type':'application/json; charset=utf-8'});
    if(r.url.path.endsWith('/history'))return http.Response('{"items":[]}',200);
-   return http.Response(jsonEncode({'month':date.substring(0,7),'items':records,'can_import':true}),200);
+   return http.Response.bytes(utf8.encode(jsonEncode({'month':date.substring(0,7),'items':records,'can_import':true})),200,headers:{'content-type':'application/json; charset=utf-8'});
   });
   await tester.pumpWidget(MaterialApp(home:ActualsPage(queue:queue,client:ActualClient(queue,client:client))));
   await tester.pumpAndSettle();
