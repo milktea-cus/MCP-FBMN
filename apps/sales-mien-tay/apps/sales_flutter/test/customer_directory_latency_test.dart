@@ -5,11 +5,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:idb_shim/idb_shim.dart';
 import 'package:sales_mien_tay/customers.dart';
 import 'package:sales_mien_tay/models.dart';
 import 'package:sales_mien_tay/offline_queue.dart';
 import 'package:sales_mien_tay/session.dart';
+
+// Widget tests use an in-memory storage double; real IndexedDB is tested
+// separately in offline_queue_test and the Chrome PWA CI job.
+class DirectoryQueue extends OfflineQueue {
+  final saved = <String, List<Map<String, dynamic>>>{};
+  DirectoryQueue() : super(SalesSession(), 'seller-a', 'rev-1');
+
+  @override
+  Future<List<Map<String, dynamic>>> cached(String key) async => saved[key] ?? [];
+
+  @override
+  Future<void> cache(String key, List<Map<String, dynamic>> items) async {
+    saved[key] = [for(final row in items) Map<String, dynamic>.from(row)];
+  }
+}
 
 Map<String, dynamic> customer(String id, String name) => {
   'id': id,
@@ -42,8 +56,7 @@ void main() {
     tester.view.physicalSize = const Size(390, 844);
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final queue = OfflineQueue(SalesSession(), 'seller-a', 'rev-1',
-      factory: newIdbFactoryMemory());
+    final queue = DirectoryQueue();
     await queue.cache('customers:', [customer('1', 'Đại lý Lê Phương')]);
     final request = Completer<http.Response>();
     final client = MockClient((_) => request.future);
@@ -69,8 +82,7 @@ void main() {
 
   testWidgets('offline failure keeps scoped data with compact Vietnamese status',
       (tester) async {
-    final queue = OfflineQueue(SalesSession(), 'seller-a', 'rev-1',
-      factory: newIdbFactoryMemory());
+    final queue = DirectoryQueue();
     await queue.cache('customers:', [customer('1', 'Đại lý Lê Phương')]);
     final client = MockClient((_) async =>
       http.Response.bytes(utf8.encode('{"error":"Offline"}'), 503));
@@ -92,8 +104,7 @@ void main() {
 
   testWidgets('403 access revocation cannot expose the cached directory',
       (tester) async {
-    final queue = OfflineQueue(SalesSession(), 'seller-a', 'rev-1',
-      factory: newIdbFactoryMemory());
+    final queue = DirectoryQueue();
     await queue.cache('customers:', [customer('1', 'Khách cần ẩn')]);
     final response = Completer<http.Response>();
     final client = MockClient((_) => response.future);
