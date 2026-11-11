@@ -1,4 +1,31 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+/// Local visual preference only; business records remain in IndexedDB/SQLite.
+class SalesThemePreference {
+  static const storageKey = 'field-work-theme-mode';
+  static final ValueNotifier<ThemeMode> mode = ValueNotifier(ThemeMode.light);
+
+  static Future<void> restore() async {
+    try {
+      final saved = await SharedPreferencesAsync().getString(storageKey);
+      mode.value = saved == 'dark' ? ThemeMode.dark : ThemeMode.light;
+    } catch (_) {
+      // A blocked preference store must never block sign-in or offline data.
+    }
+  }
+
+  static Future<void> select(ThemeMode selection) async {
+    final chosen = selection == ThemeMode.dark ? ThemeMode.dark : ThemeMode.light;
+    mode.value = chosen;
+    try {
+      await SharedPreferencesAsync().setString(storageKey,
+        chosen == ThemeMode.dark ? 'dark' : 'light');
+    } catch (_) {
+      // The visible setting still works for the current app session.
+    }
+  }
+}
 
 /// FBMN common UI contract 2026-11-03; source archived in standards/ui-fbmn.
 class SalesTheme {
@@ -18,10 +45,20 @@ class SalesTheme {
 
   static double buttonHeight(double width) => width <= mobileBreakpoint ? 44 : 36;
 
-  static ThemeData build({double width = 390}) {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: brand, brightness: Brightness.light, surface: Colors.white,
-    ).copyWith(primary: brand, onPrimary: Colors.white, error: const Color(0xFFB42318));
+  static ThemeData build({double width = 390, Brightness brightness = Brightness.light}) {
+    final dark = brightness == Brightness.dark;
+    // Dark surfaces are derived from the same FBMN purple seed, not a second palette.
+    final generated = ColorScheme.fromSeed(seedColor: brand, brightness: brightness);
+    final scheme = generated.copyWith(
+      primary: dark ? generated.primary : brand,
+      onPrimary: dark ? generated.onPrimary : Colors.white,
+      surface: dark ? generated.surface : Colors.white,
+      error: dark ? generated.error : const Color(0xFFB42318),
+    );
+    final surface = dark ? scheme.surfaceContainerLow : Colors.white;
+    final outline = dark ? scheme.outlineVariant : border;
+    final heading = dark ? scheme.primaryContainer : tableHeader;
+    final headingInk = dark ? scheme.onPrimaryContainer : tableInk;
     final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(controlRadius));
     final control = ButtonStyle(
       minimumSize: WidgetStatePropertyAll(Size(0, buttonHeight(width))),
@@ -32,7 +69,9 @@ class SalesTheme {
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );
     return ThemeData(
-      colorScheme: scheme, useMaterial3: true, scaffoldBackgroundColor: canvas,
+      colorScheme: scheme,
+      useMaterial3: true,
+      scaffoldBackgroundColor: dark ? scheme.surface : canvas,
       filledButtonTheme: FilledButtonThemeData(style: control),
       outlinedButtonTheme: OutlinedButtonThemeData(style: control),
       textButtonTheme: TextButtonThemeData(style: control),
@@ -40,22 +79,38 @@ class SalesTheme {
       inputDecorationTheme: InputDecorationTheme(
         isDense: true,
         constraints: const BoxConstraints(minHeight: fieldHeight),
-        labelStyle: const TextStyle(fontSize: controlFontSize),
+        labelStyle: TextStyle(fontSize: controlFontSize, color: scheme.onSurfaceVariant),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(controlRadius)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(controlRadius), borderSide: const BorderSide(color: border)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(controlRadius), borderSide: const BorderSide(color: brand, width: 1.5)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(controlRadius),
+          borderSide: BorderSide(color: outline)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(controlRadius),
+          borderSide: BorderSide(color: scheme.primary, width: 1.5)),
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       ),
       cardTheme: CardThemeData(
-        elevation: 0, color: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: border)),
+        elevation: 0, color: surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: outline)),
       ),
-      dataTableTheme: const DataTableThemeData(
-        headingRowColor: WidgetStatePropertyAll(tableHeader),
-        headingTextStyle: TextStyle(color: tableInk, fontWeight: FontWeight.w700, fontSize: 13),
+      dataTableTheme: DataTableThemeData(
+        headingRowColor: WidgetStatePropertyAll(heading),
+        headingTextStyle: TextStyle(color: headingInk,
+          fontWeight: FontWeight.w700, fontSize: 13),
+        dataTextStyle: TextStyle(color: scheme.onSurface),
+        dividerThickness: 1,
       ),
-      appBarTheme: const AppBarTheme(backgroundColor: tableHeader, foregroundColor: tableInk, scrolledUnderElevation: 0),
-      navigationBarTheme: const NavigationBarThemeData(backgroundColor: Colors.white,indicatorColor: tableHeader, labelTextStyle: WidgetStatePropertyAll(TextStyle(fontSize:12,fontWeight:FontWeight.w600))),
+      appBarTheme: AppBarTheme(
+        backgroundColor: dark ? scheme.surfaceContainer : heading,
+        foregroundColor: dark ? scheme.onSurface : headingInk,
+        scrolledUnderElevation: 0,
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: surface,
+        indicatorColor: heading,
+        labelTextStyle: const WidgetStatePropertyAll(
+          TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+      ),
+      dividerTheme: DividerThemeData(color: outline),
     );
   }
 }

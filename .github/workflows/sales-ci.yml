@@ -58,6 +58,10 @@ jobs:
       - name: Generate missing web/android platform scaffolding
         run: flutter create --platforms=web,android .
       - run: flutter pub get
+      - name: Generate FB icons for PWA and Android
+        run: python3 scripts/generate_app_icons.py
+      - name: Validate brand icon sizes
+        run: python3 scripts/check_app_icons.py
       - run: flutter analyze --no-fatal-infos
       - run: flutter test
       - name: Test real Chrome IndexedDB

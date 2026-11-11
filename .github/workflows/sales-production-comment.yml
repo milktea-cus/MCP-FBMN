@@ -83,6 +83,8 @@ jobs:
         run: |
           flutter create --platforms=web,android .
           flutter pub get
+          python3 scripts/generate_app_icons.py
+          python3 scripts/check_app_icons.py
           flutter analyze --no-fatal-infos
           flutter test
           flutter build web --release --dart-define=API_BASE_URL="$API_BASE_URL"

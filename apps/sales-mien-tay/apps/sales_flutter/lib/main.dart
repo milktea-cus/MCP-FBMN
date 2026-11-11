@@ -19,15 +19,37 @@ import 'dart:async';
 
 void main() => runApp(const SalesApp());
 
-class SalesApp extends StatelessWidget {
+class SalesApp extends StatefulWidget {
   const SalesApp({super.key});
+  @override
+  State<SalesApp> createState() => _SalesAppState();
+}
+
+class _SalesAppState extends State<SalesApp> {
+  @override
+  void initState() {
+    super.initState();
+    SalesThemePreference.mode.addListener(_themeChanged);
+    unawaited(SalesThemePreference.restore());
+  }
+
+  void _themeChanged() { if (mounted) setState(() {}); }
+
+  @override
+  void dispose() {
+    SalesThemePreference.mode.removeListener(_themeChanged);
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) => MaterialApp(
-    debugShowCheckedModeBanner: false,
-    title: 'Field Work',
-    theme: SalesTheme.build(width: constraints.maxWidth),
-    home: const AuthGate(),
+      debugShowCheckedModeBanner: false,
+      title: 'Field Work',
+      theme: SalesTheme.build(width: constraints.maxWidth),
+      darkTheme: SalesTheme.build(width: constraints.maxWidth, brightness: Brightness.dark),
+      themeMode: SalesThemePreference.mode.value,
+      home: const AuthGate(),
     ),
   );
 }
@@ -282,6 +304,8 @@ class _SalesHomeState extends State<SalesHome> {
         onRefresh:(){unawaited(_queue.sync());_refresh();},
         onStaff:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>StaffPage(session:widget.session))),
         onProfile:_profile,
+        themeMode: SalesThemePreference.mode.value,
+        onThemeModeChanged: (value) => unawaited(SalesThemePreference.select(value)),
       ),
       body: Row(children: [
         if (!narrow) NavigationRail(
@@ -296,7 +320,7 @@ class _SalesHomeState extends State<SalesHome> {
         ),
         Expanded(child: Column(children: [
           if(_selectedIndex!=3&&_selectedIndex!=10&&_selectedIndex!=11&&_selectedIndex!=12)Padding(padding:const EdgeInsets.all(12),child:DropdownButtonFormField<String>(initialValue:_province,isExpanded:true,decoration:const InputDecoration(labelText:'Địa bàn'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả địa bàn của tôi')),for(final p in _catalog.provinces)DropdownMenuItem(value:p,child:Text(p))],onChanged:(p)=>setState(()=>_province=p??''))),
-          if(_queue.pending.isNotEmpty||_queue.quarantined>0||_queue.error!=null) Material(color:SalesTheme.tableHeader,child:ListTile(leading:const Icon(Icons.cloud_upload_outlined,color:SalesTheme.brand),title:Text('Chờ đồng bộ: ${_queue.pending.length} · Cách ly: ${_queue.quarantined}'),subtitle:Text(_queue.error??(_queue.syncing?'Đang đồng bộ':'Đã lưu trên máy')),trailing:IconButton(tooltip:'Đồng bộ ngay',onPressed:_queue.syncing?null:()=>unawaited(_queue.sync()),icon:const Icon(Icons.sync)),onTap:()=>showDialog<void>(context:context,builder:(c)=>AlertDialog(title:const Text('Hàng đợi đồng bộ'),content:SizedBox(width:420,child:ListView(shrinkWrap:true,children:[for(final r in _queue.pending)ListTile(title:Text((r['payload'] as Map)['name']?.toString()??(r['payload'] as Map)['customer_name']?.toString()??(r['payload'] as Map)['kind'].toString()),subtitle:Text(r['error']?.toString()??'Đã lưu máy · chờ đồng bộ'))])),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng'))])))),
+          if(_queue.pending.isNotEmpty||_queue.quarantined>0||_queue.error!=null) Material(color:Theme.of(context).colorScheme.primaryContainer,child:ListTile(leading:Icon(Icons.cloud_upload_outlined,color:Theme.of(context).colorScheme.onPrimaryContainer),title:Text('Chờ đồng bộ: ${_queue.pending.length} · Cách ly: ${_queue.quarantined}'),subtitle:Text(_queue.error??(_queue.syncing?'Đang đồng bộ':'Đã lưu trên máy')),trailing:IconButton(tooltip:'Đồng bộ ngay',onPressed:_queue.syncing?null:()=>unawaited(_queue.sync()),icon:const Icon(Icons.sync)),onTap:()=>showDialog<void>(context:context,builder:(c)=>AlertDialog(title:const Text('Hàng đợi đồng bộ'),content:SizedBox(width:420,child:ListView(shrinkWrap:true,children:[for(final r in _queue.pending)ListTile(title:Text((r['payload'] as Map)['name']?.toString()??(r['payload'] as Map)['customer_name']?.toString()??(r['payload'] as Map)['kind'].toString()),subtitle:Text(r['error']?.toString()??'Đã lưu máy · chờ đồng bộ'))])),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng'))])))),
           if (_message != null) Material(color: const Color(0xFFFBE8E7),
             child: Padding(padding: const EdgeInsets.all(10), child: Text(_message!))),
           Expanded(child: _selectedIndex == 0 ? _overview() : _selectedIndex == 1
@@ -393,9 +417,12 @@ class SalesHomeDrawer extends StatelessWidget {
   final List<IconData> icons;
   final ValueChanged<int> onSection;
   final VoidCallback onRefresh,onStaff,onProfile;
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode>? onThemeModeChanged;
   const SalesHomeDrawer({super.key,required this.admin,required this.loading,
     required this.selectedIndex,required this.sections,required this.icons,
-    required this.onSection,required this.onRefresh,required this.onStaff,required this.onProfile});
+    required this.onSection,required this.onRefresh,required this.onStaff,required this.onProfile,
+    this.themeMode = ThemeMode.light, this.onThemeModeChanged});
   @override Widget build(BuildContext context){
     void run(VoidCallback action){Navigator.of(context).pop();action();}
     Widget section(int i)=>ListTile(leading:Icon(icons[i]),title:Text(sections[i]),
@@ -406,6 +433,12 @@ class SalesHomeDrawer extends StatelessWidget {
         title:const Text('Quản lý nhân viên'),onTap:()=>run(onStaff)),
       ListTile(leading:const Icon(Icons.account_circle_outlined),
         title:const Text('Hồ sơ / Đăng xuất'),onTap:()=>run(onProfile)),
+      if (onThemeModeChanged != null) SwitchListTile(
+        secondary: Icon(themeMode == ThemeMode.dark ? Icons.dark_mode_outlined : Icons.light_mode_outlined),
+        title: const Text('Chế độ tối'),
+        value: themeMode == ThemeMode.dark,
+        onChanged: (enabled) => onThemeModeChanged!(
+          enabled ? ThemeMode.dark : ThemeMode.light)),
       ListTile(leading:const Icon(Icons.sync),title:const Text('Tải lại dữ liệu'),
         enabled:!loading,onTap:loading?null:()=>run(onRefresh)),
       const Divider(),
