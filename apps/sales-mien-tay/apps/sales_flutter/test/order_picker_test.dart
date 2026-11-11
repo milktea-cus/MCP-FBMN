@@ -88,8 +88,9 @@ void main() {
       await openPicker(tester);
       expect(find.byType(Dialog), findsOneWidget);
       expect(find.text('Chọn sản phẩm'), findsOneWidget);
-      expect(find.text('Tồn 24'), findsNWidgets(2));
-      expect(find.text('Chưa có tồn'), findsOneWidget);
+      expect(find.text('Tồn 24'), findsNothing);
+      expect(find.text('Chưa có tồn'), findsNothing);
+      expect(find.textContaining('Thùng'), findsNWidgets(3));
       final input = find.byKey(const Key('order-picker-search'));
       await tester.enterText(input, '0');
       await tester.pump(const Duration(milliseconds: 260));

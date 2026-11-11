@@ -11,7 +11,7 @@ bool orderPickerMatches(Map<String, dynamic> row, String query, {required bool p
   if (q.isEmpty) return true;
   final fields = products
       ? ['name', 'company_code', 'sku', 'brand', 'category']
-      : ['name', 'customer_code', 'export_code', 'province', 'district'];
+      : ['name', 'field_code', 'customer_code', 'export_code', 'province', 'district'];
   return fields.any((field) =>
       (row[field]?.toString() ?? '').toLowerCase().contains(q));
 }
@@ -20,12 +20,6 @@ List<Map<String, dynamic>> _pickerRows(Object? data) =>
     (data as List? ?? const [])
         .map((row) => Map<String, dynamic>.from(row as Map))
         .toList();
-
-bool _stockIsOld(Object? value) {
-  final date = DateTime.tryParse(value?.toString() ?? '');
-  return date == null ||
-      DateTime.now().toUtc().difference(date.toUtc()) > const Duration(hours: 24);
-}
 
 /// Separate picker component; the existing order/cart workflow stays intact.
 class OrderPicker extends StatefulWidget {
@@ -176,7 +170,7 @@ class _OrderPickerState extends State<OrderPicker> {
           error = cached.isEmpty
               ? 'Không có danh mục đã lưu. Cần kết nối để tìm sản phẩm.'
               : completeCache
-                  ? 'Đang dùng danh mục lưu máy. Tồn sẽ kiểm lại khi xuất.'
+                  ? 'Đang dùng danh mục lưu máy. Danh mục sẽ được cập nhật khi có mạng.'
                   : 'Đang dùng dữ liệu lưu máy, có thể chưa đủ mã.';
         });
       }
@@ -249,7 +243,7 @@ class _OrderPickerState extends State<OrderPicker> {
         key: ValueKey('order-customer-${row['id']}'),
         title: Text(row['name']?.toString() ?? 'Chưa có tên'),
         subtitle: Text(
-          'Mã CTY: ${row['export_code'] ?? 'Chưa có'} · ${row['district'] ?? ''}, ${row['province'] ?? ''}',
+          'Mã: ${row['field_code'] ?? 'Đang cấp'} · CTY: ${row['export_code'] ?? 'Chưa ánh xạ'} · ${row['district'] ?? ''}, ${row['province'] ?? ''}',
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
@@ -257,8 +251,6 @@ class _OrderPickerState extends State<OrderPicker> {
         onTap: () => Navigator.pop(context, row),
       );
     }
-    final amount = row['quantity']?.toString();
-    final stale = _stockIsOld(row['snapshot_at']);
     final code = row['company_code']?.toString() ?? '';
     final sku = row['sku']?.toString() ?? '';
     final brand = row['brand']?.toString() ?? '';
@@ -279,22 +271,8 @@ class _OrderPickerState extends State<OrderPicker> {
                 style: Theme.of(context).textTheme.bodySmall),
           ])),
           const SizedBox(width: 8),
-          SizedBox(width: 100, child: Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(amount == null ? 'Chưa có tồn' : 'Tồn $amount',
-                  maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w700)),
-              Text(amount == null ? 'Chưa cập nhật' : stale ? 'Tồn cũ' : 'Mới cập nhật',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: stale ? Theme.of(context).colorScheme.tertiary
-                          : Theme.of(context).colorScheme.onSurfaceVariant)),
-              const SizedBox(height: 2),
-              Icon(Icons.add_circle_outline,
-                  color: Theme.of(context).colorScheme.primary, size: 24),
-            ],
-          )),
+          Icon(Icons.add_circle_outline,
+            color: Theme.of(context).colorScheme.primary, size: 24),
         ]),
       ),
     );

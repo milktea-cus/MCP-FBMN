@@ -331,18 +331,24 @@ class _OrdersPageState extends State<OrdersPage>{
    return false;
   }finally{if(mounted)setState(()=>busy=false);}
  }
- Future<void> issue({bool acceptStale=false})async{
+ Future<void> issue()async{
   if(selected==null||offline||busy)return;
-  if(selected!['status']=='local'||selected!['local_dirty']==true||localSaving||localError!=null){
-   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Lưu đơn trên hệ thống trước khi xuất.')));
+  if(selected!['status']=='local'||selected!['local_dirty']==true||
+     localSaving||localError!=null){
+   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+    content:Text('Lưu đơn trên hệ thống trước khi xuất phiếu.')));
    return;
   }
   if(selected!['status']!='draft')return;
   final confirmed=await showDialog<bool>(context:context,builder:(c)=>AlertDialog(
-   title:const Text('Xác minh và xuất đơn'),
-   content:const Text('Máy chủ sẽ kiểm mã khách, ĐVT và tồn hiện tại. Xuất đơn KHÔNG trừ tồn và KHÔNG tạo doanh số. File là mẫu chuẩn bị, chưa được chứng thực tương thích app công ty.'),
-   actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Đóng')),
-    FilledButton(onPressed:()=>Navigator.pop(c,true),child:const Text('Kiểm tồn & xuất'))]));
+   title:const Text('Xuất phiếu yêu cầu hàng'),
+   content:const Text(
+    'Field Work ghi nhận yêu cầu của Sales, không kiểm tồn, không giữ hàng, không trừ kho và không ghi doanh số. Mã khách CTY có thể bổ sung sau để nhập vào app công ty.'),
+   actions:[
+    TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Đóng')),
+    FilledButton(onPressed:()=>Navigator.pop(c,true),child:const Text('Xuất phiếu')),
+   ],
+  ));
   if(confirmed!=true||!mounted)return;
   setState(()=>busy=true);
   try{
@@ -350,25 +356,15 @@ class _OrdersPageState extends State<OrdersPage>{
     'id':selected!['id'],'client_ref':const Uuid().v4(),
     'version':selected!['version']??0,'owner_sub':selected!['owner_sub'],
     'customer_id':selected!['customer_id'],'action':'export',
-    'accept_stale':acceptStale,'note':note.text,'lines':[],
+    'accept_stale':false,'note':note.text,'lines':[],
    });
    selected={...selected!,...Map<String,dynamic>.from(doc['item'] as Map)};
    await _removeLocal(selected!['id'].toString());
    if(mounted)setState((){});
    await download();
   }catch(e){
-   if(mounted){
-    final message='$e';
-    if(message.contains('24 giờ')&&!acceptStale){
-     final accepted=await showDialog<bool>(context:context,builder:(c)=>AlertDialog(
-      title:const Text('Tồn kho đã cũ'),
-      content:const Text('Bản tồn quá 24 giờ. Anh có muốn sử dụng số tồn đã lưu (chưa quá 7 ngày) để xác minh xuất không? Số tồn không phải lượng đã giữ cho đơn.'),
-      actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Không')),
-       FilledButton(onPressed:()=>Navigator.pop(c,true),child:const Text('Đã hiểu · kiểm lại'))]));
-     if(accepted==true&&mounted){setState(()=>busy=false);await issue(acceptStale:true);return;}
-    }
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Chưa xuất: $e')));
-   }
+   if(mounted)ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content:Text('Chưa xuất phiếu: $e')));
   }finally{if(mounted)setState(()=>busy=false);}
  }
  Future<void> download()async{
@@ -511,16 +507,16 @@ class _OrdersPageState extends State<OrdersPage>{
    primary:false,padding:const EdgeInsets.all(12),children:[
    Row(children:[Expanded(child:Text('Ra đơn',style:Theme.of(context).textTheme.titleLarge)),
     IconButton(tooltip:'Tải lại đơn',onPressed:busy?null:load,icon:const Icon(Icons.refresh))]),
-   const Text('Chọn khách và sản phẩm để tạo đơn. Không nhập giá, không trừ tồn.'),
+   const Text('Phiếu yêu cầu của Sales · không kiểm tồn, không trừ kho.'),
    if(loading)const LinearProgressIndicator(),
-   if(offline)const Text('Ngoại tuyến · chỉ lưu nháp trên máy, cần mạng để kiểm tồn và xuất.'),
+   if(offline)const Text('Ngoại tuyến · nháp vẫn lưu trên máy; cần mạng khi gửi phiếu.'),
    if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
    if(inCart)...[
     Row(children:[Expanded(child:Text('Đơn ${selected!['id'].toString().substring(0,8)} · ${orderStatus(selected!['status']?.toString()??'local')}')),
      IconButton(tooltip:'Đóng giỏ',onPressed:busy?null:()=>setState(()=>selected=null),icon:const Icon(Icons.close))]),
     OutlinedButton.icon(onPressed:canEdit&&!busy?chooseCustomer:null,icon:const Icon(Icons.storefront_outlined),
      label:Text(customer?['name']?.toString().isNotEmpty==true?
-      '${customer!['name']} · CTY: ${customer!['export_code']??'CHƯA CÓ MÃ'}':'Chọn khách hàng')),
+      '${customer!['name']} · FW: ${customer!['field_code']??'Đang cấp'}':'Chọn khách hàng')),
     if(selected!['replaces_order_id']!=null)
      Text('Điều chỉnh từ đơn ${selected!['replaces_order_id']} · Chứng từ công ty không tự thay đổi.'),
     if(selected!['replaced_by_id']!=null)
@@ -530,7 +526,7 @@ class _OrdersPageState extends State<OrdersPage>{
     if(selected!['replacement_reason']!=null)
      Text('Lý do điều chỉnh: ${selected!['replacement_reason']}'),
     if(customer!=null&&(customer!['export_code']==null||customer!['export_code'].toString().isEmpty))
-     const Text('Khách chưa có mã công ty. Có thể lưu nháp nhưng chưa xuất được.'),
+     const Text('Chưa có mã CTY: vẫn xuất được phiếu Sales; cần đối chiếu mã CTY trước khi nhập app công ty.'),
     if(canEdit)OutlinedButton.icon(onPressed:busy?null:addProduct,icon:const Icon(Icons.add_shopping_cart),
      label:const Text('Thêm sản phẩm')),
     if(removedLine!=null&&canEdit)Card(
@@ -545,7 +541,7 @@ class _OrdersPageState extends State<OrdersPage>{
     ),
     for(var i=0;i<lines.length;i++)OrderCartLine(
      key:ValueKey(lines[i]['line_id']),
-     number:i+1,line:lines[i],stockMessage:orderStockMessage(lines[i]),
+     number:i+1,line:lines[i],stockMessage:'',
      editable:canEdit&&!busy,
      onQuantity:(value)=>changeLineQuantity(i,value),
      onRemove:()=>removeLine(i),
@@ -640,7 +636,7 @@ class _OrdersPageState extends State<OrdersPage>{
     if(filtered.isEmpty&&!loading)const Padding(
      padding:EdgeInsets.all(16),child:Text('Không có đơn phù hợp bộ lọc.')),
    ],
-   const Padding(padding:EdgeInsets.all(8),child:Text('Excel xuất là mẫu CHUẨN BỊ nhập công ty, chưa được đối chiếu mẫu chính thức. Tồn là snapshot, không được giữ chỗ khi ra đơn.')),
+   const Padding(padding:EdgeInsets.all(8),child:Text('Excel chỉ là phiếu chuẩn bị nhập công ty, chưa được đối chiếu mẫu chính thức. Field Work không kiểm hoặc giữ tồn kho.')),
   ]);
  }
 }

@@ -85,7 +85,7 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')||30)));
       const offset = Math.min(10000, Math.max(0, Number(url.searchParams.get('offset')||0)));
       if (!Number.isInteger(limit) || !Number.isInteger(offset)) return fail('Pagination không hợp lệ');
-      const rows = await db`SELECT c.id,c.client_ref,c.owner_sub,c.name,c.code,c.category,
+      const rows = await db`SELECT c.id,c.client_ref,c.owner_sub,c.name,c.code,c.field_code,c.category,
           c.contact_name,c.phone,c.address_line,c.province,c.district,c.latitude,c.longitude,
           c.location_accuracy_m,c.location_consent,c.note,c.status,c.version,c.created_at,c.updated_at
         FROM customers c WHERE public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)

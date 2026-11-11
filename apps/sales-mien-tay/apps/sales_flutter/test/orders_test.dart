@@ -56,7 +56,7 @@ void main(){
   expect(find.text('Lưu nháp trên máy'),findsNothing);
   expect(find.text('Xuất'),findsOneWidget);
   expect(find.textContaining('Đã lưu trên máy'),findsOneWidget);
-  expect(find.textContaining('Không nhập giá'),findsOneWidget);
+  expect(find.textContaining('Phiếu yêu cầu của Sales'),findsOneWidget);
   await tester.tap(find.byTooltip('Đóng giỏ'));await tester.pumpAndSettle();
   expect(find.textContaining('Nháp trên máy'),findsOneWidget);
   online=false;

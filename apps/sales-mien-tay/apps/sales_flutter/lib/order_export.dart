@@ -26,7 +26,7 @@ String _xmlSheet(List<List<Object?>> rows){
 Uint8List buildOrderPreparationXlsx(Map<String,dynamic> order){
  if(!['exported','imported'].contains(order['status']))throw StateError('Đơn chưa xuất');
  final code=order['customer_code']?.toString()??'';
- if(code.isEmpty)throw StateError('Thiếu mã khách CTY');
+ // Field Work accepts Sales requests even without ERP company mapping.
  final lines=(order['lines'] as List? ?? []).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
  if(lines.isEmpty)throw StateError('Giỏ hàng rỗng');
  final data=<List<Object?>>[
@@ -41,10 +41,11 @@ Uint8List buildOrderPreparationXlsx(Map<String,dynamic> order){
   ['Trạng thái','CHƯA ĐƯỢC ĐỐI CHIẾU VỚI MẪU IMPORT APP CÔNG TY'],
   ['Mã đơn',order['id'].toString()],
   ['Khách hàng',order['customer_name']??''],
-  ['Mã khách công ty',code],
+  ['Mã Field Work',order['customer_field_code']??''],
+  ['Mã khách công ty',code.isEmpty?'CHƯA ÁNH XẠ · CẦN KIỂM TRA TRƯỚC KHI IMPORT':code],
   ['Ngày xuất',order['exported_at']?.toString()??''],
   ['Lưu ý','Không có giá/thuế/thanh toán. Xuất đơn không trừ tồn kho và không tạo doanh số.'],
-  ['Tồn kho','Đã kiểm tra online lúc xác nhận xuất, không đặt giữ số lượng.'],
+  ['Tồn kho','Field Work không kiểm tồn khi ra đơn, không giữ hàng hoặc trừ kho.'],
   ['Nhập hệ thống công ty','Chỉ xác nhận đã nhập khi nhân viên đối chiếu với app công ty.'],
  ];
  final strings=<String,String>{

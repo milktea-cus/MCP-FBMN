@@ -48,12 +48,12 @@ export async function orderRoutes(req:Request,env:{DATABASE_URL:string},u:User,u
  if(req.method==='GET'){
   if(path==='/api/v1/orders/customers'){
    const q=(url.searchParams.get('q')??'').trim().slice(0,120);
-   const items=await sql`SELECT c.id::text AS id,c.owner_sub,c.name,c.code AS customer_code,
+   const items=await sql`SELECT c.id::text AS id,c.owner_sub,c.name,c.code AS customer_code,c.field_code,
     c.province,c.district,m.company_code AS mapping_code,
     coalesce(nullif(btrim(m.company_code),''),nullif(btrim(c.code),'')) AS export_code
     FROM customers c LEFT JOIN catalog_customer_mapping m ON m.customer_id=c.id
     WHERE c.status<>'inactive' AND public.sales_can_access(${u.sub},c.owner_sub,c.province,c.district)
-      AND (c.name ILIKE '%'||${q}||'%' OR c.code ILIKE '%'||${q}||'%'
+      AND (c.name ILIKE '%'||${q}||'%' OR c.field_code ILIKE '%'||${q}||'%' OR c.code ILIKE '%'||${q}||'%'
        OR m.company_code ILIKE '%'||${q}||'%')
     ORDER BY c.name LIMIT 100`;
    return respond({items});
@@ -66,8 +66,8 @@ export async function orderRoutes(req:Request,env:{DATABASE_URL:string},u:User,u
     return bad('Tham số phân trang không hợp lệ');
    const limit=parsedLimit+1;
    const items=await sql`SELECT p.id::text AS id,p.company_code,p.sku,p.name,p.brand,p.category,p.unit,
-    p.product_spec,s.quantity::text AS quantity,s.snapshot_at
-    FROM catalog_products p LEFT JOIN inventory_stock s ON s.product_id=p.id
+    p.product_spec
+    FROM catalog_products p
     WHERE p.active AND p.company_code>${after}
       AND (p.name ILIKE '%'||${q}||'%' OR p.company_code ILIKE '%'||${q}||'%'
        OR p.sku ILIKE '%'||${q}||'%' OR p.brand ILIKE '%'||${q}||'%'
@@ -76,8 +76,7 @@ export async function orderRoutes(req:Request,env:{DATABASE_URL:string},u:User,u
    const hasMore=items.length>parsedLimit;
    const page=items.slice(0,parsedLimit);
    return respond({items:page,next_cursor:hasMore?page[page.length-1].company_code:null,
-    stock_unit:'ĐVT trong danh mục (thùng nếu danh mục dùng Thùng)',
-    does_not_reserve_stock:true});
+    sales_request_only:true,does_not_reserve_stock:true});
   }
   const detail=/^\/api\/v1\/orders\/([a-f0-9-]{36})(\/export|\/audit)?$/i.exec(path);
   if(path==='/api/v1/orders'){
@@ -98,19 +97,19 @@ export async function orderRoutes(req:Request,env:{DATABASE_URL:string},u:User,u
     o.replacement_reason,o.superseded_at,
     (SELECT successor.id::text FROM field_orders successor
       WHERE successor.replaces_order_id=o.id) AS replaced_by_id,
-    c.name AS customer_name,c.province,c.district,
+    c.name AS customer_name,c.field_code AS customer_field_code,c.province,c.district,
     coalesce(nullif(btrim(m.company_code),''),nullif(btrim(c.code),'')) AS customer_code,
     coalesce((SELECT jsonb_agg(jsonb_build_object('line_id',l.line_id,'product_id',l.product_id,
        'company_code',p.company_code,'name',p.name,'unit',l.unit,'quantity',l.quantity,
-       'available',s.quantity::text,'snapshot_at',s.snapshot_at)
+       'available',NULL::text,'snapshot_at',NULL::timestamptz)
        ORDER BY l.line_position,p.company_code) FROM field_order_lines l JOIN catalog_products p ON p.id=l.product_id
-       LEFT JOIN inventory_stock s ON s.product_id=l.product_id
        WHERE l.order_id=o.id),'[]'::jsonb) AS lines
     FROM field_orders o JOIN customers c ON c.id=o.customer_id AND c.owner_sub=o.owner_sub
     LEFT JOIN catalog_customer_mapping m ON m.customer_id=c.id
     WHERE public.sales_can_access(${u.sub},o.owner_sub,c.province,c.district)
       AND (${status}='' OR o.status=${status})
       AND (${q}='' OR c.name ILIKE '%'||${q}||'%'
+       OR c.field_code ILIKE '%'||${q}||'%'
        OR c.code ILIKE '%'||${q}||'%'
        OR m.company_code ILIKE '%'||${q}||'%'
        OR o.id::text ILIKE '%'||${q}||'%')
@@ -127,13 +126,13 @@ export async function orderRoutes(req:Request,env:{DATABASE_URL:string},u:User,u
     o.replacement_reason,o.superseded_at,
     (SELECT successor.id::text FROM field_orders successor
       WHERE successor.replaces_order_id=o.id) AS replaced_by_id,
-    c.name AS customer_name,c.province,c.district,
+    c.name AS customer_name,c.field_code AS customer_field_code,c.province,c.district,
     coalesce(nullif(btrim(m.company_code),''),nullif(btrim(c.code),'')) AS customer_code,
     coalesce((SELECT jsonb_agg(jsonb_build_object('line_id',l.line_id,'product_id',l.product_id,
        'company_code',p.company_code,'name',p.name,'unit',l.unit,'quantity',l.quantity,
-       'available',s.quantity::text,'snapshot_at',s.snapshot_at)
+       'available',NULL::text,'snapshot_at',NULL::timestamptz)
       ORDER BY l.line_position,p.company_code) FROM field_order_lines l JOIN catalog_products p ON p.id=l.product_id
-      LEFT JOIN inventory_stock s ON s.product_id=l.product_id WHERE l.order_id=o.id),'[]'::jsonb) AS lines
+ WHERE l.order_id=o.id),'[]'::jsonb) AS lines
     FROM field_orders o JOIN customers c ON c.id=o.customer_id AND c.owner_sub=o.owner_sub
     LEFT JOIN catalog_customer_mapping m ON m.customer_id=c.id
     WHERE o.id=${id}::uuid AND public.sales_can_access(${u.sub},o.owner_sub,c.province,c.district)`;

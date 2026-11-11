@@ -13,8 +13,18 @@ void main(){
   expect(xml, isNot(contains('<f>')));expect(xml,isNot(contains('Đơn giá')));
   expect(files['xl/worksheets/sheet2.xml'],contains('CHƯA ĐƯỢC ĐỐI CHIẾU'));
  });
- test('reject export when not issued or customer company code missing',(){
+ test('reject draft/empty cart but allow Sales request without ERP company mapping',(){
   expect(()=>buildOrderPreparationXlsx({'status':'draft','customer_code':'1','lines':[]}),throwsStateError);
   expect(()=>buildOrderPreparationXlsx({'status':'exported','customer_code':'','lines':[]}),throwsStateError);
+  final data=buildOrderPreparationXlsx({
+   'id':'fb-order','status':'exported','customer_field_code':'TGMT01',
+   'customer_code':'','customer_name':'Nhà sách Minh Tâm',
+   'lines':[{'company_code':'000999','unit':'Hộp','quantity':3}],
+  });
+  final files={for(final f in ZipDecoder().decodeBytes(data).files)f.name:utf8.decode(f.content)};
+  expect(files['xl/worksheets/sheet1.xml'],contains('000999'));
+  expect(files['xl/worksheets/sheet2.xml'],contains('TGMT01'));
+  expect(files['xl/worksheets/sheet2.xml'],contains('CHƯA ÁNH XẠ'));
+  expect(files['xl/worksheets/sheet2.xml'],contains('không kiểm tồn'));
  });
 }

@@ -131,7 +131,7 @@ class _OrderCartLineState extends State<OrderCartLine> {
           ]),
           const SizedBox(height: 3),
           Row(children: [
-            Expanded(child: Text(widget.stockMessage,
+            if(widget.stockMessage.isNotEmpty) Expanded(child: Text(widget.stockMessage,
               maxLines: 2, overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: widget.stockMessage.startsWith('Thiếu tồn')

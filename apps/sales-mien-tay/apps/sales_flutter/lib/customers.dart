@@ -16,13 +16,13 @@ import 'customer_assortment.dart';
 
 class FieldCustomer {
   final String id, name, address, province, district, category, status;
-  final String? phone, contact, note, owner, code;
+  final String? phone, contact, note, owner, code, fieldCode;
   final double? latitude, longitude;
   final int version;
-  Map<String,dynamic> toJson()=>{'id':id,'owner_sub':owner,'name':name,'code':code,'address_line':address,'province':province,'district':district,'category':category,'status':status,'phone':phone,'contact_name':contact,'note':note,'latitude':latitude,'longitude':longitude,'version':version};
+  Map<String,dynamic> toJson()=>{'id':id,'owner_sub':owner,'name':name,'code':code,'field_code':fieldCode,'address_line':address,'province':province,'district':district,'category':category,'status':status,'phone':phone,'contact_name':contact,'note':note,'latitude':latitude,'longitude':longitude,'version':version};
   FieldCustomer.fromJson(Map<String, dynamic> j)
       : id = j['id'].toString(), name = j['name'].toString(),
-        owner = j['owner_sub'] as String?, code = j['code'] as String?, address = j['address_line'].toString(), province = j['province'].toString(),
+        owner = j['owner_sub'] as String?, code = j['code'] as String?,fieldCode=j['field_code'] as String?, address = j['address_line'].toString(), province = j['province'].toString(),
         district = j['district'].toString(), category = j['category'].toString(),
         status = j['status'].toString(), phone = j['phone'] as String?,
         contact = j['contact_name'] as String?, note = j['note'] as String?,
@@ -241,7 +241,7 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
         return Card(child: ListTile(
           leading: CustomerCategoryAvatar(category:c.category),
           title: Text(c.name,maxLines:2,overflow:TextOverflow.ellipsis),
-          subtitle: Text('${category.label} · ${c.district}, ${c.province} · ${c.address}',
+          subtitle: Text('${c.fieldCode??'Đang cấp mã'} · ${category.label} · ${c.district}, ${c.province} · ${c.address}',
             maxLines:3,overflow:TextOverflow.ellipsis),
           trailing: c.owner!=widget.service.identity?const Icon(Icons.chevron_right):IconButton(tooltip:'Sửa thông tin',icon:const Icon(Icons.edit_outlined),onPressed:() async {final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>CustomerEditor(service:widget.service,regions:widget.regions,customer:c,queue:widget.queue)));if(changed==true&&mounted)refresh();}),
           onTap: () async {final changed=await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) =>
@@ -313,7 +313,10 @@ class _CustomerEditorState extends State<CustomerEditor> {
       TextFormField(controller:name,decoration:const InputDecoration(labelText:'Tên điểm bán *'),
         validator:(v)=>(v??'').trim().length<2?'Tên ít nhất 2 ký tự':null),
       const SizedBox(height:12),
-      TextFormField(controller:companyCode,decoration:const InputDecoration(labelText:'Mã khách công ty · dùng nhập doanh số',helperText:'Nhập đúng mã trong file công ty, giữ số 0 ở đầu'),
+      InputDecorator(decoration:const InputDecoration(labelText:'Mã Field Work (tự động)'),
+       child:Text(widget.customer?.fieldCode??'Được cấp sau khi đồng bộ · 6 ký tự in hoa')),
+      const SizedBox(height:12),
+      TextFormField(controller:companyCode,decoration:const InputDecoration(labelText:'Mã khách CTY (nếu có)',helperText:'Dùng đối chiếu với app công ty; không phải mã Field Work'),
        validator:(v)=>(v??'').trim().length>80?'Mã khách tối đa 80 ký tự':null),
       const SizedBox(height:12),
       DropdownButtonFormField<String>(initialValue:province,decoration:const InputDecoration(labelText:'Tỉnh/TP (địa giới cũ) *'),
@@ -415,6 +418,8 @@ class _CustomerDetailState extends State<CustomerDetail> {
             ])),
           ]),
           const SizedBox(height: 12),
+          Text('Mã Field Work: ${customer.fieldCode??'Đang cấp sau đồng bộ'}'),
+          if(customer.code?.isNotEmpty==true)Text('Mã khách CTY: ${customer.code}'),
           Text('Địa chỉ: ${customer.address}, ${customer.district}, ${customer.province}'),
           Text('Chủ điểm bán: ${customer.contact ?? 'Chưa có'}'),
           Text('Số điện thoại: ${customer.phone ?? 'Chưa có'}'),
