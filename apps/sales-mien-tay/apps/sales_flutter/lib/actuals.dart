@@ -39,18 +39,19 @@ class _ActualsPageState extends State<ActualsPage>{
  DateTime month=DateTime(DateTime.now().year,DateTime.now().month);
  String owner='';bool busy=true,offline=false,canImport=false;String? error;
  List<Map<String,dynamic>> entries=[],staff=[];
+ Map<String,dynamic> summary={};
  int generation=0;
  String get ym=>'${month.year}-${month.month.toString().padLeft(2,'0')}';
  String get cacheKey=>'sales-actuals:$ym:$owner';
  @override void initState(){super.initState();owner=widget.queue.identity;load();}
  Future<void> load()async{
   final g=++generation,key=cacheKey,path=saleParam('/api/v1/actuals',{'month':ym,'owner':owner});
-  setState((){busy=true;offline=false;error=null;entries=[];canImport=false;});
+  setState((){busy=true;offline=false;error=null;entries=[];summary={};canImport=false;});
   Map<String,dynamic>? doc;String? failure;
   try{doc=await client.get(path);try{await widget.queue.cache(key,[doc]);}catch(_){}}
   catch(e){failure=e.toString();if(e is! ApiFailure||e.status>=500){try{doc=(await widget.queue.cached(key)).firstOrNull;offline=doc!=null;}catch(_){}}}
   if(!mounted||g!=generation)return;
-  setState((){busy=false;error=doc==null?failure:null;if(doc!=null){entries=saleRows(doc['items']);canImport=!offline&&doc['can_import']==true;}});
+  setState((){busy=false;error=doc==null?failure:null;if(doc!=null){entries=saleRows(doc['items']);summary=Map<String,dynamic>.from(doc['summary'] as Map? ?? {});canImport=!offline&&doc['can_import']==true;}});
  }
  Future<void> loadStaff()async{
   try{final r=await client.get('/api/v1/actuals/options?type=staff');if(mounted)setState(()=>staff=saleRows(r['items']));}catch(_){}
@@ -71,7 +72,9 @@ class _ActualsPageState extends State<ActualsPage>{
  }
  @override Widget build(BuildContext context){
   final active=entries.where((r)=>r['status']=='active').toList();
-  final amount=active.fold<int>(0,(a,r)=>a+(int.tryParse('${r['amount']}')??0));
+  final amount=int.tryParse('${summary['total_amount']}')??active.fold<int>(0,(a,r)=>a+(int.tryParse('${r['amount']}')??0));
+  final activeCount=int.tryParse('${summary['active_records']}')??active.length;
+  final totalCount=int.tryParse('${summary['total_records']}')??entries.length;
   return Scaffold(appBar:AppBar(title:const Text('Doanh số thực tế')),body:ListView(padding:const EdgeInsets.all(12),children:[
    Row(children:[Expanded(child:Text('Doanh số công ty / nhập tay',style:Theme.of(context).textTheme.titleMedium)),
     IconButton(tooltip:'Tải lại',onPressed:busy?null:load,icon:const Icon(Icons.refresh))]),
@@ -86,7 +89,8 @@ class _ActualsPageState extends State<ActualsPage>{
    if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
    Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
     const Text('Doanh số đã ghi nhận trong kỳ'),Text(saleMoney(amount),style:Theme.of(context).textTheme.headlineSmall),
-    Text('Số dòng: ${active.length} · Hủy: ${entries.length-active.length}'),
+    Text('Số dòng: $activeCount · Hủy: ${totalCount-activeCount}'),
+    if(totalCount>entries.length)Text('Đang hiển thị ${entries.length}/$totalCount dòng mới nhất, tổng doanh số vẫn tính đủ.'),
     const Text('Chỉ tính dòng đang hiệu lực; không cộng dữ liệu dự kiến hoặc đơn nháp.'),
    ]))),
    if(!offline&&error==null)Wrap(spacing:8,runSpacing:8,children:[

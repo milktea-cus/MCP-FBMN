@@ -82,7 +82,13 @@ export async function actualRoutes(req:Request,env:{DATABASE_URL:string},u:User,
     AND (${owner==='all'&&manager} OR a.owner_sub=${owner})
     AND public.sales_can_access(${u.sub},a.owner_sub,c.province,c.district)
     ORDER BY a.sale_date DESC,a.created_at DESC LIMIT 500`;
-  return reply({month,items,can_import:manager});
+  const [totals]=await sql`SELECT count(*)::int AS total_records,count(*) FILTER(WHERE a.status='active')::int AS active_records,
+      coalesce(sum(a.amount) FILTER(WHERE a.status='active'),0)::text AS total_amount
+    FROM sales_actuals a JOIN customers c ON c.id=a.customer_id AND c.owner_sub=a.owner_sub
+    WHERE a.sale_date>=to_date(${month}||'-01','YYYY-MM-DD') AND a.sale_date<(to_date(${month}||'-01','YYYY-MM-DD')+interval '1 month')
+    AND (${owner==='all'&&manager} OR a.owner_sub=${owner})
+    AND public.sales_can_access(${u.sub},a.owner_sub,c.province,c.district)`;
+  return reply({month,items,summary:totals,can_import:manager});
  }
  if(['/api/v1/actuals/import/preview','/api/v1/actuals/import/confirm'].includes(path)&&req.method==='POST'){
   if(!manager)return bad('Chỉ Admin/Manager nhập doanh số từ công ty',403);
