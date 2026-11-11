@@ -66,7 +66,7 @@ class OfflineQueue extends ChangeNotifier {
  }
  Future<void> enqueue(String path,Map<String,dynamic> data,{Uint8List? photo,String? mime,String method='POST'}) async{
   if(_closed)throw StateError('Phiên đã đóng');
-  if(!['/api/v1/records','/api/v1/customers'].contains(path)&&!RegExp(r'^/api/v1/records/[a-f0-9-]{36}$').hasMatch(path)&&!RegExp(r'^/api/v1/notifications/[0-9]{1,19}/read$').hasMatch(path)&&!RegExp(r'^/api/v1/customers/[a-f0-9-]{36}(/visits|/photos|/products)?throw ArgumentError('Unsupported offline operation');
+  if(!['/api/v1/records','/api/v1/customers'].contains(path)&&!RegExp(r'^/api/v1/records/[a-f0-9-]{36}$').hasMatch(path)&&!RegExp(r'^/api/v1/notifications/[0-9]{1,19}/read$').hasMatch(path)&&!RegExp(r'^/api/v1/customers/[a-f0-9-]{36}(/visits|/photos|/products)?$').hasMatch(path))throw ArgumentError('Unsupported offline operation');
   final id=data['client_ref']?.toString()??const Uuid().v4();
   if(photo!=null&&(photo.isEmpty||photo.length>5*1024*1024))throw StateError('Ảnh phải nhỏ hơn 5 MB');
   await _put({'key':'$namespace:$id','namespace':namespace,'account':identity,'created':DateTime.now().millisecondsSinceEpoch,
