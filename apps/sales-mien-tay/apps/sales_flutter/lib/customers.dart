@@ -9,6 +9,7 @@ import 'package:uuid/uuid.dart';
 import 'models.dart';
 import 'session.dart';
 import 'offline_queue.dart';
+import 'editor.dart';
 import 'customer_categories.dart';
 import 'customer_assortment.dart';
 import 'theme.dart';
