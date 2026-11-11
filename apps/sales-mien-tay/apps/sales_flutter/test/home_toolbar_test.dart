@@ -4,7 +4,7 @@ import '../lib/main.dart';
 import '../lib/theme.dart';
 
 void main(){
-  const sections=['Tổng quan','Khách hàng','Khảo sát','Target','Dự kiến','Lịch trình','Hỗ trợ','Chính sách','Yêu cầu','Báo cáo','Danh mục SKU','Tra tồn'];
+  const sections=['Tổng quan','Khách hàng','Khảo sát','Target','Dự kiến','Lịch trình','Hỗ trợ','Chính sách','Yêu cầu','Báo cáo','Danh mục SKU','Tra tồn','Ra đơn'];
   Widget shell({required bool admin,required bool loading,required List<String> calls})=>MaterialApp(
     theme:SalesTheme.build(),home:Scaffold(
       appBar:SalesHomeBar(loading:loading,onNotifications:()=>calls.add('bell')),
@@ -34,6 +34,7 @@ void main(){
       expect(find.text('Quản lý nhân viên'),findsOneWidget);
       expect(find.text('Tra tồn'),findsOneWidget);
       expect(find.text('Danh mục SKU'),findsOneWidget);
+      expect(find.text('Ra đơn'),findsOneWidget);
       await tester.tap(find.text('Quản lý nhân viên'));await tester.pumpAndSettle();
       expect(calls,['bell','staff']);expect(find.text('Quản lý nhân viên'),findsNothing);
       expect(tester.takeException(),isNull);
