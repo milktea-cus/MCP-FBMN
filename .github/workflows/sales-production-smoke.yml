@@ -45,7 +45,7 @@ jobs:
           test "$code" = 401
           jq -e '.error | type=="string"' /tmp/me.json
           code=$(curl -sS --max-time 30 -o /tmp/login.json -w '%{http_code}' \
-            -H 'Content-Type: application/json' --data '{}' "$site/api/auth/login")
+            -H 'Origin: https://sales-mien-tay.vercel.app' -H 'Content-Type: application/json' --data '{}' "$site/api/auth/login")
           echo "/api/auth/login (invalid) => HTTP $code"
           test "$code" = 400
           jq -e '.error | type=="string"' /tmp/login.json
