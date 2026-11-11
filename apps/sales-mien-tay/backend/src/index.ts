@@ -3,6 +3,7 @@ import {AuthError, authRoutes, userFromRequest, provisionIdentity} from './auth'
 import {staffRoutes} from './staff';
 import districts from './districts_old.json';
 import {customerRoutes} from './customers';
+import {assortmentRoutes} from './assortment';
 import {surveyRoutes} from './surveys';
 import {catalogRoutes} from './catalog';
 import {catalogImportRoutes} from './catalog_import';
@@ -115,6 +116,8 @@ export default {
         return json({districts: allowed, kinds});
       }
       if (!env.DATABASE_URL) return bad('DATABASE_URL chưa được cấu hình', 503);
+      const assortmentResponse=await assortmentRoutes(req,env,user,url);
+      if(assortmentResponse)return assortmentResponse;
       const productResponse = await customerRoutes(req, env, user, url);
       if (productResponse) return productResponse;
       const performanceResponse=await performanceRoutes(req,env,user,url);

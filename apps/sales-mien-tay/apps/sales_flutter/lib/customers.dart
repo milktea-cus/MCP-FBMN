@@ -12,6 +12,7 @@ import 'offline_queue.dart';
 import 'editor.dart';
 import 'surveys.dart';
 import 'customer_categories.dart';
+import 'customer_assortment.dart';
 
 class FieldCustomer {
   final String id, name, address, province, district, category, status;
@@ -418,6 +419,14 @@ class _CustomerDetailState extends State<CustomerDetail> {
           Text('Chủ điểm bán: ${customer.contact ?? 'Chưa có'}'),
           Text('Số điện thoại: ${customer.phone ?? 'Chưa có'}'),
           Text('GPS: ${customer.latitude?.toStringAsFixed(6) ?? 'Chưa ghi'} / ${customer.longitude?.toStringAsFixed(6) ?? 'Chưa ghi'}'),
+          const SizedBox(height: 16),
+          CustomerAssortmentSection(
+            customerId:customer.id,ownerSub:customer.owner??'',
+            editable:own,queue:widget.queue,
+            api:CustomerAssortmentApi(widget.service.endpoint,widget.service.token,
+             identity:widget.service.identity,revision:widget.service.revision,
+             client:widget.service.client),
+          ),
           const SizedBox(height: 16),
           if(own&&widget.queue!=null)Wrap(spacing:8,children:[OutlinedButton.icon(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>Scaffold(appBar:AppBar(title:Text(customer.name)),body:SurveyPage(queue:widget.queue!,service:widget.service,regions:widget.regions,initialCustomer:customer.id)))),icon:const Icon(Icons.assignment_outlined),label:const Text('Phiên khảo sát')),OutlinedButton.icon(onPressed:()=>addRecord('forecast'),icon:const Icon(Icons.payments_outlined),label:const Text('Dự kiến doanh thu'))]),
           if(own)FilledButton.icon(
