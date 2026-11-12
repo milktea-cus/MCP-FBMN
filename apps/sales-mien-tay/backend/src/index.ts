@@ -161,7 +161,7 @@ export default {
           AND public.sales_can_access(${user.sub},r.owner_sub,r.province,r.district)
         )
         SELECT r.id,r.version,c.owner_sub,c.full_name,c.province,c.district,
-          coalesce(r.data,'{}'::jsonb) AS data,c.id AS customer_id,c.name,c.address_line,c.latitude,c.longitude,c.location_consent,
+          coalesce(r.data,'{}'::jsonb) AS data,c.id AS customer_id,c.name,c.category,c.address_line,c.latitude,c.longitude,c.location_consent,
           r.id IS NOT NULL AS planned,
           coalesce(v.visited,false) AS visited,coalesce(v.visited_week,false) AS visited_week,coalesce(v.visited_period,false) AS visited_period,v.last_visit,v.week_visits,coalesce(s.completed_sessions,0) AS completed_sessions
         FROM eligible c LEFT JOIN planned r ON r.data->>'customerId'=c.id::text AND r.owner_sub=c.owner_sub

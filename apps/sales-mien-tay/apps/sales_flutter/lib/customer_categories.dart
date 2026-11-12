@@ -17,6 +17,7 @@ class CustomerCategory {
     CustomerCategory('tap_hoa','Tạp hóa',Icons.store_outlined,Color(0xFFA66B25)),
     CustomerCategory('cua_hang','Cửa hàng',Icons.shopping_bag_outlined,Color(0xFF148F9E)),
     CustomerCategory('truong_hoc','Trường học',Icons.school_outlined,Color(0xFF087F7B)),
+    CustomerCategory('khach_le','Khách lẻ',Icons.person_outline,Color(0xFFC13C82)),
     CustomerCategory('khac','Khác',Icons.category_outlined,Color(0xFF758092)),
   ];
 

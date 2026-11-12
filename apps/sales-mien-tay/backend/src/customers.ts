@@ -68,7 +68,7 @@ function dataError(data: ObjectBody) {
   if (data.code !== undefined && data.code !== null && !str(data.code, 80)) return 'Mã điểm bán không hợp lệ';
   if (data.phone !== undefined && data.phone !== null && data.phone !== '' && !/^[0-9+(). -]{8,20}$/.test(String(data.phone)))
     return 'Số điện thoại không hợp lệ';
-  if (data.category !== undefined && !['tap_hoa', 'sieu_thi', 'dai_ly', 'npp', 'nha_sach', 'van_phong_pham', 'cua_hang', 'truong_hoc', 'khac'].includes(String(data.category)))
+  if (data.category !== undefined && !['tap_hoa', 'sieu_thi', 'dai_ly', 'npp', 'nha_sach', 'van_phong_pham', 'cua_hang', 'truong_hoc', 'khach_le', 'khac'].includes(String(data.category)))
     return 'Loại điểm bán không hợp lệ';
   if (data.status !== undefined && !['active', 'inactive', 'potential'].includes(String(data.status)))
     return 'Trạng thái không hợp lệ';
