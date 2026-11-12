@@ -8,6 +8,7 @@ import 'order_export.dart';
 import 'session.dart';
 import 'order_picker.dart';
 import 'order_cart_line.dart';
+import 'responsive_controls.dart';
 
 List<Map<String,dynamic>> orderRows(Object? value)=>(value as List? ?? []).map((x)=>Map<String,dynamic>.from(x as Map)).toList();
 String orderTotalByUnit(List<Map<String,dynamic>> lines){
@@ -598,8 +599,8 @@ class _OrdersPageState extends State<OrdersPage>{
      ),
     ),
     const SizedBox(height:8),
-    Wrap(spacing:8,runSpacing:8,crossAxisAlignment:WrapCrossAlignment.center,children:[
-     SizedBox(width:210,child:DropdownButtonFormField<String>(
+    AdaptiveFilterRow(minFieldWidth:260,children:[
+     DropdownButtonFormField<String>(
       value:filterStatus,
       isExpanded:true,decoration:const InputDecoration(labelText:'Trạng thái',isDense:true),
       items:const [
@@ -615,8 +616,8 @@ class _OrdersPageState extends State<OrdersPage>{
        setState(()=>filterStatus=value??'');
        unawaited(load());
       },
-     )),
-     OutlinedButton.icon(onPressed:pickOrderDates,
+      ),
+      OutlinedButton.icon(onPressed:pickOrderDates,
       icon:const Icon(Icons.date_range),
       label:Text(filterDates==null?'Lọc ngày':
        '${_orderDate(filterDates!.start)} → ${_orderDate(filterDates!.end)}')),
@@ -636,7 +637,7 @@ class _OrdersPageState extends State<OrdersPage>{
     if(filtered.isEmpty&&!loading)const Padding(
      padding:EdgeInsets.all(16),child:Text('Không có đơn phù hợp bộ lọc.')),
    ],
-   const Padding(padding:EdgeInsets.all(8),child:Text('Excel chỉ là phiếu chuẩn bị nhập công ty, chưa được đối chiếu mẫu chính thức. Field Work không kiểm hoặc giữ tồn kho.')),
+   const Padding(padding:EdgeInsets.all(8),child:Text('File xuất cần đối chiếu mẫu công ty trước khi sử dụng.')),
   ]);
  }
 }
