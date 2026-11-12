@@ -33,7 +33,7 @@ void main(){
   expect(saleMoney(150000),'150.000 đ');
   expect(find.text('225.000 đ'),findsOneWidget);
   expect(find.textContaining('hiển thị 1/2 dòng'),findsOneWidget);
-  expect(find.text('Nhập Excel'),findsOneWidget);
+  expect(find.text('Nhập file'),findsOneWidget);
   expect(find.text('Nhập tay'),findsOneWidget);
   expect(find.textContaining('không cộng dữ liệu dự kiến'),findsOneWidget);
   await tester.pumpWidget(const SizedBox());queue.dispose();client.close();
