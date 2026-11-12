@@ -7,7 +7,8 @@ void main(){
     appBar:AppBar(title:const Text('Field Work')),
     drawer:SalesHomeDrawer(
       admin:false,loading:false,selectedIndex:0,
-      sections:const ['Tổng quan'],icons:const [Icons.home_outlined],
+      sections:List.generate(13,(i)=>'Mục $i'),
+      icons:List.filled(13,Icons.home_outlined),
       onSection:(_){},onRefresh:(){},onStaff:(){},onProfile:(){},
       onUpdate:update,
     ),
