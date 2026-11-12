@@ -228,9 +228,8 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
     final countTD = surveys.where((e) =>
       (e.data['brands'] is List && (e.data['brands'] as List).contains('Thành Đạt (đối thủ)'))).length;
     return ListView(padding: const EdgeInsets.all(18), children: [
-      Text('Tổng quan thị trường', style: Theme.of(context).textTheme.headlineSmall),
+      Text('Tổng quan', style: Theme.of(context).textTheme.headlineSmall),
       const SizedBox(height: 7),
-      const Text('Quản lý khảo sát điểm bán và kế hoạch Sales 13 tỉnh miền Tây (địa giới cũ).'),
       const SizedBox(height: 16),
       SalesOverviewKpis(
         surveyed: surveys.length,
@@ -249,7 +248,6 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
       const SizedBox(height: 20),
       _coverageTable(surveys),
       const SizedBox(height: 10),
-      const Text('Chỉ tính nhãn hàng được ghi nhận hiện diện. Một điểm bán có thể có nhiều nhãn hàng.'),
       const SizedBox(height: 14),
     ]);
   }
