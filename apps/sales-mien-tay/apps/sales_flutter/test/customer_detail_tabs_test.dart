@@ -317,8 +317,11 @@ void main(){
       service:FakeDirectoryService(),
       regions:const RegionCatalog({'Tiền Giang':['Mỹ Tho']})))));
     await tester.pumpAndSettle();
-    expect(find.text('Chưa có GPS · tìm theo địa chỉ'),findsOneWidget);
-    await tester.tap(find.text('Chỉ đường'));
+    // The compact card hides address/GPS details, but directions still fall
+    // back to the customer's stored address when there is no coordinate.
+    expect(find.textContaining('2 Lê Lợi'),findsNothing);
+    expect(find.byTooltip('Chỉ đường'),findsOneWidget);
+    await tester.tap(find.byTooltip('Chỉ đường'));
     await tester.pump();
     expect(launcher.lastUrl,contains('maps/dir/'));
     expect(Uri.parse(launcher.lastUrl!).queryParameters['destination'],
