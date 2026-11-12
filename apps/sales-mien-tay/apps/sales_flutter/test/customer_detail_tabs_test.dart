@@ -229,20 +229,20 @@ void main(){
       service:FakeService(),customer:customer(),queue:queue,
       regions:const RegionCatalog({'Tiền Giang':['Mỹ Tho']}))));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Nhập tọa độ'),300);
+    await tester.scrollUntilVisible(find.text('Nhập tọa độ'),300,scrollable:find.byType(Scrollable).first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Nhập tọa độ'));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.byKey(const Key('customer-location-lat')),300);
+    await tester.scrollUntilVisible(find.byKey(const Key('customer-location-lat')),300,scrollable:find.byType(Scrollable).first);
     await tester.enterText(find.byKey(const Key('customer-location-lat')),'10.345');
     await tester.enterText(find.byKey(const Key('customer-location-lon')),'106.123');
-    await tester.scrollUntilVisible(find.text('Xem trước tọa độ'),300);
+    await tester.scrollUntilVisible(find.text('Xem trước tọa độ'),300,scrollable:find.byType(Scrollable).first);
     await tester.tap(find.text('Xem trước tọa độ'));
     await tester.pumpAndSettle();
     expect(find.textContaining('Tọa độ mới: 10.345000, 106.123000'),findsOneWidget);
     await tester.tap(find.text('Xác nhận vị trí'));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Lưu điểm bán'),300);
+    await tester.scrollUntilVisible(find.text('Lưu điểm bán'),300,scrollable:find.byType(Scrollable).first);
     await tester.tap(find.text('Lưu điểm bán'));
     await tester.pump();
     expect(queue.lastPath,'/api/v1/customers/$customerId');
@@ -266,13 +266,13 @@ void main(){
       service:FakeService(),customer:existing,queue:queue,
       regions:const RegionCatalog({'Tiền Giang':['Mỹ Tho']}))));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.widgetWithText(ChoiceChip,'Nhập tọa độ'),300);
+    await tester.scrollUntilVisible(find.widgetWithText(ChoiceChip,'Nhập tọa độ'),300,scrollable:find.byType(Scrollable).first);
     await tester.pumpAndSettle();
     final manual=tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip,'Nhập tọa độ'));
     final link=tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip,'Dán link Maps'));
     expect(manual.onSelected,isNull);
     expect(link.onSelected,isNull);
-    await tester.scrollUntilVisible(find.text('Lưu điểm bán'),300);
+    await tester.scrollUntilVisible(find.text('Lưu điểm bán'),300,scrollable:find.byType(Scrollable).first);
     await tester.tap(find.text('Lưu điểm bán'));
     await tester.pump();
     expect(queue.lastPayload?.containsKey('latitude'),isFalse);
@@ -287,13 +287,13 @@ void main(){
       service:FakeService(),customer:customer(),queue:queue,
       regions:const RegionCatalog({'Tiền Giang':['Mỹ Tho']}))));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Lấy GPS thiết bị và xem trước'),300);
+    await tester.scrollUntilVisible(find.text('Lấy GPS thiết bị và xem trước'),300,scrollable:find.byType(Scrollable).first);
     await tester.tap(find.text('Lấy GPS thiết bị và xem trước'));
     await tester.pumpAndSettle();
     expect(find.text('Sử dụng vị trí'),findsOneWidget);
     await tester.tap(find.text('Không'));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Lưu điểm bán'),300);
+    await tester.scrollUntilVisible(find.text('Lưu điểm bán'),300,scrollable:find.byType(Scrollable).first);
     await tester.tap(find.text('Lưu điểm bán'));
     await tester.pump();
     expect(queue.lastPayload?.containsKey('latitude'),isFalse);
