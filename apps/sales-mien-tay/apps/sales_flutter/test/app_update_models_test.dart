@@ -21,10 +21,11 @@ void main() {
     final wrongSigner=AndroidRelease.fromJson({...release,
       'signerSha256':List.filled(64,'c').join()});
     expect(wrongSigner.canUpgradeSafely(installed),isFalse);
-    final older=AndroidRelease.fromJson({...release,'versionCode':1});
-    // The release validator blocks non-release APKs before version comparison.
-    expect(older.versionCode,1);
-    expect(older.canUpgradeSafely(installed),isFalse);
+    final sameVersion=AndroidInstalledApp.fromJson({
+      'versionCode':2,'versionName':'1.0.0-rc.2',
+      'packageName':fieldWorkAndroidPackage,'signerSha256':signer,
+    });
+    expect(update.canUpgradeSafely(sameVersion),isFalse);
   });
   test('rejects foreign package, broken checksum, size and missing signature',(){
     for(final corrupted in [
