@@ -1,0 +1,160 @@
+name: Field Work Android signed release to private R2
+
+on:
+  workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: "Green Sales Miền Tây CI run ID for this exact main commit"
+        required: true
+        type: string
+      version_code:
+        description: "Expected pubspec Android versionCode"
+        required: true
+        type: string
+      release_notes:
+        description: "Notes visible to Field Work Android users"
+        required: true
+        type: string
+      publish_production:
+        description: "Publish to private R2 latest after full verification"
+        required: true
+        type: choice
+        options: ["no", "yes"]
+        default: "no"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: field-work-android-r2-production
+  cancel-in-progress: false
+
+jobs:
+  signed-release:
+    name: Android / Signed APK and verified immutable R2 release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/sales-mien-tay/apps/sales_flutter
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require exact green main CI before signing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_NAME: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+          VERIFIED_CI_RUN: ${{ inputs.ci_run_id }}
+          EXPECTED_BUILD_CODE: ${{ inputs.version_code }}
+          NOTES: ${{ inputs.release_notes }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, urllib.request
+          run=os.environ['VERIFIED_CI_RUN']
+          if not run.isascii() or not run.isdigit() or len(run)>18:
+              raise SystemExit('CI run id invalid')
+          req=urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['REPO_NAME']}/actions/runs/{run}",
+              headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],
+                       'Accept':'application/vnd.github+json'})
+          with urllib.request.urlopen(req,timeout=20) as res:
+              data=json.load(res)
+          if data.get('head_sha')!=os.environ['COMMIT_SHA'] or data.get('conclusion')!='success' or data.get('name')!='Sales Miền Tây CI':
+              raise SystemExit('CI is not green for exact release SHA')
+          pubspec=pathlib.Path('pubspec.yaml').read_text(encoding='utf8')
+          line=next(x for x in pubspec.splitlines() if x.startswith('version:'))
+          value=line.split(':',1)[1].strip()
+          if '+' not in value or value.rsplit('+',1)[1]!=os.environ['EXPECTED_BUILD_CODE']:
+              raise SystemExit('Version code does not match pubspec')
+          if len(os.environ['NOTES'])>2000:
+              raise SystemExit('Release notes too long')
+          print('CI and versionCode verified for signed release')
+          PY
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: flutter pub get
+      - name: Configure release keystore without logging or storing it in Git
+        env:
+          ENCODED_KEYSTORE: ${{ secrets.FIELD_WORK_ANDROID_KEYSTORE_BASE64 }}
+          FIELD_WORK_ANDROID_STORE_PASSWORD: ${{ secrets.FIELD_WORK_ANDROID_STORE_PASSWORD }}
+          FIELD_WORK_ANDROID_KEY_ALIAS: ${{ secrets.FIELD_WORK_ANDROID_KEY_ALIAS }}
+          FIELD_WORK_ANDROID_KEY_PASSWORD: ${{ secrets.FIELD_WORK_ANDROID_KEY_PASSWORD }}
+          CERT_PIN: ${{ secrets.FIELD_WORK_ANDROID_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          for var in ENCODED_KEYSTORE FIELD_WORK_ANDROID_STORE_PASSWORD FIELD_WORK_ANDROID_KEY_ALIAS FIELD_WORK_ANDROID_KEY_PASSWORD CERT_PIN; do
+            test -n "${!var}" || { echo "Missing protected release signing setting"; exit 1; }
+          done
+          printf '%s' "$ENCODED_KEYSTORE" | base64 --decode > "$RUNNER_TEMP/field-work-release.jks"
+          chmod 600 "$RUNNER_TEMP/field-work-release.jks"
+          echo "FIELD_WORK_ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/field-work-release.jks" >> "$GITHUB_ENV"
+          echo "FIELD_WORK_ANDROID_STORE_PASSWORD=$FIELD_WORK_ANDROID_STORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "FIELD_WORK_ANDROID_KEY_ALIAS=$FIELD_WORK_ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "FIELD_WORK_ANDROID_KEY_PASSWORD=$FIELD_WORK_ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
+      - name: Build signed release APK (never debug signing)
+        run: flutter build apk --release
+      - name: Verify APK package code and certificate with Android build tools
+        env:
+          EXPECTED_CERT: ${{ secrets.FIELD_WORK_ANDROID_CERT_SHA256 }}
+          EXPECTED_CODE: ${{ inputs.version_code }}
+        run: |
+          set -euo pipefail
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          test -s "$APK"
+          python3 - <<'PY'
+          import glob, os, pathlib, re, subprocess
+          root=os.environ['ANDROID_HOME']
+          tools=sorted(glob.glob(root+'/build-tools/*/apksigner'))
+          aapts=sorted(glob.glob(root+'/build-tools/*/aapt'))
+          if not tools or not aapts:
+              raise SystemExit('Android signature inspection tools missing')
+          apk='build/app/outputs/flutter-apk/app-release.apk'
+          result=subprocess.check_output([tools[-1],'verify','--print-certs',apk],text=True)
+          match=re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-fA-F:]+)',result)
+          if not match:
+              raise SystemExit('Certificate digest missing')
+          signer=match.group(1).lower().replace(':','')
+          expected=os.environ['EXPECTED_CERT'].lower().replace(':','')
+          if len(expected)!=64 or signer!=expected:
+              raise SystemExit('Signer is not the authorized release certificate')
+          badging=subprocess.check_output([aapts[-1],'dump','badging',apk],text=True)
+          package=re.search(r"package: name='([^']+)' versionCode='([^']+)'",badging)
+          if not package or package.group(1)!='com.example.sales_mien_tay' or package.group(2)!=os.environ['EXPECTED_CODE']:
+              raise SystemExit('APK packageId/versionCode mismatch')
+          print('Verified package, versionCode and release signing certificate')
+          pathlib.Path(os.environ['RUNNER_TEMP'],'field-work-signer.txt').write_text(signer)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: field-work-android-signed-${{ inputs.version_code }}
+          path: apps/sales-mien-tay/apps/sales_flutter/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
+      - name: Publish immutable APK and atomically advance private R2 latest
+        if: inputs.publish_production == 'yes'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.FIELD_WORK_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.FIELD_WORK_R2_SECRET_ACCESS_KEY }}
+          CF_ACCOUNT_ID: e29ec156139b3750d875a9c45ed477ec
+          EXPECTED_CODE: ${{ inputs.version_code }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          set -euo pipefail
+          test -n "$AWS_ACCESS_KEY_ID" && test -n "$AWS_SECRET_ACCESS_KEY" ||
+            { echo "Private R2 publisher credentials are not configured"; exit 1; }
+          python3 -m pip install --quiet 'boto3>=1.35,<2'
+          VERSION="$(sed -n 's/^version: //p' pubspec.yaml | head -n1 | cut -d+ -f1)"
+          SIGNER="$(cat "$RUNNER_TEMP/field-work-signer.txt")"
+          python3 ../../scripts/publish_android_release.py \
+            --apk build/app/outputs/flutter-apk/app-release.apk \
+            --version-code "$EXPECTED_CODE" --version-name "$VERSION" \
+            --signer-sha256 "$SIGNER" --notes "$RELEASE_NOTES"
+      - name: Remove keystore from runner
+        if: always()
+        run: rm -f "$RUNNER_TEMP/field-work-release.jks" "$RUNNER_TEMP/field-work-signer.txt"
