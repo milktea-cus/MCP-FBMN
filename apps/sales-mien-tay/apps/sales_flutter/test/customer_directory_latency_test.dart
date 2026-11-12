@@ -82,8 +82,10 @@ void main() {
     await tester.pumpWidget(directoryHarness(q,CustomerService(
       'https://example.test','',identity:'seller-a',client:client)));
     await tester.pump();await tester.pump();
-    expect(tester.widget<IconButton>(find.byTooltip('Gọi điện')).onPressed,isNull);
-    expect(tester.widget<IconButton>(find.byTooltip('Mở Zalo')).onPressed,isNull);
+    final call=find.byWidgetPredicate((w)=>w is IconButton&&w.tooltip=='Gọi điện');
+    final zalo=find.byWidgetPredicate((w)=>w is IconButton&&w.tooltip=='Mở Zalo');
+    expect(tester.widget<IconButton>(call).onPressed,isNull);
+    expect(tester.widget<IconButton>(zalo).onPressed,isNull);
     expect(find.text('Chỉ đường'),findsOneWidget);
     expect(tester.takeException(),isNull);
     await tester.pumpWidget(const SizedBox());
