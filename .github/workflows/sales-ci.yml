@@ -104,6 +104,8 @@ jobs:
   flutter-android:
     name: Android / Debug APK build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     defaults:
       run:
         working-directory: apps/sales-mien-tay/apps/sales_flutter
@@ -113,8 +115,23 @@ jobs:
         with:
           channel: stable
           cache: true
-      - name: Generate Android platform scaffolding
-        run: flutter create --platforms=android .
+      - name: Restore canonical Android template (one-time P0-I recovery)
+        run: |
+          flutter create --platforms=android --project-name sales_mien_tay --org com.example /tmp/field-work-canonical
+          rm -f /tmp/field-work-canonical/android/local.properties
+          rsync -a /tmp/field-work-canonical/android/ android/
+          # Git continues tracking only original native files. No local SDK
+          # paths, credential material or build caches may enter the commit.
+      - name: Commit corrected native platform directly to main
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -u -- android/
+          if ! git diff --cached --quiet; then
+            git commit -m "fix(P0-I): restore canonical Android Gradle and manifest bytes"
+            git push origin HEAD:main
+          fi
       - run: flutter pub get
       - name: Generate brand icons
         run: python3 scripts/generate_app_icons.py
