@@ -282,6 +282,10 @@ void main(){
     queue.dispose();
   });
   testWidgets('P0-F GPS consent refusal cannot save a fake position',(tester)async{
+    tester.view.devicePixelRatio=1;
+    tester.view.physicalSize=const Size(390,1900);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final queue=CoverSelectionProbe();
     await tester.pumpWidget(MaterialApp(home:CustomerEditor(
       service:FakeService(),customer:customer(),queue:queue,
