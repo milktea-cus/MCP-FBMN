@@ -12,6 +12,7 @@ import 'offline_queue.dart';
 import 'customer_categories.dart';
 import 'customer_assortment.dart';
 import 'theme.dart';
+import 'customer_location.dart';
 import 'survey_media.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -27,9 +28,11 @@ Uri? customerCallUri(String? raw) {
 class FieldCustomer {
   final String id, name, address, province, district, category, status;
   final String? phone, contact, note, owner, code, fieldCode;
-  final double? latitude, longitude;
+  final double? latitude, longitude, locationAccuracy;
+  final String? locationSource, locationRecordedBy;
+  final DateTime? locationRecordedAt;
   final int version;
-  Map<String,dynamic> toJson()=>{'id':id,'owner_sub':owner,'name':name,'code':code,'field_code':fieldCode,'address_line':address,'province':province,'district':district,'category':category,'status':status,'phone':phone,'contact_name':contact,'note':note,'latitude':latitude,'longitude':longitude,'version':version};
+  Map<String,dynamic> toJson()=>{'id':id,'owner_sub':owner,'name':name,'code':code,'field_code':fieldCode,'address_line':address,'province':province,'district':district,'category':category,'status':status,'phone':phone,'contact_name':contact,'note':note,'latitude':latitude,'longitude':longitude,'location_accuracy_m':locationAccuracy,'location_source':locationSource,'location_recorded_by':locationRecordedBy,'location_recorded_at':locationRecordedAt?.toIso8601String(),'version':version};
   FieldCustomer.fromJson(Map<String, dynamic> j)
       : id = j['id'].toString(), name = j['name'].toString(),
         owner = j['owner_sub'] as String?, code = j['code'] as String?,fieldCode=j['field_code'] as String?, address = j['address_line'].toString(), province = j['province'].toString(),
@@ -38,6 +41,10 @@ class FieldCustomer {
         contact = j['contact_name'] as String?, note = j['note'] as String?,
         latitude = (j['latitude'] as num?)?.toDouble(),
         longitude = (j['longitude'] as num?)?.toDouble(),
+        locationAccuracy = (j['location_accuracy_m'] as num?)?.toDouble(),
+        locationSource=j['location_source'] as String?,
+        locationRecordedBy=j['location_recorded_by'] as String?,
+        locationRecordedAt=DateTime.tryParse(j['location_recorded_at']?.toString()??''),
         version = (j['version'] as num?)?.toInt() ?? 1;
 }
 
@@ -86,11 +93,16 @@ class CustomerService {
     return items;
   }
   Future<FieldCustomer> add(Map<String, dynamic> data) async {
-    final res = await http.post(uri('/api/v1/customers'), headers: headers, body: jsonEncode(data));
+    final url=uri('/api/v1/customers');
+    final res=await (client?.post(url, headers:headers, body:jsonEncode(data)) ??
+      http.post(url, headers:headers, body:jsonEncode(data))).timeout(const Duration(seconds:30));
     return FieldCustomer.fromJson(decode(res, 201)['item'] as Map<String, dynamic>);
   }
   Future<FieldCustomer> update(FieldCustomer customer, Map<String,dynamic> data) async {
-    final res=await http.patch(uri('/api/v1/customers/${customer.id}'),headers:headers,body:jsonEncode({...data,'version':customer.version})).timeout(const Duration(seconds:30));
+    final url=uri('/api/v1/customers/${customer.id}');
+    final payload=jsonEncode({...data,'version':customer.version});
+    final res=await (client?.patch(url,headers:headers,body:payload) ??
+      http.patch(url,headers:headers,body:payload)).timeout(const Duration(seconds:30));
     return FieldCustomer.fromJson(decode(res)['item'] as Map<String,dynamic>);
   }
   Future<void> checkin(String customerId, Position pos, String ref) async {
@@ -166,6 +178,25 @@ Future<Position> captureGps(BuildContext context) async {
   return Geolocator.getCurrentPosition(locationSettings: const LocationSettings(
       accuracy: LocationAccuracy.high, timeLimit: Duration(seconds: 20)));
 }
+
+/// Directions do not check-in or write to the customer/visit database.
+Future<void> openCustomerDirections(BuildContext context,FieldCustomer customer)async{
+  final point=customerCoordinatesValid(customer.latitude,customer.longitude)
+    ?CustomerMapPoint(customer.latitude!,customer.longitude!):null;
+  final address='${customer.address}, ${customer.district}, ${customer.province}, Việt Nam';
+  final ok=await launchCustomerMap(customerDirectionsUri(point:point,address:address));
+  if(!ok&&context.mounted){
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content:Text('Không mở được Google Maps. Kiểm tra ứng dụng bản đồ hoặc trình duyệt.')));
+  }
+}
+
+String customerLocationLabel(String? source)=>switch(source){
+  'gps'=>'GPS thiết bị (không phải check-in)',
+  'manual'=>'Nhập tọa độ thủ công',
+  'map_link'=>'Từ liên kết bản đồ',
+  _=>'Chưa rõ nguồn · mốc cũ được bảo vệ',
+};
 
 class CustomerDirectoryPage extends StatefulWidget {
   final CustomerService service;
@@ -273,15 +304,31 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
       : ListView.builder(itemCount: customers.length, itemBuilder: (ctx,i) {
         final c = customers[i];
         final category = CustomerCategory.fromId(c.category);
-        return Card(child: ListTile(
-          leading: CustomerCategoryAvatar(category:c.category),
-          title: Text(c.name,maxLines:2,overflow:TextOverflow.ellipsis),
-          subtitle: Text('${c.fieldCode??'Đang cấp mã'} · ${category.label} · ${c.district}, ${c.province} · ${c.address}',
-            maxLines:3,overflow:TextOverflow.ellipsis),
-          trailing: c.owner!=widget.service.identity?const Icon(Icons.chevron_right):IconButton(tooltip:'Sửa thông tin',icon:const Icon(Icons.edit_outlined),onPressed:() async {final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>CustomerEditor(service:widget.service,regions:widget.regions,customer:c,queue:widget.queue)));if(changed==true&&mounted)refresh();}),
-          onTap: () async {final changed=await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) =>
-            CustomerDetail(service: widget.service, customer: c,regions:widget.regions,queue:widget.queue)));if(changed==true&&mounted)refresh();},
-        ));
+        final hasGps=customerCoordinatesValid(c.latitude,c.longitude);
+        return Card(child:Column(children:[
+          ListTile(
+            leading: CustomerCategoryAvatar(category:c.category),
+            title: Text(c.name,maxLines:2,overflow:TextOverflow.ellipsis),
+            subtitle: Text('${c.fieldCode??'Đang cấp mã'} · ${category.label} · ${c.district}, ${c.province} · ${c.address}',
+              maxLines:3,overflow:TextOverflow.ellipsis),
+            trailing: c.owner!=widget.service.identity?const Icon(Icons.chevron_right):IconButton(
+              tooltip:'Sửa thông tin',icon:const Icon(Icons.edit_outlined),onPressed:() async {
+                final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>
+                  CustomerEditor(service:widget.service,regions:widget.regions,customer:c,queue:widget.queue)));
+                if(changed==true&&mounted)refresh();
+              }),
+            onTap: () async {final changed=await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) =>
+              CustomerDetail(service: widget.service, customer: c,regions:widget.regions,queue:widget.queue)));
+              if(changed==true&&mounted)refresh();},
+          ),
+          Padding(padding:const EdgeInsets.fromLTRB(14,0,10,4),child:Row(children:[
+            Expanded(child:Text(hasGps?customerLocationLabel(c.locationSource):'Chưa có GPS · tìm theo địa chỉ',
+              maxLines:1,overflow:TextOverflow.ellipsis,style:Theme.of(context).textTheme.labelSmall)),
+            TextButton.icon(onPressed:()=>openCustomerDirections(context,c),
+              icon:const Icon(Icons.directions_outlined,size:18),
+              label:const Text('Chỉ đường')),
+          ])),
+        ]));
       })),
     ]);
     });
@@ -300,19 +347,182 @@ class _CustomerEditorState extends State<CustomerEditor> {
   final key = GlobalKey<FormState>();
   final name = TextEditingController(), address = TextEditingController(), contact = TextEditingController(),
     phone = TextEditingController(), note = TextEditingController(), companyCode = TextEditingController();
+  final latitudeInput=TextEditingController(),longitudeInput=TextEditingController(),
+    mapsInput=TextEditingController();
   final clientRef = const Uuid().v4();
   String? province, district;
   String category = 'tap_hoa';
-  Position? position;
+  String locationMode='gps';
+  CustomerMapPoint? confirmedPoint;
+  String? confirmedSource;
+  double? confirmedAccuracy;
+  bool locationDraftDirty=false;
   XFile? photo;
   bool saving = false;
   String? error;
-  @override void initState(){super.initState();final c=widget.customer;if(c!=null){name.text=c.name;companyCode.text=c.code??'';address.text=c.address;contact.text=c.contact??'';phone.text=c.phone??'';note.text=c.note??'';province=c.province;district=c.district;category=CustomerCategory.fromId(c.category).id;}}
-  @override void dispose() {name.dispose(); address.dispose();contact.dispose();phone.dispose();note.dispose();companyCode.dispose();super.dispose();}
-  Future<void> gps() async {
-    try {final p = await captureGps(context); if (mounted) setState(() {position = p; error = null;});}
-    catch (e) {if (mounted) setState(() => error = e.toString());}
+  CustomerMapPoint? get existingPoint{
+    final c=widget.customer;
+    return c!=null&&customerCoordinatesValid(c.latitude,c.longitude)
+      ?CustomerMapPoint(c.latitude!,c.longitude!):null;
   }
+  bool get protectedPoint=>existingPoint!=null &&
+    (widget.customer?.locationSource==null||widget.customer?.locationSource=='gps');
+  @override void initState(){
+    super.initState();
+    final c=widget.customer;
+    if(c!=null){
+      name.text=c.name;companyCode.text=c.code??'';address.text=c.address;
+      contact.text=c.contact??'';phone.text=c.phone??'';note.text=c.note??'';
+      province=c.province;district=c.district;
+      category=CustomerCategory.fromId(c.category).id;
+      if(c.locationSource=='manual'||c.locationSource=='map_link'){
+        locationMode=c.locationSource!;
+      }
+      if(customerCoordinatesValid(c.latitude,c.longitude)){
+        latitudeInput.text=c.latitude!.toString();
+        longitudeInput.text=c.longitude!.toString();
+      }
+    }
+  }
+  @override void dispose(){
+    for(final c in [name,address,contact,phone,note,companyCode,
+      latitudeInput,longitudeInput,mapsInput]){c.dispose();}
+    super.dispose();
+  }
+  void _setLocationMode(String mode){
+    if((mode=='manual'||mode=='map_link')&&protectedPoint)return;
+    setState((){
+      locationMode=mode;
+      confirmedPoint=null;confirmedSource=null;confirmedAccuracy=null;
+      locationDraftDirty=false;error=null;
+    });
+  }
+  Future<void> _confirmLocation(CustomerMapPoint point,String source,{double? accuracy})async{
+    if(!customerCoordinatesValid(point.latitude,point.longitude)){
+      setState(()=>error='Vĩ độ hoặc kinh độ không hợp lệ');
+      return;
+    }
+    final old=existingPoint;
+    final replacing=old!=null&&(old.latitude!=point.latitude||old.longitude!=point.longitude||
+      source!=widget.customer?.locationSource);
+    final accepted=await showDialog<bool>(context:context,builder:(dialogContext)=>AlertDialog(
+      title:const Text('Xem trước vị trí điểm bán'),
+      content:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
+        Text('Tọa độ mới: ${point.label}'),
+        const SizedBox(height:8),
+        Text('Nguồn: ${customerLocationLabel(source)}'),
+        if(old!=null)Text('Tọa độ đang lưu: ${old.label}'),
+        if(replacing)const Padding(padding:EdgeInsets.only(top:8),
+          child:Text('Vị trí đang lưu sẽ chỉ được thay sau khi anh xác nhận.')),
+        const SizedBox(height:8),
+        const Text('Tôi xác nhận đã được phép lưu vị trí này. Tọa độ nhập tay/link không phải GPS check-in.'),
+      ]),
+      actions:[
+        TextButton(onPressed:()=>Navigator.pop(dialogContext,false),child:const Text('Hủy')),
+        TextButton.icon(onPressed:()async{
+          final ok=await launchCustomerMap(customerPreviewUri(point));
+          if(!ok&&dialogContext.mounted){
+            ScaffoldMessenger.of(dialogContext).showSnackBar(
+              const SnackBar(content:Text('Không mở được bản đồ. Có thể xác nhận tọa độ khi ngoại tuyến.')));
+          }
+        },icon:const Icon(Icons.map_outlined),label:const Text('Xem trên Maps')),
+        FilledButton(onPressed:()=>Navigator.pop(dialogContext,true),
+          child:const Text('Xác nhận vị trí')),
+      ],
+    ));
+    if(!mounted)return;
+    if(accepted==true){
+      setState((){
+        confirmedPoint=point;confirmedSource=source;
+        confirmedAccuracy=source=='gps'?accuracy:null;
+        locationDraftDirty=false;error=null;
+      });
+    }
+  }
+  Future<void> gps() async {
+    try {
+      final p=await captureGps(context);
+      if(mounted)await _confirmLocation(CustomerMapPoint(p.latitude,p.longitude),'gps',accuracy:p.accuracy);
+    }catch(e){if(mounted)setState(()=>error='$e');}
+  }
+  Future<void> previewEnteredLocation()async{
+    try{
+      final point=locationMode=='manual'
+        ?customerManualPoint(latitudeInput.text,longitudeInput.text)
+        :parseCustomerMapLink(mapsInput.text);
+      if(point==null)throw const FormatException('Vĩ độ/kinh độ không hợp lệ. Dùng dấu chấm thập phân.');
+      await _confirmLocation(point,locationMode);
+    }catch(e){
+      if(mounted)setState(()=>error=e is FormatException?e.message:'$e');
+    }
+  }
+  Widget locationInputs(){
+    final previous=existingPoint;
+    return Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(
+      crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+      Text('Vị trí điểm bán',style:Theme.of(context).textTheme.titleMedium),
+      if(previous!=null)...[
+        const SizedBox(height:8),
+        Text('Đang lưu: ${previous.label}'),
+        Text(customerLocationLabel(widget.customer?.locationSource),
+          style:Theme.of(context).textTheme.bodySmall),
+      ],
+      if(protectedPoint)Padding(padding:const EdgeInsets.only(top:8),
+        child:Text('Mốc GPS hiện có được bảo vệ. Chỉ thay bằng GPS thiết bị mới sau khi xác nhận.',
+          style:Theme.of(context).textTheme.bodySmall)),
+      const SizedBox(height:10),
+      Wrap(spacing:6,runSpacing:6,children:[
+        ChoiceChip(label:const Text('Lấy GPS'),selected:locationMode=='gps',
+          onSelected:(_)=>_setLocationMode('gps')),
+        ChoiceChip(label:const Text('Nhập tọa độ'),selected:locationMode=='manual',
+          onSelected:protectedPoint?null:(_)=>_setLocationMode('manual')),
+        ChoiceChip(label:const Text('Dán link Maps'),selected:locationMode=='map_link',
+          onSelected:protectedPoint?null:(_)=>_setLocationMode('map_link')),
+      ]),
+      const SizedBox(height:10),
+      if(locationMode=='gps')OutlinedButton.icon(onPressed:gps,
+        icon:const Icon(Icons.my_location_outlined),
+        label:const Text('Lấy GPS thiết bị và xem trước')),
+      if(locationMode=='manual')...[
+        Row(children:[
+          Expanded(child:TextFormField(key:const Key('customer-location-lat'),controller:latitudeInput,
+            keyboardType:const TextInputType.numberWithOptions(decimal:true,signed:true),
+            decoration:const InputDecoration(labelText:'Vĩ độ (-90 đến 90)'),
+            onChanged:(_)=>setState((){locationDraftDirty=true;confirmedPoint=null;}))),
+          const SizedBox(width:8),
+          Expanded(child:TextFormField(key:const Key('customer-location-lon'),controller:longitudeInput,
+            keyboardType:const TextInputType.numberWithOptions(decimal:true,signed:true),
+            decoration:const InputDecoration(labelText:'Kinh độ (-180 đến 180)'),
+            onChanged:(_)=>setState((){locationDraftDirty=true;confirmedPoint=null;}))),
+        ]),
+        const SizedBox(height:8),
+        OutlinedButton.icon(onPressed:previewEnteredLocation,
+          icon:const Icon(Icons.visibility_outlined),label:const Text('Xem trước tọa độ')),
+      ],
+      if(locationMode=='map_link')...[
+        TextFormField(key:const Key('customer-location-link'),controller:mapsInput,maxLength:2048,
+          keyboardType:TextInputType.url,
+          decoration:const InputDecoration(labelText:'Dán link Google Maps',
+            hintText:'https://www.google.com/maps/...'),
+          onChanged:(_)=>setState((){locationDraftDirty=true;confirmedPoint=null;})),
+        OutlinedButton.icon(onPressed:previewEnteredLocation,
+          icon:const Icon(Icons.visibility_outlined),label:const Text('Đọc link và xem trước')),
+        Text('Link rút gọn cần mở lấy link đầy đủ; hệ thống không tự theo redirect.',
+          style:Theme.of(context).textTheme.bodySmall),
+      ],
+      if(confirmedPoint!=null)...[
+        const SizedBox(height:8),
+        Text('Đã xác nhận: ${confirmedPoint!.label}',
+          style:TextStyle(color:Theme.of(context).colorScheme.primary,fontWeight:FontWeight.w600)),
+        Text('Nguồn: ${customerLocationLabel(confirmedSource)}',
+          style:Theme.of(context).textTheme.bodySmall),
+      ],
+      if(previous==null&&confirmedPoint==null)
+        Text('Chưa ghi tọa độ · có thể lưu khách hàng trước và bổ sung sau.',
+          style:Theme.of(context).textTheme.bodySmall),
+    ])));
+  }
+
   Future<void> choosePhoto() async {
     try {final x = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1600, imageQuality: 80);
       if (x != null && mounted) setState(() {photo = x; error = null;});}
@@ -320,6 +530,10 @@ class _CustomerEditorState extends State<CustomerEditor> {
   }
   Future<void> save() async {
     if(saving)return;
+    if(locationDraftDirty&&confirmedPoint==null){
+      setState(()=>error='Hãy xem trước và xác nhận tọa độ trước khi lưu.');
+      return;
+    }
     if (!key.currentState!.validate() || province == null || district == null) {
       setState(() => error = 'Vui lòng điền thông tin và chọn tỉnh/huyện'); return;
     }
@@ -329,7 +543,14 @@ class _CustomerEditorState extends State<CustomerEditor> {
         'address_line':address.text.trim(),'contact_name':contact.text.trim().isEmpty?null:contact.text.trim(),
         'phone':phone.text.trim().isEmpty?null:phone.text.trim(),'note':note.text.trim().isEmpty?null:note.text.trim(),
         'province':province,'district':district,'category':category,
-        if(widget.customer==null||position!=null)...{'location_consent':position != null,'latitude':position?.latitude,'longitude':position?.longitude,'location_accuracy_m':position?.accuracy}};
+        if(confirmedPoint!=null)...{
+          'location_consent':true,
+          'latitude':confirmedPoint!.latitude,
+          'longitude':confirmedPoint!.longitude,
+          'location_accuracy_m':confirmedSource=='gps'?confirmedAccuracy:null,
+          'location_source':confirmedSource,
+          if(existingPoint!=null)'location_override_confirmed':true,
+        }};
       if(widget.queue!=null){
         final compressed=photo==null?null:compressSurveyMedia(await photo!.readAsBytes());
         await widget.queue!.enqueue(widget.customer==null?'/api/v1/customers':'/api/v1/customers/${widget.customer!.id}',{...data,if(widget.customer!=null)'version':widget.customer!.version,'client_ref':clientRef},
@@ -388,7 +609,7 @@ class _CustomerEditorState extends State<CustomerEditor> {
       const SizedBox(height:12),
       TextFormField(controller:note,maxLines:3,decoration:const InputDecoration(labelText:'Ghi chú')),
       const SizedBox(height:12),
-      OutlinedButton.icon(onPressed:gps,icon:const Icon(Icons.location_on_outlined),label:Text(position==null?'Lấy GPS điểm bán':'GPS: ${position!.latitude.toStringAsFixed(5)}, ${position!.longitude.toStringAsFixed(5)}')),
+      locationInputs(),
       OutlinedButton.icon(onPressed:choosePhoto,icon:const Icon(Icons.photo_camera_outlined),
         label:Text(photo==null?'Chọn ảnh điểm bán':'Đã chọn: ${photo!.name}')),
       if(error!=null)Padding(padding:const EdgeInsets.all(8),child:Text(error!,style:const TextStyle(color:Colors.red))),
@@ -570,7 +791,7 @@ class _CustomerDetailState extends State<CustomerDetail> {
       :'${c.address}, ${c.district}, ${c.province}, Việt Nam';
     final uri=Uri.https('www.google.com','/maps/search/',{'api':'1','query':query});
     try{
-      if(!await launchUrl(uri,mode:LaunchMode.externalApplication))throw StateError('Không mở được bản đồ');
+      if(!await launchCustomerMap(uri))throw StateError('Không mở được bản đồ');
     }catch(e){if(mounted)setState(()=>message='$e');}
   }
   Widget _section(String title,IconData icon,Widget child)=>Card(
@@ -751,7 +972,15 @@ class _CustomerDetailState extends State<CustomerDetail> {
                 crossAxisAlignment:CrossAxisAlignment.stretch,children:[
                   _line(Icons.map_outlined,'Tỉnh/TP · Quận/Huyện','${c.province} · ${c.district}'),
                   _line(Icons.place_outlined,'Địa chỉ chi tiết',c.address),
-                  _line(Icons.gps_fixed_outlined,'GPS',gps),
+                  _line(Icons.gps_fixed_outlined,'Tọa độ',gps),
+                  _line(Icons.info_outline,'Nguồn vị trí',c.latitude==null||c.longitude==null
+                    ?'Chưa ghi GPS · tìm theo địa chỉ':customerLocationLabel(c.locationSource)),
+                  const SizedBox(height:8),
+                  OutlinedButton.icon(onPressed:()=>openCustomerDirections(context,c),
+                    icon:const Icon(Icons.directions_outlined),label:const Text('Chỉ đường')),
+                  if(c.latitude==null||c.longitude==null)
+                    Text('Chưa có tọa độ xác minh, Google Maps sẽ tìm theo địa chỉ.',
+                      style:Theme.of(context).textTheme.bodySmall),
                 ],
               )),
               if(!own)const Padding(padding:EdgeInsets.all(8),

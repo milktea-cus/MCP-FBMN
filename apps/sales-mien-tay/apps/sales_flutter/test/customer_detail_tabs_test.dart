@@ -53,14 +53,26 @@ class CoverSelectionProbe extends OfflineQueue {
   CoverSelectionProbe()
     :super(Disconnected(),'sales-1','scope-1',factory:newIdbFactoryMemory());
   String? lastPhotoId,lastPath,lastMethod;
+  Map<String,dynamic>? lastPayload;
   @override
   Future<void> enqueue(String path,Map<String,dynamic> data,{
     Uint8List? photo,Uint8List? thumbnail,String? sha256,
     String? thumbnailSha256,String? mime,String method='POST',
   })async{
     lastPath=path;
+    lastPayload=Map<String,dynamic>.from(data);
     lastPhotoId=data['photo_id']?.toString();
     lastMethod=method;
+  }
+}
+
+class FakeDirectoryService extends FakeService {
+  @override Future<List<FieldCustomer>> list({
+    void Function(List<FieldCustomer> partial)? onPage,
+  })async{
+    final rows=[customer()];
+    onPage?.call(rows);
+    return rows;
   }
 }
 
@@ -206,6 +218,107 @@ void main(){
     await tester.pumpWidget(const SizedBox.shrink());
     queue.dispose();
   });
+
+  testWidgets('P0-F customer editor previews manual point then stores provenance offline',(tester)async{
+    tester.view.devicePixelRatio=1;
+    tester.view.physicalSize=const Size(390,900);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final queue=CoverSelectionProbe();
+    await tester.pumpWidget(MaterialApp(home:CustomerEditor(
+      service:FakeService(),customer:customer(),queue:queue,
+      regions:const RegionCatalog({'Tiền Giang':['Mỹ Tho']}))));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Nhập tọa độ'));
+    await tester.tap(find.text('Nhập tọa độ'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('customer-location-lat')));
+    await tester.enterText(find.byKey(const Key('customer-location-lat')),'10.345');
+    await tester.enterText(find.byKey(const Key('customer-location-lon')),'106.123');
+    await tester.ensureVisible(find.text('Xem trước tọa độ'));
+    await tester.tap(find.text('Xem trước tọa độ'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Tọa độ mới: 10.345000, 106.123000'),findsOneWidget);
+    await tester.tap(find.text('Xác nhận vị trí'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Lưu điểm bán'));
+    await tester.tap(find.text('Lưu điểm bán'));
+    await tester.pump();
+    expect(queue.lastPath,'/api/v1/customers/$customerId');
+    expect(queue.lastMethod,'PATCH');
+    expect(queue.lastPayload?['location_source'],'manual');
+    expect(queue.lastPayload?['location_consent'],isTrue);
+    expect(queue.lastPayload?['latitude'],10.345);
+    expect(queue.lastPayload?['longitude'],106.123);
+    expect(queue.lastPayload?['location_accuracy_m'],isNull);
+    expect(queue.lastPayload?.containsKey('location_override_confirmed'),isFalse);
+    await tester.pumpWidget(const SizedBox.shrink());
+    queue.dispose();
+  });
+  testWidgets('P0-F protected GPS cannot be replaced with manual/link',(tester)async{
+    final existing=FieldCustomer.fromJson({
+      ...customer().toJson(),'latitude':10.35,'longitude':106.36,
+      'location_source':'gps','location_accuracy_m':17.0,
+    });
+    final queue=CoverSelectionProbe();
+    await tester.pumpWidget(MaterialApp(home:CustomerEditor(
+      service:FakeService(),customer:existing,queue:queue,
+      regions:const RegionCatalog({'Tiền Giang':['Mỹ Tho']}))));
+    await tester.pumpAndSettle();
+    final manual=tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip,'Nhập tọa độ'));
+    final link=tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip,'Dán link Maps'));
+    expect(manual.onSelected,isNull);
+    expect(link.onSelected,isNull);
+    await tester.ensureVisible(find.text('Lưu điểm bán'));
+    await tester.tap(find.text('Lưu điểm bán'));
+    await tester.pump();
+    expect(queue.lastPayload?.containsKey('latitude'),isFalse);
+    expect(queue.lastPayload?.containsKey('longitude'),isFalse);
+    expect(queue.lastPayload?.containsKey('location_source'),isFalse);
+    await tester.pumpWidget(const SizedBox.shrink());
+    queue.dispose();
+  });
+  testWidgets('P0-F GPS consent refusal cannot save a fake position',(tester)async{
+    final queue=CoverSelectionProbe();
+    await tester.pumpWidget(MaterialApp(home:CustomerEditor(
+      service:FakeService(),customer:customer(),queue:queue,
+      regions:const RegionCatalog({'Tiền Giang':['Mỹ Tho']}))));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Lấy GPS thiết bị và xem trước'));
+    await tester.tap(find.text('Lấy GPS thiết bị và xem trước'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sử dụng vị trí'),findsOneWidget);
+    await tester.tap(find.text('Không'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Lưu điểm bán'));
+    await tester.tap(find.text('Lưu điểm bán'));
+    await tester.pump();
+    expect(queue.lastPayload?.containsKey('latitude'),isFalse);
+    await tester.pumpWidget(const SizedBox.shrink());
+    queue.dispose();
+  });
+  testWidgets('P0-F directory directions use address with no GPS',(tester)async{
+    tester.view.devicePixelRatio=1;
+    tester.view.physicalSize=const Size(360,760);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final original=UrlLauncherPlatform.instance;
+    final launcher=CaptureDialLauncher();
+    UrlLauncherPlatform.instance=launcher;
+    addTearDown(()=>UrlLauncherPlatform.instance=original);
+    await tester.pumpWidget(MaterialApp(home:Scaffold(body:CustomerDirectoryPage(
+      service:FakeDirectoryService(),
+      regions:const RegionCatalog({'Tiền Giang':['Mỹ Tho']})))));
+    await tester.pumpAndSettle();
+    expect(find.text('Chưa có GPS · tìm theo địa chỉ'),findsOneWidget);
+    await tester.tap(find.text('Chỉ đường'));
+    await tester.pump();
+    expect(launcher.lastUrl,contains('maps/dir/'));
+    expect(Uri.parse(launcher.lastUrl!).queryParameters['destination'],
+      contains('2 Lê Lợi'));
+    expect(tester.takeException(),isNull);
+  });
+
   test('cover selection uses a durable account-scoped PATCH operation',()async{
     final factory=newIdbFactoryMemory();
     final queue=OfflineQueue(Disconnected(),'sales-1','scope-1',factory:factory);

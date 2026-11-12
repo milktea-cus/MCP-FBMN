@@ -171,7 +171,9 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
    SELECT ${id}::uuid,c.id,${actor.sub},c.province,c.district,${rid}::uuid,${tid}::uuid,${started}::timestamptz,${v.latitude as number},${v.longitude as number},${v.accuracy_m as number},${distance},${first}
    FROM eligible c ON CONFLICT(id) DO NOTHING RETURNING *
   ), initialized AS (
-   UPDATE customers c SET latitude=s.latitude,longitude=s.longitude,location_accuracy_m=s.accuracy_m,location_consent=true,version=c.version+1,updated_at=now()
+   UPDATE customers c SET latitude=s.latitude,longitude=s.longitude,location_accuracy_m=s.accuracy_m,location_consent=true,
+      location_source='gps',location_recorded_by=s.owner_sub,location_recorded_at=s.started_at,
+      version=c.version+1,updated_at=now()
    FROM created s WHERE c.id=s.customer_id AND s.location_initialized AND c.latitude IS NULL AND c.longitude IS NULL RETURNING c.id
   ), gps AS (
    INSERT INTO field_visits(customer_id,owner_sub,client_ref,checkin_at,latitude,longitude,accuracy_m,distance_m,note)

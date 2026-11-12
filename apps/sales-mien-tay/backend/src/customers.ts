@@ -72,9 +72,16 @@ function dataError(data: ObjectBody) {
     return 'Loại điểm bán không hợp lệ';
   if (data.status !== undefined && !['active', 'inactive', 'potential'].includes(String(data.status)))
     return 'Trạng thái không hợp lệ';
+  if (data.location_source !== null && data.location_source !== undefined &&
+    !['gps','manual','map_link'].includes(String(data.location_source)))return 'Nguồn tọa độ không hợp lệ';
   if ((data.latitude !== null && data.latitude !== undefined) || (data.longitude !== null && data.longitude !== undefined)) {
     if (!point(data.latitude, data.longitude, data.location_accuracy_m)) return 'Tọa độ không hợp lệ';
     if (data.location_consent !== true) return 'Chưa xác nhận quyền dùng vị trí';
+    if(data.location_source!==null&&data.location_source!==undefined&&
+       data.location_source!=='gps'&&data.location_accuracy_m!==null&&data.location_accuracy_m!==undefined)
+      return 'Tọa độ nhập tay/link không được mang sai số GPS';
+  } else if(data.location_source!==null&&data.location_source!==undefined) {
+    return 'Nguồn vị trí cần có đủ vĩ độ và kinh độ';
   }
   return null;
 }
@@ -97,7 +104,8 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       if (!Number.isInteger(limit) || !Number.isInteger(offset)) return fail('Pagination không hợp lệ');
       const rows = await db`SELECT c.id,c.client_ref,c.owner_sub,c.name,c.code,c.field_code,c.category,
           c.contact_name,c.phone,c.address_line,c.province,c.district,c.latitude,c.longitude,
-          c.location_accuracy_m,c.location_consent,c.note,c.status,c.version,c.created_at,c.updated_at
+          c.location_accuracy_m,c.location_consent,c.location_source,c.location_recorded_by,c.location_recorded_at,
+           c.note,c.status,c.version,c.created_at,c.updated_at
         FROM customers c WHERE public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)
           AND (${!url.searchParams.get('province')} OR c.province=${url.searchParams.get('province')??''})
         ORDER BY c.updated_at DESC,c.id DESC LIMIT ${limit} OFFSET ${offset}`;
@@ -113,10 +121,14 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       const code=optional(data.code,80),contact=optional(data.contact_name),phone=optional(data.phone,20),note=optional(data.note,2000);
       const lat=data.latitude as number|null|undefined,lon=data.longitude as number|null|undefined,acc=data.location_accuracy_m as number|null|undefined;
       const consent=data.location_consent===true;
+      const hasPoint=lat!==null&&lat!==undefined&&lon!==null&&lon!==undefined;
+      const source=hasPoint?(data.location_source??(acc!==null&&acc!==undefined?'gps':null)):null;
       const rows=await db`INSERT INTO customers(client_ref,owner_sub,name,code,category,contact_name,phone,
-          address_line,province,district,latitude,longitude,location_accuracy_m,location_consent,note,status)
+          address_line,province,district,latitude,longitude,location_accuracy_m,location_consent,
+          location_source,location_recorded_by,location_recorded_at,note,status)
         SELECT ${String(data.client_ref)}::uuid,${actor.sub},${name},${code},${data.category??'tap_hoa'},${contact},${phone},
-          ${address},${province},${district},${lat??null},${lon??null},${acc??null},${consent},${note},${data.status??'active'}
+          ${address},${province},${district},${lat??null},${lon??null},${acc??null},${consent},
+          ${source},${hasPoint?actor.sub:null},${hasPoint?new Date().toISOString():null}::timestamptz,${note},${data.status??'active'}
         WHERE public.sales_can_access(${actor.sub},${actor.sub},${province},${district})
         ON CONFLICT(owner_sub,client_ref) DO NOTHING RETURNING *`;
       const existing=rows.length?rows:await db`SELECT * FROM customers WHERE owner_sub=${actor.sub} AND client_ref=${String(data.client_ref)}::uuid AND public.sales_can_access(${actor.sub},owner_sub,province,district)`;
@@ -142,10 +154,31 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
     const error=dataError(merged);if(error)return fail(error);
     const province=String(merged.province),district=String(merged.district);
     if(!await inScope(db,actor,province,district))return fail('Không có quyền địa bàn',403);
+    const requestedLocation=data.latitude!==undefined||data.longitude!==undefined||
+      data.location_source!==undefined;
+    const newSource=data.location_source===undefined?current.location_source:data.location_source;
+    const locationChanged=requestedLocation&&
+      (merged.latitude!==current.latitude||merged.longitude!==current.longitude||
+       newSource!==current.location_source);
+    if(locationChanged){
+      if(!point(merged.latitude,merged.longitude,merged.location_accuracy_m)||data.location_consent!==true)
+        return fail('Cần tọa độ hợp lệ và xác nhận quyền lưu vị trí',400);
+      if((newSource==='manual'||newSource==='map_link')&&merged.location_accuracy_m!=null)
+        return fail('Nguồn nhập tay/link không được mang sai số GPS');
+      if(current.latitude!==null&&current.longitude!==null){
+        if(data.location_override_confirmed!==true)
+          return fail('Mốc hiện có được bảo vệ. Cần xác nhận thay đổi vị trí.',409);
+        if((current.location_source===null||current.location_source==='gps')&&newSource!=='gps')
+          return fail('Mốc GPS hiện có chỉ được thay bằng GPS thiết bị đã xác nhận',409);
+      }
+    }
     const rows=await db`UPDATE customers SET name=${str(merged.name)!},code=${optional(merged.code,80)},category=${merged.category},
         contact_name=${optional(merged.contact_name)},phone=${optional(merged.phone,20)},address_line=${str(merged.address_line,500)!},
         province=${province},district=${district},latitude=${merged.latitude??null},longitude=${merged.longitude??null},
         location_accuracy_m=${merged.location_accuracy_m??null},location_consent=${merged.location_consent===true},
+        location_source=${newSource??null},
+        location_recorded_by=CASE WHEN ${locationChanged} THEN ${actor.sub} ELSE location_recorded_by END,
+        location_recorded_at=CASE WHEN ${locationChanged} THEN now() ELSE location_recorded_at END,
         note=${optional(merged.note,2000)},status=${merged.status},last_mutation_ref=${data.client_ref??null}::uuid,version=version+1,updated_at=now()
       WHERE id=${id}::uuid AND version=${data.version as number} AND public.sales_can_access(${actor.sub},owner_sub,province,district) AND public.sales_can_access(${actor.sub},owner_sub,${province},${district}) RETURNING *`;
     if(!rows.length)return fail('Xung đột phiên bản',409);
