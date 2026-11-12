@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'offline_queue.dart';
 import 'session.dart';
 import 'actuals.dart';
+import 'responsive_controls.dart';
 
 List<int> targetMonths(String period,int month)=>period=='year'?List.generate(12,(i)=>i+1):
   period=='quarter'?List.generate(3,(i)=>((month-1)~/3)*3+i+1):[month];
@@ -96,20 +97,31 @@ class _TargetPageState extends State<TargetPage>{
   final hasActual=fact.any((r)=>targetAmount(r['records'])>0);
   final actual=fact.fold<int>(0,(sum,r)=>sum+targetAmount(r['amount']));
   return ListView(padding:const EdgeInsets.all(12),children:[
-   Row(children:[Expanded(child:Text('Quản lý Target',style:Theme.of(context).textTheme.titleLarge)),IconButton(tooltip:'Tải lại Target',onPressed:busy?null:load,icon:const Icon(Icons.refresh))]),
+   Row(children:[Expanded(child:Text('Chỉ tiêu',style:Theme.of(context).textTheme.titleLarge)),IconButton(tooltip:'Tải lại Target',onPressed:busy?null:load,icon:const Icon(Icons.refresh))]),
    OutlinedButton.icon(onPressed:()async{await Navigator.push(context,MaterialPageRoute(builder:(_)=>ActualsPage(queue:widget.queue)));if(mounted)load();},
-     icon:const Icon(Icons.receipt_long_outlined),label:const Text('Doanh số thực tế · Nhập tay / Excel')),
+     icon:const Icon(Icons.receipt_long_outlined),label:const Text('Doanh số thực tế')),
    if(staff.isNotEmpty)DropdownButtonFormField<String>(key:ValueKey('owner:$owner'),initialValue:staff.any((s)=>s['user_sub']==owner)?owner:null,isExpanded:true,decoration:const InputDecoration(labelText:'Nhân viên'),
     items:[for(final s in staff)DropdownMenuItem(value:s['user_sub'].toString(),child:Text('${s['employee_code']} · ${s['full_name']}',overflow:TextOverflow.ellipsis))],onChanged:busy?null:(v){if(v!=null){owner=v;load();}}),
    const SizedBox(height:8),
-   Row(children:[Expanded(child:DropdownButtonFormField<int>(key:ValueKey(year),initialValue:year,decoration:const InputDecoration(labelText:'Năm'),items:[for(var y=year-3;y<=year+3;y++)if(y>=2000&&y<=2100)DropdownMenuItem(value:y,child:Text('$y'))],onChanged:busy?null:(v){if(v!=null){year=v;load();}})),const SizedBox(width:8),
-    Expanded(child:DropdownButtonFormField<String>(initialValue:period,decoration:const InputDecoration(labelText:'Kỳ'),items:const [DropdownMenuItem(value:'month',child:Text('Tháng')),DropdownMenuItem(value:'quarter',child:Text('Quý')),DropdownMenuItem(value:'year',child:Text('Năm'))],onChanged:(v)=>setState(()=>period=v??'month')))]),
-   if(period!='year')...[
+   AdaptiveFilterRow(children:[
+     DropdownButtonFormField<int>(key:ValueKey(year),initialValue:year,isExpanded:true,
+       decoration:const InputDecoration(labelText:'Năm'),
+       items:[for(var y=year-3;y<=year+3;y++)if(y>=2000&&y<=2100)
+         DropdownMenuItem(value:y,child:Text('$y'))],
+       onChanged:busy?null:(v){if(v!=null){year=v;load();}}),
+     DropdownButtonFormField<String>(initialValue:period,isExpanded:true,
+       decoration:const InputDecoration(labelText:'Kỳ'),
+       items:const [DropdownMenuItem(value:'month',child:Text('Tháng')),
+         DropdownMenuItem(value:'quarter',child:Text('Quý')),
+         DropdownMenuItem(value:'year',child:Text('Năm'))],
+       onChanged:(v)=>setState(()=>period=v??'month')),
+    ]),
+    if(period!='year')...[
     const SizedBox(height:8),
     DropdownButtonFormField<int>(key:ValueKey('period:$period'),initialValue:period=='quarter'?((month-1)~/3)*3+1:month,decoration:InputDecoration(labelText:period=='quarter'?'Quý':'Tháng'),items:[for(final m in period=='quarter'?[1,4,7,10]:List.generate(12,(i)=>i+1))DropdownMenuItem(value:m,child:Text(period=='quarter'?'Quý ${(m-1)~/3+1}':'Tháng $m'))],onChanged:(v)=>setState(()=>month=v??1)),
    ],
    if(busy)const LinearProgressIndicator(),
-   if(cached)const Text('Dữ liệu đã lưu trên máy · chỉ xem, cần mạng để giao/sửa Target.'),
+   if(cached)const Text('Dữ liệu lưu máy · cần mạng để giao hoặc sửa chỉ tiêu.'),
    if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
    if(!busy&&error==null&&owner.isEmpty)const Text('Chưa có nhân viên thuộc phạm vi quản lý.'),
    if(!busy&&error==null&&owner.isNotEmpty)...[
