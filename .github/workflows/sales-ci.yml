@@ -104,8 +104,6 @@ jobs:
   flutter-android:
     name: Android / Debug APK build
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     defaults:
       run:
         working-directory: apps/sales-mien-tay/apps/sales_flutter
@@ -115,44 +113,15 @@ jobs:
         with:
           channel: stable
           cache: true
-      - name: Restore canonical Android template (one-time P0-I recovery)
+      - name: Verify checked-in Android platform
         run: |
-          flutter create --platforms=android --project-name sales_mien_tay --org com.example /tmp/field-work-canonical
-          rm -f /tmp/field-work-canonical/android/local.properties
-          rsync -a /tmp/field-work-canonical/android/ android/
-          # Git continues tracking only original native files. No local SDK
-          # paths, credential material or build caches may enter the commit.
-      - name: Commit corrected native platform directly to main
-        if: github.ref == 'refs/heads/main'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -u -- android/
-          if ! git diff --cached --quiet; then
-            git commit -m "fix(P0-I): restore canonical Android Gradle and manifest bytes"
-            git push origin HEAD:main
-          fi
+          test -s android/gradle/wrapper/gradle-wrapper.jar
+          test -s android/app/src/main/AndroidManifest.xml
+          test -s android/app/src/main/kotlin/com/example/sales_mien_tay/MainActivity.kt
+          flutter create --platforms=android .
       - run: flutter pub get
       - name: Generate brand icons
         run: python3 scripts/generate_app_icons.py
-      - name: Capture canonical generated Android files for source control
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import zipfile
-          root=Path('android')
-          excluded={'local.properties','key.properties','.DS_Store'}
-          with zipfile.ZipFile('/tmp/field-work-android-scaffold.zip','w',zipfile.ZIP_DEFLATED) as out:
-              for file in root.rglob('*'):
-                  if not file.is_file() or file.name in excluded or any(s in file.parts for s in ('.gradle','build','.cxx')):
-                      continue
-                  out.write(file,arcname=file.as_posix())
-          PY
-      - uses: actions/upload-artifact@v4
-        with:
-          name: field-work-android-scaffold
-          path: /tmp/field-work-android-scaffold.zip
-          retention-days: 1
       - name: Compile debug APK
         run: flutter build apk --debug
       - uses: actions/upload-artifact@v4
