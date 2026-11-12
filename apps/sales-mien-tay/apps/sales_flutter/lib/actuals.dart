@@ -77,7 +77,7 @@ class _ActualsPageState extends State<ActualsPage>{
   final activeCount=int.tryParse('${summary['active_records']}')??active.length;
   final totalCount=int.tryParse('${summary['total_records']}')??entries.length;
   return Scaffold(appBar:AppBar(title:const Text('Doanh số thực tế')),body:ListView(padding:const EdgeInsets.all(12),children:[
-   Row(children:[Expanded(child:Text('Doanh số công ty / nhập tay',style:Theme.of(context).textTheme.titleMedium)),
+   Row(children:[Expanded(child:Text('Doanh số',style:Theme.of(context).textTheme.titleMedium)),
     IconButton(tooltip:'Tải lại',onPressed:busy?null:load,icon:const Icon(Icons.refresh))]),
    if(staff.length>1)DropdownButtonFormField<String>(key:ValueKey(owner),initialValue:staff.any((x)=>x['id']==owner)?owner:null,
     isExpanded:true,decoration:const InputDecoration(labelText:'Nhân viên'),items:[for(final r in staff)DropdownMenuItem(value:r['id'].toString(),child:Text('${r['code']} · ${r['name']}',overflow:TextOverflow.ellipsis))],
@@ -92,13 +92,13 @@ class _ActualsPageState extends State<ActualsPage>{
     const Text('Doanh số đã ghi nhận trong kỳ'),Text(saleMoney(amount),style:Theme.of(context).textTheme.headlineSmall),
     Text('Số dòng: $activeCount · Hủy: ${totalCount-activeCount}'),
     if(totalCount>entries.length)Text('Đang hiển thị ${entries.length}/$totalCount dòng mới nhất, tổng doanh số vẫn tính đủ.'),
-    const Text('Chỉ tính dòng đang hiệu lực; không cộng dữ liệu dự kiến hoặc đơn nháp.'),
+    const Text('Chỉ tính doanh số đã ghi, không gồm nháp.'),
    ]))),
    if(!offline&&error==null)Wrap(spacing:8,runSpacing:8,children:[
     FilledButton.icon(onPressed:busy?null:()=>edit(),icon:const Icon(Icons.add),label:const Text('Nhập tay')),
     if(canImport)OutlinedButton.icon(onPressed:busy?null:()async{await Navigator.push(context,MaterialPageRoute(builder:(_)=>ActualImportPage(client:client)));if(mounted)load();},
-      icon:const Icon(Icons.upload_file),label:const Text('Nhập Excel')),
-    if(canImport)TextButton(onPressed:()async{await Navigator.push(context,MaterialPageRoute(builder:(_)=>ActualImportHistory(client:client)));},child:const Text('Nhật ký nhập')),
+      icon:const Icon(Icons.upload_file),label:const Text('Nhập file')),
+    if(canImport)TextButton(onPressed:()async{await Navigator.push(context,MaterialPageRoute(builder:(_)=>ActualImportHistory(client:client)));},child:const Text('Nhật ký')),
    ]),
    if(entries.isEmpty&&!busy&&error==null)const Padding(padding:EdgeInsets.all(24),child:Text('Chưa có doanh số trong tháng này.')),
    for(final r in entries)Card(child:ListTile(
