@@ -62,7 +62,7 @@ async function activeRelease(bucket:R2Bucket):Promise<AndroidRelease|null>{
   const apk=await bucket.head(release.objectKey);
   if(!apk||apk.size!==release.size||
       apk.customMetadata?.sha256!==release.sha256||
-      apk.customMetadata?.signerSha256!==release.signerSha256)
+      apk.customMetadata?.signersha256!==release.signerSha256)
     throw Error('release APK not verified');
   return release;
 }
