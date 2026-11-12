@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import 'actuals.dart';
 import 'actuals_parser.dart';
+import 'responsive_controls.dart';
 import 'xlsx_reader.dart';
 
 class ActualImportPage extends StatefulWidget{
@@ -59,31 +60,42 @@ class _ActualImportPageState extends State<ActualImportPage>{
  }
  @override Widget build(BuildContext context){
   final s=selected,columns=s==null||header>=s.rows.length?<XlsxCell?>[]:s.rows[header];
-  return Scaffold(appBar:AppBar(title:const Text('Nhập Excel doanh số')),body:ListView(padding:const EdgeInsets.all(12),children:[
-   const Text('Chọn file Excel rồi ánh xạ dropdown ngay dưới từng cột. 7 thuộc tính bắt buộc; Mã dòng chứng từ có thể bỏ qua nếu mỗi chứng từ chỉ có một dòng cho mỗi mã CTY.'),
-   const SizedBox(height:8),
-   const Text('Mã nhân viên, khách hàng, mã CTY và chứng từ cần ở dạng TEXT trong Excel để giữ số 0 đầu. Chưa có mã khách trong danh mục thì cần cập nhật trước khi nhập.'),
-   Wrap(spacing:8,runSpacing:8,children:[
-    FilledButton.icon(onPressed:busy?null:pick,icon:const Icon(Icons.upload_file),label:const Text('Chọn Excel .xlsx')),
-    OutlinedButton(onPressed:busy?null:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>ActualImportHistory(client:widget.client))),child:const Text('Nhật ký nhập')),
+  return Scaffold(appBar:AppBar(title:const Text('Nhập doanh số')),body:ListView(padding:const EdgeInsets.all(12),children:[
+   ExpansionTile(
+      tilePadding:EdgeInsets.zero,
+      title:const Text('Lưu ý nhập file'),
+      children:[Padding(padding:const EdgeInsets.only(bottom:8),
+        child:Text('Mã nhân viên, khách, sản phẩm và chứng từ phải là ô văn bản '
+          'để giữ số 0 đầu. Chọn đủ các cột bắt buộc, không chọn trùng. '
+          'Cần cập nhật mã khách CTY trước khi nhập doanh số.'))],
+    ),
+    Wrap(spacing:8,runSpacing:8,children:[
+    FilledButton.icon(onPressed:busy?null:pick,icon:const Icon(Icons.upload_file),label:const Text('Chọn file')),
+    OutlinedButton(onPressed:busy?null:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>ActualImportHistory(client:widget.client))),child:const Text('Nhật ký')),
    ]),
    if(filename.isNotEmpty)Text(filename),
    if(busy)const LinearProgressIndicator(),if(error!=null)Text(error!,style:TextStyle(color:done?Colors.green:Theme.of(context).colorScheme.error)),
    if(s!=null)...[
     const SizedBox(height:10),
-    DropdownButtonFormField<String>(key:ValueKey('sheet:$generation'),initialValue:sheet,isExpanded:true,decoration:const InputDecoration(labelText:'Sheet'),
-     items:[for(final name in workbook!.tables.keys)DropdownMenuItem(value:name,child:Text(name))],onChanged:busy?null:(v){if(v!=null)setState((){sheet=v;header=0;mapping.clear();invalidate();});}),
-    const SizedBox(height:8),
-    DropdownButtonFormField<int>(key:ValueKey('header:$sheet:$generation'),initialValue:header,decoration:const InputDecoration(labelText:'Dòng tiêu đề'),
-     items:[for(var i=0;i<s.rows.length&&i<20;i++)DropdownMenuItem(value:i,child:Text('Dòng ${i+1}'))],
-     onChanged:busy?null:(v){if(v!=null)setState((){header=v;mapping.clear();invalidate();});}),
+    AdaptiveFilterRow(children:[
+      DropdownButtonFormField<String>(key:ValueKey('sheet:$generation'),initialValue:sheet,isExpanded:true,
+        decoration:const InputDecoration(labelText:'Trang Excel'),
+        items:[for(final name in workbook!.tables.keys)
+          DropdownMenuItem(value:name,child:Text(name,overflow:TextOverflow.ellipsis))],
+        onChanged:busy?null:(v){if(v!=null)setState((){sheet=v;header=0;mapping.clear();invalidate();});}),
+      DropdownButtonFormField<int>(key:ValueKey('header:$sheet:$generation'),initialValue:header,isExpanded:true,
+        decoration:const InputDecoration(labelText:'Dòng tiêu đề'),
+        items:[for(var i=0;i<s.rows.length&&i<20;i++)
+          DropdownMenuItem(value:i,child:Text('Dòng ${i+1}'))],
+        onChanged:busy?null:(v){if(v!=null)setState((){header=v;mapping.clear();invalidate();});}),
+    ]),
     const SizedBox(height:12),
-    Text('Ánh xạ cột Excel · cuộn ngang để xem toàn bộ',style:Theme.of(context).textTheme.titleMedium),
+    Text('Ánh xạ cột · vuốt ngang để xem thêm',style:Theme.of(context).textTheme.titleMedium),
     SingleChildScrollView(scrollDirection:Axis.horizontal,child:Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
      for(var i=0;i<columns.length;i++)SizedBox(width:190,child:Padding(padding:const EdgeInsets.all(4),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
       SizedBox(height:46,child:Text('${actualColumn(i)} · ${columns[i]?.text??''}',maxLines:2,overflow:TextOverflow.ellipsis)),
       DropdownButtonFormField<String>(key:ValueKey('$generation:$sheet:$header:$i:${mapping[i]}'),initialValue:mapping[i]??'ignore',
-       isExpanded:true,decoration:const InputDecoration(labelText:'Thuộc tính'),
+       isExpanded:true,decoration:const InputDecoration(labelText:'Ánh xạ'),
        items:[for(final e in actualAttributes.entries)DropdownMenuItem(value:e.key,child:Text(e.value,overflow:TextOverflow.ellipsis))],
        onChanged:busy?null:(v){if(v!=null)setState((){mapping[i]=v;invalidate();});}),
       for(final row in s.rows.skip(header+1).take(3))Padding(padding:const EdgeInsets.symmetric(vertical:5),child:Text(i<row.length?row[i]?.text??'':'',maxLines:1,overflow:TextOverflow.ellipsis)),
@@ -92,7 +104,7 @@ class _ActualImportPageState extends State<ActualImportPage>{
     if(mapping.values.where((x)=>x!='ignore').length!=mapping.values.where((x)=>x!='ignore').toSet().length)
      const Text('Không được chọn trùng thuộc tính.'),
     const SizedBox(height:8),
-    FilledButton(onPressed:busy?null:inspect,child:const Text('Xem trước doanh số')),
+    FilledButton(onPressed:busy?null:inspect,child:const Text('Xem trước')),
    ],
    if(errors.isNotEmpty)...[Text('${errors.length} lỗi — chưa thể nhập',style:Theme.of(context).textTheme.titleMedium),
     for(final e in errors.take(50))Text(e)],
@@ -102,7 +114,7 @@ class _ActualImportPageState extends State<ActualImportPage>{
      title:Text('${r['external_ref']} / ${r['line_ref']} · ${r['company_code']}'),
      subtitle:Text('${r['sale_date']} · NV ${r['employee_code']} · KH ${r['customer_code']}\nSL ${r['quantity']} · ${saleMoney(r['amount'])}${r['duplicate']==true?' · TRÙNG (BỎ QUA)':''}'),
      isThreeLine:true));})),
-    FilledButton(onPressed:busy?null:confirm,child:const Text('Xác nhận ghi doanh số')),
+    FilledButton(onPressed:busy?null:confirm,child:const Text('Xác nhận')),
    ],
   ]));
  }
