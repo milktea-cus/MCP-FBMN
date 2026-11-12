@@ -92,7 +92,7 @@ class _ActualsPageState extends State<ActualsPage>{
     const Text('Doanh số đã ghi nhận trong kỳ'),Text(saleMoney(amount),style:Theme.of(context).textTheme.headlineSmall),
     Text('Số dòng: $activeCount · Hủy: ${totalCount-activeCount}'),
     if(totalCount>entries.length)Text('Đang hiển thị ${entries.length}/$totalCount dòng mới nhất, tổng doanh số vẫn tính đủ.'),
-    const Text('Chỉ tính doanh số đã ghi, không gồm nháp.'),
+    const Text('Chỉ tính doanh số thực tế, không cộng dữ liệu dự kiến hoặc nháp.'),
    ]))),
    if(!offline&&error==null)Wrap(spacing:8,runSpacing:8,children:[
     FilledButton.icon(onPressed:busy?null:()=>edit(),icon:const Icon(Icons.add),label:const Text('Nhập tay')),
