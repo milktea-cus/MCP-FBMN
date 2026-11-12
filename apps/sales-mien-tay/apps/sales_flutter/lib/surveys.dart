@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import 'customers.dart';
 import 'customer_categories.dart';
+import 'responsive_controls.dart';
 import 'field_work.dart';
 import 'models.dart';
 import 'offline_queue.dart';
@@ -138,14 +139,26 @@ class _SurveyPageState extends State<SurveyPage>{
   final visible=candidates.where((r)=>(all||r['planned']==true)&&(district.isEmpty||r['district']==district)&&(employee.isEmpty||r['owner_sub']==employee)&&(widget.initialCustomer==null||r['customer_id']==widget.initialCustomer)).toList();
   return ListView(padding:const EdgeInsets.all(12),children:[
    Row(children:[Expanded(child:Text('Khảo sát theo tuyến',style:Theme.of(context).textTheme.titleLarge)),IconButton(onPressed:busy?null:load,tooltip:'Đồng bộ',icon:const Icon(Icons.sync))]),
-   Wrap(spacing:8,runSpacing:8,children:[OutlinedButton.icon(onPressed:busy?null:pickDay,icon:const Icon(Icons.calendar_today),label:Text(dayKey(day))),if(widget.admin)OutlinedButton(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>SurveyTemplateAdmin(service:widget.service,regions:widget.regions))),child:const Text('Mẫu khảo sát')),if(widget.admin)OutlinedButton(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>MediaUsagePage(service:widget.service))),child:const Text('Dung lượng R2')),if(widget.legacy!=null)TextButton(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:widget.legacy!)),child:const Text('Biểu mẫu cũ'))]),
+   Wrap(spacing:8,runSpacing:8,children:[OutlinedButton.icon(onPressed:busy?null:pickDay,icon:const Icon(Icons.calendar_today),label:Text(dayKey(day))),if(widget.admin)OutlinedButton(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>SurveyTemplateAdmin(service:widget.service,regions:widget.regions))),child:const Text('Mẫu khảo sát')),if(widget.admin)OutlinedButton(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>MediaUsagePage(service:widget.service))),child:const Text('Dung lượng')),if(widget.legacy!=null)TextButton(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:widget.legacy!)),child:const Text('Mẫu cũ'))]),
    const SizedBox(height:8),
    SegmentedButton<bool>(segments:const [ButtonSegment(value:false,label:Text('Ngày')),ButtonSegment(value:true,label:Text('Tuần'))],selected:{weekly},onSelectionChanged:busy?null:(v){setState(()=>weekly=v.first);load();}),
    if(weekly)Text('${dayKey(weekMonday(day))} – ${dayKey(weekMonday(day).add(const Duration(days:6)))}'),
-   SwitchListTile(contentPadding:EdgeInsets.zero,title:const Text('Tất cả khách trong quyền'),subtitle:const Text('Cho phép ghé đột xuất; mặc định chỉ điểm có lịch.'),value:all,onChanged:(v)=>setState(()=>all=v)),
-   DropdownButtonFormField<String>(key:ValueKey(districts.join('|')),initialValue:districts.contains(district)?district:'',isExpanded:true,decoration:const InputDecoration(labelText:'Huyện'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả')),for(final d in districts)DropdownMenuItem(value:d,child:Text(d))],onChanged:(v)=>setState(()=>district=v??'')),
-   if(staff.length>1)Padding(padding:const EdgeInsets.only(top:8),child:DropdownButtonFormField<String>(key:ValueKey(staff.keys.join('|')),initialValue:staff.containsKey(employee)?employee:'',isExpanded:true,decoration:const InputDecoration(labelText:'Nhân viên'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả trong quyền')),for(final e in staff.entries)DropdownMenuItem(value:e.key,child:Text(e.value))],onChanged:(v)=>setState(()=>employee=v??''))),
-   if(busy)const LinearProgressIndicator(),if(error!=null)Padding(padding:const EdgeInsets.all(8),child:Text(error!)),
+   SwitchListTile(contentPadding:EdgeInsets.zero,title:const Text('Tất cả khách trong quyền'),subtitle:const Text('Bật để ghé ngoài tuyến.'),value:all,onChanged:(v)=>setState(()=>all=v)),
+   AdaptiveFilterRow(minFieldWidth:190,children:[
+      DropdownButtonFormField<String>(key:ValueKey(districts.join('|')),
+        initialValue:districts.contains(district)?district:'',isExpanded:true,
+        decoration:const InputDecoration(labelText:'Huyện'),
+        items:[const DropdownMenuItem(value:'',child:Text('Tất cả')),
+          for(final d in districts)DropdownMenuItem(value:d,child:Text(d,overflow:TextOverflow.ellipsis))],
+        onChanged:(v)=>setState(()=>district=v??'')),
+      if(staff.length>1)DropdownButtonFormField<String>(key:ValueKey(staff.keys.join('|')),
+        initialValue:staff.containsKey(employee)?employee:'',isExpanded:true,
+        decoration:const InputDecoration(labelText:'Nhân viên'),
+        items:[const DropdownMenuItem(value:'',child:Text('Tất cả trong quyền')),
+          for(final e in staff.entries)DropdownMenuItem(value:e.key,child:Text(e.value,overflow:TextOverflow.ellipsis))],
+        onChanged:(v)=>setState(()=>employee=v??'')),
+    ]),
+    if(busy)const LinearProgressIndicator(),if(error!=null)Padding(padding:const EdgeInsets.all(8),child:Text(error!)),
    if(visible.isEmpty&&!busy)const Padding(padding:EdgeInsets.all(16),child:Text('Không có điểm ghé trong kỳ này. Bật tất cả khách để ghé đột xuất.')),
    for(final r in visible)Card(child:ListTile(title:Text(r['name'].toString()),leading:r['category']==null
       ?CircleAvatar(child:Text(r['planned']==true?((r['data'] as Map)['sequence']??'').toString():'–'))
