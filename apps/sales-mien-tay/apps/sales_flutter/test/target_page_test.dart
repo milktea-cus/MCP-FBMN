@@ -42,7 +42,7 @@ void main(){
   offline=true;
   await tester.tap(find.byTooltip('Tải lại Target'));await tester.pumpAndSettle();
   expect(find.text('Giao / sửa'),findsNothing);
-  expect(find.textContaining('Dữ liệu đã lưu trên máy'),findsOneWidget);
+  expect(find.textContaining('Dữ liệu lưu máy'),findsOneWidget);
   expect(find.text('1.000.000 đ'),findsWidgets);
   expect(tester.takeException(),isNull);
   await tester.pumpWidget(const SizedBox());q.dispose();client.close();
