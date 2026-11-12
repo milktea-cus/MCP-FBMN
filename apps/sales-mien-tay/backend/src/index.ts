@@ -13,6 +13,7 @@ import {actualRoutes} from './actuals';
 import {orderRoutes} from './orders';
 import {performanceRoutes} from './performance';
 import {notificationRoutes} from './notifications';
+import {appReleaseRoutes} from './app_releases';
 
 interface Env {
   DATABASE_URL: string;
@@ -24,6 +25,8 @@ interface Env {
   AUTH_JWKS_URL: string;
   ALLOWED_ORIGINS: string;
   PHOTOS_BUCKET?: R2Bucket;
+  APP_RELEASES_BUCKET?: R2Bucket;
+  APP_DOWNLOAD_HMAC_KEY?: string;
 }
 type Kind = 'survey' | 'target' | 'forecast' | 'visit' | 'dealer' | 'competitor' | 'support';
 const kinds: Kind[] = ['survey', 'target', 'forecast', 'visit', 'dealer', 'competitor', 'support'];
@@ -107,6 +110,8 @@ export default {
       if(syncIdentity!==null&&(syncIdentity!==user.sub||req.headers.get('X-Sync-Revision')!==String(user.staff.scope_revision)))return bad('Phiên hoặc địa bàn đồng bộ đã thay đổi',403);
       if (url.pathname === '/api/v1/me' && req.method === 'GET') return json({identity: user.sub, role: user.staff.role, employee_code: user.staff.employee_code, full_name: user.staff.full_name, email: user.staff.email, scope_revision: String(user.staff.scope_revision), scopes: user.scopes, permissions: user.admin ? ['staff:manage','records:all'] : user.manager ? ['records:team','records:own'] : ['records:own']});
       if(url.pathname==='/api/v1/admin/identity')return provisionIdentity(req,env,user);
+      const releaseResponse=await appReleaseRoutes(req,env,user,url);
+      if(releaseResponse)return releaseResponse;
       const notifications = await notificationRoutes(req,env,user,url);
       if(notifications)return notifications;
       const staffResponse = await staffRoutes(req, env, user, url);
