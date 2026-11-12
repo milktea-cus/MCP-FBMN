@@ -15,7 +15,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+        // Package ID used by existing Field Work debug installs; do not change.
         applicationId = "com.example.sales_mien_tay"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
@@ -29,11 +29,30 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("fieldWorkRelease") {
+            // These env vars exist only during the signed-release job.
+            val storePath = System.getenv("FIELD_WORK_ANDROID_KEYSTORE_PATH")
+            val storeSecret = System.getenv("FIELD_WORK_ANDROID_STORE_PASSWORD")
+            val alias = System.getenv("FIELD_WORK_ANDROID_KEY_ALIAS")
+            val keySecret = System.getenv("FIELD_WORK_ANDROID_KEY_PASSWORD")
+            if (!storePath.isNullOrBlank() && !storeSecret.isNullOrBlank() &&
+                !alias.isNullOrBlank() && !keySecret.isNullOrBlank()) {
+                storeFile = file(storePath)
+                storePassword = storeSecret
+                keyAlias = alias
+                keyPassword = keySecret
+            }
+        }
+    }
+
     buildTypes {
-        release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+        getByName("release") {
+            // Fail closed if signing secrets are not supplied.
+            // NEVER fall back to debug keys for an upgrade release.
+            signingConfig = signingConfigs.getByName("fieldWorkRelease")
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }
@@ -42,6 +61,10 @@ kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
+}
+
+dependencies {
+    implementation("androidx.core:core:1.16.0")
 }
 
 flutter {
