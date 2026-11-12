@@ -67,8 +67,13 @@ void main() {
       await tester.pump();await tester.pump();
       expect(find.byTooltip('Gọi điện'),findsOneWidget);
       expect(find.byTooltip('Mở Zalo'),findsOneWidget);
-      expect(find.text('Chỉ đường'),findsOneWidget);
+      expect(find.byTooltip('Chỉ đường'),findsOneWidget);
       expect(find.byIcon(Icons.person_outline),findsOneWidget);
+      expect(find.text('Tiền Giang'),findsOneWidget);
+      expect(find.text('Khách lẻ'),findsOneWidget);
+      expect(find.textContaining('Thành phố Mỹ Tho'),findsNothing);
+      expect(find.byKey(const Key('customer-card-1')),findsOneWidget);
+      expect(find.byTooltip('Sửa thông tin'),findsOneWidget);
       expect(tester.takeException(),isNull);
       await tester.pumpWidget(const SizedBox());
       client.close();q.dispose();
@@ -86,7 +91,7 @@ void main() {
     final zalo=find.byWidgetPredicate((w)=>w is IconButton&&w.tooltip=='Mở Zalo');
     expect(tester.widget<IconButton>(call).onPressed,isNull);
     expect(tester.widget<IconButton>(zalo).onPressed,isNull);
-    expect(find.text('Chỉ đường'),findsOneWidget);
+    expect(find.byTooltip('Chỉ đường'),findsOneWidget);
     expect(tester.takeException(),isNull);
     await tester.pumpWidget(const SizedBox());
     client.close();q.dispose();
