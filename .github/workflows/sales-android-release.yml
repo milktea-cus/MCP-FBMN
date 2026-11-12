@@ -33,7 +33,7 @@ concurrency:
 jobs:
   signed-release:
     name: Android / Signed APK and verified immutable R2 release
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.actor == 'milktea-cus'
     runs-on: ubuntu-latest
     defaults:
       run:
