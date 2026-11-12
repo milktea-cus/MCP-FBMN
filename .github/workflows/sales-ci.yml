@@ -19,6 +19,12 @@ on:
 permissions:
   contents: read
 
+# Every main push tests the newest source; cancel stale intermediate commits,
+# so old Android builds cannot starve the production acceptance run.
+concurrency:
+  group: sales-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
 jobs:
   api-typecheck:
     name: Cloudflare API / Typecheck
