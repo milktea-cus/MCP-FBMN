@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'app_update_page.dart';
 import 'api.dart';
 import 'customers.dart';
 import 'editor.dart';
@@ -330,6 +332,10 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
         onRefresh:(){unawaited(_queue.sync());_refresh();},
         onStaff:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>StaffPage(session:widget.session))),
         onProfile:_profile,
+        onUpdate:!kIsWeb&&defaultTargetPlatform==TargetPlatform.android
+          ?()=>Navigator.push(context,MaterialPageRoute(
+            builder:(_)=>AppUpdatePage(session:widget.session)))
+          :null,
         themeMode: SalesThemePreference.mode.value,
         onThemeModeChanged: (value) => unawaited(SalesThemePreference.select(value)),
       ),
@@ -585,12 +591,13 @@ class SalesHomeDrawer extends StatelessWidget {
   final List<IconData> icons;
   final ValueChanged<int> onSection;
   final VoidCallback onRefresh,onStaff,onProfile;
+  final VoidCallback? onUpdate;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
   const SalesHomeDrawer({super.key,required this.admin,required this.loading,
     required this.selectedIndex,required this.sections,required this.icons,
     required this.onSection,required this.onRefresh,required this.onStaff,required this.onProfile,
-    this.themeMode = ThemeMode.light, this.onThemeModeChanged});
+    this.onUpdate,this.themeMode = ThemeMode.light, this.onThemeModeChanged});
   @override Widget build(BuildContext context){
     void run(VoidCallback action){Navigator.of(context).pop();action();}
     Widget section(int i)=>ListTile(leading:Icon(icons[i]),title:Text(sections[i]),
@@ -601,6 +608,11 @@ class SalesHomeDrawer extends StatelessWidget {
         title:const Text('Quản lý nhân viên'),onTap:()=>run(onStaff)),
       ListTile(leading:const Icon(Icons.account_circle_outlined),
         title:const Text('Hồ sơ / Đăng xuất'),onTap:()=>run(onProfile)),
+      if(onUpdate!=null)ListTile(
+        key:const Key('android-update-menu'),
+        leading:const Icon(Icons.system_update_alt_outlined),
+        title:const Text('Cập nhật ứng dụng'),
+        onTap:()=>run(onUpdate!)),
       if (onThemeModeChanged != null) SwitchListTile(
         secondary: Icon(themeMode == ThemeMode.dark ? Icons.dark_mode_outlined : Icons.light_mode_outlined),
         title: const Text('Chế độ tối'),
