@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fast offline source checks; no network or production credentials required."""
 import json
+import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,4 +30,21 @@ bad_names = {".env", ".dev.vars", "key.properties", ".p12", ".jks"}
 for path in ROOT.rglob("*"):
     if path.is_file():
         assert path.name not in bad_names, f"Potential secret file tracked: {path}"
+# Signed Android release tooling must remain syntactically valid and fail closed.
+publisher = ROOT / "scripts" / "publish_android_release.py"
+ast.parse(publisher.read_text(encoding="utf8"), filename=str(publisher))
+release_workflow = ROOT.parents[1] / ".github" / "workflows" / "sales-android-release.yml"
+assert release_workflow.is_file(), "Missing signed Android release workflow"
+source = release_workflow.read_text(encoding="utf8")
+assert "ci_run_id:" in source and "publish_production:" in source, "Release approval gate missing"
+assert "flutter build apk --release" in source, "Signed release build missing"
+assert "FIELD_WORK_ANDROID_CERT_SHA256" in source, "Signer pinning missing"
+assert "publish_android_release.py" in source, "Immutable R2 publisher missing"
+native = flutter / "android"
+gradle = (native / "app" / "build.gradle.kts").read_text(encoding="utf8")
+assert 'applicationId = "com.example.sales_mien_tay"' in gradle, "Existing app ID changed"
+assert 'signingConfigs.getByName("debug")' not in gradle, "Debug signing in release is forbidden"
+assert (native / "gradle" / "wrapper" / "gradle-wrapper.jar").stat().st_size > 50000, "Android Gradle wrapper corrupt"
+assert (native / "app" / "src" / "main" / "res" / "xml" / "apk_file_paths.xml").is_file(), "APK FileProvider missing"
+print("PASS: Android signing fail-closed, private R2 publisher and native source")
 print("PASS: inventory, province/district catalog, app modules and source policy")
