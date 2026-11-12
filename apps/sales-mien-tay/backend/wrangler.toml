@@ -14,3 +14,9 @@ compatibility_date = "2026-10-01"
 [[r2_buckets]]
 binding = "PHOTOS_BUCKET"
 bucket_name = "sales-mien-tay-customer-media"
+
+# APK artifacts are private and isolated from customer photo objects.
+# APP_DOWNLOAD_HMAC_KEY must be a secret, never a plain [vars] value.
+[[r2_buckets]]
+binding = "APP_RELEASES_BUCKET"
+bucket_name = "sales-mien-tay-app-releases"
