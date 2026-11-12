@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 import 'customers.dart';
 import 'customer_categories.dart';
+import 'responsive_controls.dart';
 import 'models.dart';
 import 'offline_queue.dart';
 import 'session.dart';
@@ -208,7 +209,7 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
    Padding(padding:const EdgeInsets.symmetric(horizontal:12),child:OutlinedButton.icon(onPressed:busy?null:chooseDate,icon:const Icon(Icons.calendar_today),label:Text(widget.report?monthKey(day):dayKey(day)))),
    if(!widget.report)...[
     SegmentedButton<String>(segments:const [ButtonSegment(value:'day',label:Text('Ngày')),ButtonSegment(value:'week',label:Text('Tuần')),ButtonSegment(value:'month',label:Text('Tháng'))],selected:{monthly?'month':weekly?'week':'day'},onSelectionChanged:busy?null:(v){setState((){monthly=v.first=='month';weekly=v.first=='week';period=0;rows=[];employee='';district='';});load();}),
-    if(monthly)Padding(padding:const EdgeInsets.all(8),child:Column(children:[const Text('5 kỳ: 1–7 · 8–14 · 15–21 · 22–28 · 29–cuối tháng (không phải tuần lịch)'),Wrap(spacing:6,children:[for(var i=0;i<=5;i++)ChoiceChip(label:Text(i==0?'Tất cả':'Kỳ $i'),selected:period==i,onSelected:busy?null:(_)=>setState(()=>period=i))]),if(period>0&&periodDays(day,period).isEmpty)const Text('Tháng này không có ngày trong kỳ 5.')])),
+    if(monthly)Padding(padding:const EdgeInsets.all(8),child:Column(children:[const Text('Kỳ tháng: 1–7 · 8–14 · 15–21 · 22–28 · 29–cuối'),Wrap(spacing:6,children:[for(var i=0;i<=5;i++)ChoiceChip(label:Text(i==0?'Tất cả':'Kỳ $i'),selected:period==i,onSelected:busy?null:(_)=>setState(()=>period=i))]),if(period>0&&periodDays(day,period).isEmpty)const Text('Tháng này không có ngày trong kỳ 5.')])),
     Padding(padding:const EdgeInsets.all(8),child:Wrap(spacing:8,runSpacing:6,children:[
      FilledButton(onPressed:busy?null:()=>bulkPlan(),child:const Text('Lập nhiều khách')),
      OutlinedButton(onPressed:busy||ownDayStops.isEmpty?null:()=>bulkPlan(source:ownDayStops),child:const Text('Sao chép ngày')),
@@ -217,9 +218,23 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
     ])),
     if(weekly)Text('${dayKey(monday)} – ${dayKey(monday.add(const Duration(days:6)))}'),
     Padding(padding:const EdgeInsets.all(8),child:Column(children:[
-      if(people.length>1)DropdownButtonFormField<String>(initialValue:people.containsKey(employee)?employee:'',decoration:const InputDecoration(labelText:'Nhân viên'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả trong quyền')),for(final e in people.entries)DropdownMenuItem(value:e.key,child:Text(e.value))],onChanged:(v)=>setState(()=>employee=v??'')),
-      Row(children:[Expanded(child:DropdownButtonFormField<String>(key:ValueKey(districts.join('|')),initialValue:districts.contains(district)?district:'',isExpanded:true,decoration:const InputDecoration(labelText:'Huyện'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả')),for(final d in districts)DropdownMenuItem(value:d,child:Text(d,overflow:TextOverflow.ellipsis))],onChanged:(v)=>setState(()=>district=v??''))),const SizedBox(width:8),Expanded(child:DropdownButtonFormField<String>(initialValue:status,decoration:const InputDecoration(labelText:'Trạng thái'),items:const [DropdownMenuItem(value:'',child:Text('Tất cả')),DropdownMenuItem(value:'planned',child:Text('Có lịch')),DropdownMenuItem(value:'visited',child:Text('Đã ghé trong kỳ')),DropdownMenuItem(value:'unvisited',child:Text('Chưa ghé trong kỳ'))],onChanged:(v)=>setState(()=>status=v??'')))]),
-      const SizedBox(height:8),Text('Toàn ${monthly?'tháng':weekly?'tuần':'ngày'}: điểm theo lịch đã ghé $done/${planned.length} · Khách duy nhất đã ghé $visited/${unique.length} · Phiên hoàn thành $completed'),
+      if(people.length>1)DropdownButtonFormField<String>(initialValue:people.containsKey(employee)?employee:'',isExpanded:true,decoration:const InputDecoration(labelText:'Nhân viên'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả trong quyền')),for(final e in people.entries)DropdownMenuItem(value:e.key,child:Text(e.value,overflow:TextOverflow.ellipsis))],onChanged:(v)=>setState(()=>employee=v??'')),
+      AdaptiveFilterRow(children:[
+        DropdownButtonFormField<String>(key:ValueKey(districts.join('|')),
+          initialValue:districts.contains(district)?district:'',isExpanded:true,
+          decoration:const InputDecoration(labelText:'Huyện'),
+          items:[const DropdownMenuItem(value:'',child:Text('Tất cả')),
+            for(final d in districts)DropdownMenuItem(value:d,child:Text(d,overflow:TextOverflow.ellipsis))],
+          onChanged:(v)=>setState(()=>district=v??'')),
+        DropdownButtonFormField<String>(initialValue:status,isExpanded:true,
+          decoration:const InputDecoration(labelText:'Trạng thái'),
+          items:const [DropdownMenuItem(value:'',child:Text('Tất cả')),
+            DropdownMenuItem(value:'planned',child:Text('Có lịch')),
+            DropdownMenuItem(value:'visited',child:Text('Đã ghé')),
+            DropdownMenuItem(value:'unvisited',child:Text('Chưa ghé'))],
+          onChanged:(v)=>setState(()=>status=v??'')),
+      ]),
+      const SizedBox(height:8),Text('Đã ghé $done/${planned.length} điểm · $visited/${unique.length} khách · $completed phiên'),
       if(planned.isNotEmpty)LinearProgressIndicator(value:done/planned.length),
     ])),
    ],
