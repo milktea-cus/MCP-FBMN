@@ -6,12 +6,14 @@ on:
       - "apps/sales-mien-tay/**"
       - ".github/workflows/sales-ci.yml"
       - ".github/workflows/sales-production-comment.yml"
+      - ".github/workflows/sales-android-release.yml"
   push:
     branches: [main]
     paths:
       - "apps/sales-mien-tay/**"
       - ".github/workflows/sales-ci.yml"
       - ".github/workflows/sales-production-comment.yml"
+      - ".github/workflows/sales-android-release.yml"
   workflow_dispatch:
 
 permissions:
