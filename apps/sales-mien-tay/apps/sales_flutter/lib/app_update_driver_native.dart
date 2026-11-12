@@ -110,7 +110,21 @@ class NativeAppUpdateDriver implements AppUpdateDriver {
       if(await partial.exists())await partial.delete();
       rethrow;
     }on FileSystemException{
+      if(canceled()){
+        if(target!=null){await target.close();target=null;}
+        if(await partial.exists())await partial.delete();
+        throw const UpdateCanceled();
+      }
       throw const FileSystemException('Không ghi được APK. Kiểm tra dung lượng bộ nhớ.');
+    }catch(_){
+      // Closing an active HTTP client may raise ClientException instead of
+      // emitting another chunk. An explicit cancel must still remove .part.
+      if(canceled()){
+        if(target!=null){await target.close();target=null;}
+        if(await partial.exists())await partial.delete();
+        throw const UpdateCanceled();
+      }
+      rethrow;
     }finally{
       if(target!=null)await target.close();
       client.close();
