@@ -1,7 +1,7 @@
 name: sales_mien_tay
 publish_to: none
-description: Khung ứng dụng khảo sát & kế hoạch Sales miền Tây - Flutter Android/PWA
-version: 1.0.0-rc.1+1
+description: Field Work - ứng dụng Sales offline-first Android/PWA
+version: 1.0.0-rc.2+2
 environment:
   sdk: '>=3.5.0 <4.0.0'
 dependencies:
@@ -23,6 +23,7 @@ dependencies:
   sqflite: ^2.4.2
   cupertino_icons: ^1.0.8
   shared_preferences: ^2.3.5
+  path_provider: ^2.1.5
 dev_dependencies:
   flutter_test:
     sdk: flutter
