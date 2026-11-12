@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 import 'customers.dart';
+import 'responsive_controls.dart';
 import 'session.dart';
 
 Map<String,dynamic> _map(dynamic v)=>Map<String,dynamic>.from(v as Map);
@@ -70,13 +71,46 @@ InventoryParse parseCatalogImport(XlsxSheet sheet,int header,Map<int,String> map
 }
 String excelColumn(int i){var n=i+1,s='';while(n>0){n--;s=String.fromCharCode(65+n%26)+s;n~/=26;}return s;}
 
+/// Admin selects product attributes or stock before mapping columns.
+class InventoryImportHubPage extends StatelessWidget {
+  final CustomerService service;
+  const InventoryImportHubPage({super.key,required this.service});
+  @override Widget build(BuildContext context)=>Scaffold(
+    appBar:AppBar(title:const Text('Nhập dữ liệu')),
+    body:ListView(padding:const EdgeInsets.all(16),children:[
+      Text('Chọn nội dung cần nhập',style:Theme.of(context).textTheme.titleMedium),
+      const SizedBox(height:12),
+      Card(child:ListTile(
+        key:const Key('import-products'),
+        leading:const Icon(Icons.inventory_2_outlined),
+        title:const Text('Sản phẩm'),
+        subtitle:const Text('Cập nhật thuộc tính theo cột Excel'),
+        trailing:const Icon(Icons.chevron_right),
+        onTap:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>
+          InventoryImportPage(service:service,initialCatalogMode:true))))),
+      Card(child:ListTile(
+        key:const Key('import-stock'),
+        leading:const Icon(Icons.warehouse_outlined),
+        title:const Text('Tồn kho'),
+        subtitle:const Text('Chỉ cần mã CTY và số lượng'),
+        trailing:const Icon(Icons.chevron_right),
+        onTap:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>
+          InventoryImportPage(service:service))))),
+      const SizedBox(height:8),
+      Text('Xem trước và xác nhận trước khi ghi dữ liệu.',
+        style:Theme.of(context).textTheme.bodySmall),
+    ]));
+}
+
 class InventoryImportPage extends StatefulWidget{
  final CustomerService service;
- const InventoryImportPage({super.key,required this.service});
+ final bool initialCatalogMode;
+ const InventoryImportPage({super.key,required this.service,this.initialCatalogMode=false});
  @override State<InventoryImportPage> createState()=>_InventoryImportPageState();
 }
 class _InventoryImportPageState extends State<InventoryImportPage>{
  XlsxBook? book;String filename='',sheetName='';int header=0;int? code,qty;bool busy=false;String? message;List<String> errors=[];List<Map<String,dynamic>> preview=[];String? revision;String op=const Uuid().v4();bool canConfirm=false,duplicate=false;int fileGeneration=0;bool catalogMode=false;final mapping=<int,String>{};
+ @override void initState(){super.initState();catalogMode=widget.initialCatalogMode;}
  XlsxSheet? get sheet=>book?.tables[sheetName];
  void invalidate(){preview=[];revision=null;errors=[];canConfirm=false;duplicate=false;op=const Uuid().v4();}
  Future<Map<String,dynamic>> post(String path,Map<String,dynamic> data)async=>decodeApi(await http.post(widget.service.uri(path),headers:widget.service.headers,body:jsonEncode(data)).timeout(const Duration(seconds:60)));
@@ -120,23 +154,30 @@ class _InventoryImportPageState extends State<InventoryImportPage>{
  @override Widget build(BuildContext context){
   final s=sheet,headerRows=s==null?0:(s.maxRows<20?s.maxRows:20),columns=s==null||header>=s.rows.length?<XlsxCell?>[]:s.rows[header];
   final attrs=importAttributes.entries.where((e)=>catalogMode?e.key!='quantity':['ignore','company_code','quantity'].contains(e.key)).toList();
-  return Scaffold(appBar:AppBar(title:const Text('Nhập Excel')),body:ListView(padding:const EdgeInsets.all(16),children:[
+  return Scaffold(appBar:AppBar(title:const Text('Nhập dữ liệu')),body:ListView(padding:const EdgeInsets.all(16),children:[
    SegmentedButton<bool>(segments:const [ButtonSegment(value:false,label:Text('Cập nhật tồn')),ButtonSegment(value:true,label:Text('Cập nhật sản phẩm'))],selected:{catalogMode},onSelectionChanged:busy?null:(v)=>setState((){catalogMode=v.single;mapping.clear();code=null;qty=null;mapping.clear();invalidate();})),
-   Text(catalogMode?'Ô trống giữ nguyên · chỉ cập nhật thuộc tính đã chọn · mã mới cần tên hàng.':'Snapshot tồn · chỉ cập nhật mã có trong file · không realtime.'),
-   Wrap(spacing:8,runSpacing:8,children:[FilledButton.icon(onPressed:busy?null:pick,icon:const Icon(Icons.upload_file),label:const Text('Chọn file .xlsx')),OutlinedButton(onPressed:busy?null:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>catalogMode?CatalogImportHistory(service:widget.service):InventoryHistoryPage(service:widget.service))),child:const Text('Nhật ký nhập'))]),
+   Text(catalogMode?'Ô trống giữ nguyên; mã mới cần tên hàng.':'Tồn theo thời điểm nhập, không phải tồn tức thời.'),
+   Wrap(spacing:8,runSpacing:8,children:[FilledButton.icon(onPressed:busy?null:pick,icon:const Icon(Icons.upload_file),label:const Text('Chọn file')),OutlinedButton(onPressed:busy?null:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>catalogMode?CatalogImportHistory(service:widget.service):InventoryHistoryPage(service:widget.service))),child:const Text('Nhật ký'))]),
    if(filename.isNotEmpty)Text(filename),if(busy)const LinearProgressIndicator(),if(message!=null)Padding(padding:const EdgeInsets.all(8),child:Text(message!)),
    if(s!=null)...[
     const SizedBox(height:12),
-    DropdownButtonFormField<String>(key:ValueKey(fileGeneration),initialValue:sheetName,isExpanded:true,decoration:const InputDecoration(labelText:'Sheet'),items:[for(final name in book!.tables.keys)DropdownMenuItem(value:name,child:Text(name))],onChanged:busy?null:(v)=>setState((){sheetName=v!;header=0;code=null;qty=null;mapping.clear();invalidate();})),
+    AdaptiveFilterRow(children:[
+      DropdownButtonFormField<String>(key:ValueKey(fileGeneration),initialValue:sheetName,isExpanded:true,
+        decoration:const InputDecoration(labelText:'Trang Excel'),
+        items:[for(final name in book!.tables.keys)DropdownMenuItem(value:name,child:Text(name,overflow:TextOverflow.ellipsis))],
+        onChanged:busy?null:(v)=>setState((){sheetName=v!;header=0;code=null;qty=null;mapping.clear();invalidate();})),
+      DropdownButtonFormField<int>(key:ValueKey('$fileGeneration:$sheetName'),initialValue:headerRows>0?header:null,
+        isExpanded:true,decoration:const InputDecoration(labelText:'Dòng tiêu đề'),
+        items:[for(var i=0;i<headerRows;i++)DropdownMenuItem(value:i,child:Text('Dòng ${i+1}'))],
+        onChanged:busy?null:(v)=>setState((){header=v!;code=null;qty=null;mapping.clear();invalidate();})),
+    ]),
     const SizedBox(height:12),
-    DropdownButtonFormField<int>(key:ValueKey('$fileGeneration:$sheetName'),initialValue:headerRows>0?header:null,decoration:const InputDecoration(labelText:'Dòng tiêu đề'),items:[for(var i=0;i<headerRows;i++)DropdownMenuItem(value:i,child:Text('Dòng ${i+1}'))],onChanged:busy?null:(v)=>setState((){header=v!;code=null;qty=null;mapping.clear();invalidate();})),
-    const SizedBox(height:12),
-    const Text('Ánh xạ cột Excel · cuộn ngang để xem toàn bộ'),
+    const Text('Ánh xạ cột · vuốt ngang để xem thêm'),
     SingleChildScrollView(scrollDirection:Axis.horizontal,child:Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
      for(var i=0;i<columns.length;i++)SizedBox(width:190,child:Padding(padding:const EdgeInsets.all(4),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
       SizedBox(height:44,child:Text('${excelColumn(i)} · ${cellText(columns[i])}',maxLines:2,overflow:TextOverflow.ellipsis,style:Theme.of(context).textTheme.titleSmall)),
       const SizedBox(height:6),
-      DropdownButtonFormField<String>(key:ValueKey('map:$fileGeneration:$sheetName:$header:$catalogMode:$i:${mapping[i]}'),initialValue:mapping[i]??'ignore',isExpanded:true,decoration:const InputDecoration(labelText:'Thuộc tính'),items:[for(final e in attrs)DropdownMenuItem(value:e.key,child:Text(e.value,overflow:TextOverflow.ellipsis))],onChanged:busy?null:(v)=>setState((){mapping[i]=v!;code=null;qty=null;for(final e in mapping.entries){if(e.value=='company_code')code=e.key;if(e.value=='quantity')qty=e.key;}invalidate();})),
+      DropdownButtonFormField<String>(key:ValueKey('map:$fileGeneration:$sheetName:$header:$catalogMode:$i:${mapping[i]}'),initialValue:mapping[i]??'ignore',isExpanded:true,decoration:const InputDecoration(labelText:'Ánh xạ'),items:[for(final e in attrs)DropdownMenuItem(value:e.key,child:Text(e.value,overflow:TextOverflow.ellipsis))],onChanged:busy?null:(v)=>setState((){mapping[i]=v!;code=null;qty=null;for(final e in mapping.entries){if(e.value=='company_code')code=e.key;if(e.value=='quantity')qty=e.key;}invalidate();})),
       for(final row in s.rows.skip(header+1).take(3))Padding(padding:const EdgeInsets.symmetric(vertical:5),child:Text(i<row.length?cellText(row[i]):'',maxLines:1,overflow:TextOverflow.ellipsis)),
      ]))),
     ])),
@@ -148,7 +189,7 @@ class _InventoryImportPageState extends State<InventoryImportPage>{
     Text('Xem trước ${preview.length} mã · ${preview.where((r)=>catalogMode?r['is_new']==true:r['product_version']==0).length} mã mới',style:Theme.of(context).textTheme.titleMedium),
     if(duplicate)const Text('Nội dung trùng lần nhập gần nhất; không nhập lại.')else if(!canConfirm)const Text('Có mã ngừng sử dụng; Admin cần kiểm tra danh mục trước khi nhập.'),
     SizedBox(height:400,child:ListView.builder(itemCount:preview.length,itemBuilder:(c,i){final r=preview[i];return Card(child:ListTile(title:Text('${r['company_code']} · ${r['name']??"Mã mới, chưa xác minh"}'),subtitle:Text(catalogMode?(r['changes'] as List).map((x)=>'${importAttributes[x['field']]}: ${x['before']??"—"} → ${x['after']}').join('\n'):'Dòng ${r['row_number']} · ĐVT: ${r['unit']??"Chưa xác minh"}${r['active']==false?" · Ngừng sử dụng":""}\nTồn cũ: ${r['old_quantity']??"Chưa cập nhật"} → Mới: ${r['quantity']}')));})),
-    FilledButton(onPressed:busy||!canConfirm?null:confirm,child:Text(catalogMode?'Xác nhận cập nhật sản phẩm':'Xác nhận nhập tồn')),
+    FilledButton(onPressed:busy||!canConfirm?null:confirm,child:const Text('Xác nhận')),
    ]
   ]));
  }
