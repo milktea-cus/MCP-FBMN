@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 import 'customers.dart';
+import 'customer_categories.dart';
 import 'models.dart';
 import 'offline_queue.dart';
 import 'session.dart';
@@ -230,7 +231,15 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
      for(final r in rows)Card(child:ListTile(title:Text('${r['full_name']} · ${r['province']??'Chung'}'),subtitle:Text('Chỉ tiêu: ${money(r['target'])}\nDự kiến 5 tuần: ${money(r['forecast'])}\nCheck-in đã xác minh: ${r['checkins']} · ${r['forecasts']} dự kiến'))),
     ]else...[
      for(final r in pending)Card(child:ListTile(leading:const Icon(Icons.cloud_upload_outlined),title:Text((r['payload'] as Map)['customer_name']?.toString()??'Thay đổi tuyến'),subtitle:Text(r['error']?.toString()??'Đã lưu máy · chờ đồng bộ'))),
-     for(final r in visible)Card(child:ListTile(leading:CircleAvatar(child:Text(r['planned']==true?'${(r['data'] as Map)['sequence']??''}':'–')),title:Text(r['name'].toString()),subtitle:Text('${r['full_name']} · ${r['district']}, ${r['province']}\n${r['planned']==true?'${(r['data'] as Map)['plannedDate']} · ${r['visited']==true?'Đã ghé':'Chưa ghé theo lịch'}':'Chưa lên lịch'} · ${r['visited_period']==true?'Đã ghé trong kỳ':'Chưa ghé trong kỳ'}\nLần gần nhất: ${r['last_visit']==null?'Chưa có':DateTime.tryParse(r['last_visit'].toString())?.toLocal().toString().substring(0,16)??''}'),trailing:r['planned']==true&&r['visited']!=true&&r['owner_sub']==widget.queue.identity?IconButton(tooltip:'Sửa tuyến',icon:const Icon(Icons.edit_outlined),onPressed:()=>editStop(r)):const Icon(Icons.chevron_right),onTap:()=>openCustomer(r))),
+     for(final r in visible)Card(child:ListTile(leading:r['category']==null
+        ?CircleAvatar(child:Text(r['planned']==true?'${(r['data'] as Map)['sequence']??''}':'–'))
+        :Stack(clipBehavior:Clip.none,children:[
+          CustomerCategoryAvatar(category:r['category']?.toString()),
+          Positioned(bottom:-5,right:-5,child:CircleAvatar(radius:10,
+            backgroundColor:Theme.of(context).colorScheme.surfaceContainerHighest,
+            child:Text(r['planned']==true?'${(r['data'] as Map)['sequence']??''}':'–',
+              style:Theme.of(context).textTheme.labelSmall))),
+        ]),title:Text(r['name'].toString()),subtitle:Text('${r['full_name']} · ${r['district']}, ${r['province']}\n${r['planned']==true?'${(r['data'] as Map)['plannedDate']} · ${r['visited']==true?'Đã ghé':'Chưa ghé theo lịch'}':'Chưa lên lịch'} · ${r['visited_period']==true?'Đã ghé trong kỳ':'Chưa ghé trong kỳ'}\nLần gần nhất: ${r['last_visit']==null?'Chưa có':DateTime.tryParse(r['last_visit'].toString())?.toLocal().toString().substring(0,16)??''}'),trailing:r['planned']==true&&r['visited']!=true&&r['owner_sub']==widget.queue.identity?IconButton(tooltip:'Sửa tuyến',icon:const Icon(Icons.edit_outlined),onPressed:()=>editStop(r)):const Icon(Icons.chevron_right),onTap:()=>openCustomer(r))),
     ],
     if(rows.isEmpty&&(widget.report||pending.isEmpty))const Padding(padding:EdgeInsets.all(18),child:Text('Chưa có dữ liệu trong kỳ đã chọn.')),
    ]))
@@ -269,6 +278,7 @@ class SalesStopCustomerPicker extends StatelessWidget {
       itemBuilder:(context,index){
        final item=items[index];
        return ListTile(
+        leading:CustomerCategoryAvatar(category:item.category),
         title:Text(item.name,maxLines:2,overflow:TextOverflow.ellipsis),
         subtitle:Text('${item.district}, ${item.province}',
          maxLines:1,overflow:TextOverflow.ellipsis),
@@ -354,7 +364,11 @@ class _SalesBulkCustomerPickerState extends State<SalesBulkCustomerPicker> {
            value:position>=0,
            title:Text(customer.name),
            subtitle:Text('${customer.district}, ${customer.province}'),
-           secondary:position>=0?CircleAvatar(child:Text('${position+1}')):null,
+           secondary:Stack(clipBehavior:Clip.none,children:[
+             CustomerCategoryAvatar(category:customer.category),
+             if(position>=0)Positioned(bottom:-5,right:-5,child:CircleAvatar(
+               radius:10,child:Text('${position+1}',style:const TextStyle(fontSize:10)))),
+           ]),
            onChanged:(checked)=>setState((){
             if(checked==true){
              if(!selected.contains(customer.id))selected.add(customer.id);

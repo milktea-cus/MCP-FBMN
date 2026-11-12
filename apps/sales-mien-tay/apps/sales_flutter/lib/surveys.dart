@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import 'customers.dart';
+import 'customer_categories.dart';
 import 'field_work.dart';
 import 'models.dart';
 import 'offline_queue.dart';
@@ -146,7 +147,15 @@ class _SurveyPageState extends State<SurveyPage>{
    if(staff.length>1)Padding(padding:const EdgeInsets.only(top:8),child:DropdownButtonFormField<String>(key:ValueKey(staff.keys.join('|')),initialValue:staff.containsKey(employee)?employee:'',isExpanded:true,decoration:const InputDecoration(labelText:'Nhân viên'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả trong quyền')),for(final e in staff.entries)DropdownMenuItem(value:e.key,child:Text(e.value))],onChanged:(v)=>setState(()=>employee=v??''))),
    if(busy)const LinearProgressIndicator(),if(error!=null)Padding(padding:const EdgeInsets.all(8),child:Text(error!)),
    if(visible.isEmpty&&!busy)const Padding(padding:EdgeInsets.all(16),child:Text('Không có điểm ghé trong kỳ này. Bật tất cả khách để ghé đột xuất.')),
-   for(final r in visible)Card(child:ListTile(title:Text(r['name'].toString()),leading:CircleAvatar(child:Text(r['planned']==true?((r['data'] as Map)['sequence']??'').toString():'–')),subtitle:Text('${r['district']}, ${r['province']} · ${r['full_name']}\n${r['planned']==true?(r['data'] as Map)['plannedDate']:'Ngoài tuyến'} · ${rowSessions(r).isNotEmpty?surveyStatus(rowSessions(r).first):r['visited']==true?'GPS đã xác minh · chưa có phiên':'Chưa ghé'}'),trailing:const Icon(Icons.chevron_right),onTap:busy?null:()=>history(r))),
+   for(final r in visible)Card(child:ListTile(title:Text(r['name'].toString()),leading:r['category']==null
+      ?CircleAvatar(child:Text(r['planned']==true?((r['data'] as Map)['sequence']??'').toString():'–'))
+      :Stack(clipBehavior:Clip.none,children:[
+        CustomerCategoryAvatar(category:r['category']?.toString()),
+        Positioned(bottom:-5,right:-5,child:CircleAvatar(radius:10,
+          backgroundColor:Theme.of(context).colorScheme.surfaceContainerHighest,
+          child:Text(r['planned']==true?((r['data'] as Map)['sequence']??'').toString():'–',
+            style:Theme.of(context).textTheme.labelSmall))),
+      ]),subtitle:Text('${r['district']}, ${r['province']} · ${r['full_name']}\n${r['planned']==true?(r['data'] as Map)['plannedDate']:'Ngoài tuyến'} · ${rowSessions(r).isNotEmpty?surveyStatus(rowSessions(r).first):r['visited']==true?'GPS đã xác minh · chưa có phiên':'Chưa ghé'}'),trailing:const Icon(Icons.chevron_right),onTap:busy?null:()=>history(r))),
   ]);
  }
 }
