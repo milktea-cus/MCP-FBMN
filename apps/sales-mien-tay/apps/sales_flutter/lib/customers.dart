@@ -349,39 +349,57 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
       : ListView.builder(itemCount: customers.length, itemBuilder: (ctx,i) {
         final c = customers[i];
         final category = CustomerCategory.fromId(c.category);
-        final hasGps=customerCoordinatesValid(c.latitude,c.longitude);
-        return Card(child:Column(children:[
-          ListTile(
-            leading: CustomerCategoryAvatar(category:c.category),
-            title: Text(c.name,maxLines:2,overflow:TextOverflow.ellipsis),
-            subtitle: Text('${c.fieldCode??'Đang cấp mã'} · ${category.label} · ${c.district}, ${c.province} · ${c.address}',
-              maxLines:3,overflow:TextOverflow.ellipsis),
-            trailing: c.owner!=widget.service.identity?const Icon(Icons.chevron_right):IconButton(
-              tooltip:'Sửa thông tin',icon:const Icon(Icons.edit_outlined),onPressed:() async {
-                final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>
-                  CustomerEditor(service:widget.service,regions:widget.regions,customer:c,queue:widget.queue)));
-                if(changed==true&&mounted)refresh();
-              }),
-            onTap: () async {final changed=await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) =>
-              CustomerDetail(service: widget.service, customer: c,regions:widget.regions,queue:widget.queue)));
-              if(changed==true&&mounted)refresh();},
-          ),
-          Padding(padding:const EdgeInsets.fromLTRB(14,0,10,4),child:Row(children:[
-            Expanded(child:Text(hasGps?customerLocationLabel(c.locationSource):'Chưa có GPS · tìm theo địa chỉ',
-              maxLines:1,overflow:TextOverflow.ellipsis,style:Theme.of(context).textTheme.labelSmall)),
-            IconButton(tooltip:'Gọi điện',
-              constraints:const BoxConstraints(minWidth:44,minHeight:44),
-              onPressed:customerCallUri(c.phone)==null?null:()=>openCustomerCall(context,c),
-              icon:const Icon(Icons.call_outlined,size:20)),
-            IconButton(tooltip:'Mở Zalo',
-              constraints:const BoxConstraints(minWidth:44,minHeight:44),
-              onPressed:customerZaloUri(c.phone)==null?null:()=>openCustomerZalo(context,c),
-              icon:const CustomerZaloMark()),
-            TextButton.icon(onPressed:()=>openCustomerDirections(context,c),
-              icon:const Icon(Icons.directions_outlined,size:18),
-              label:const Text('Chỉ đường')),
-          ])),
-        ]));
+        return Card(clipBehavior:Clip.antiAlias,child:InkWell(
+          key:Key('customer-card-${c.id}'),
+          onTap:()async{
+            final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>
+              CustomerDetail(service:widget.service,customer:c,regions:widget.regions,queue:widget.queue)));
+            if(changed==true&&mounted)refresh();
+          },
+          child:Padding(padding:const EdgeInsets.fromLTRB(10,8,8,8),
+            child:Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
+              Padding(padding:const EdgeInsets.only(top:4),
+                child:CustomerCategoryAvatar(category:c.category)),
+              const SizedBox(width:8),
+              Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+                Text(c.name,maxLines:2,overflow:TextOverflow.ellipsis,
+                  style:Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height:4),
+                Text(c.province,maxLines:1,overflow:TextOverflow.ellipsis,
+                  style:Theme.of(context).textTheme.bodySmall),
+                const SizedBox(height:8),
+                Text(category.label,maxLines:1,overflow:TextOverflow.ellipsis,
+                  style:TextStyle(color:category.color,fontWeight:FontWeight.w600)),
+              ])),
+              const SizedBox(width:4),
+              SizedBox(width:132,child:Column(crossAxisAlignment:CrossAxisAlignment.end,children:[
+                SizedBox(height:44,child:c.owner!=widget.service.identity
+                  ?const Icon(Icons.chevron_right)
+                  :IconButton(tooltip:'Sửa thông tin',
+                    constraints:const BoxConstraints(minWidth:44,minHeight:44),
+                    icon:const Icon(Icons.edit_outlined,size:20),onPressed:()async{
+                      final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>
+                        CustomerEditor(service:widget.service,regions:widget.regions,customer:c,queue:widget.queue)));
+                      if(changed==true&&mounted)refresh();
+                    })),
+                const SizedBox(height:4),
+                Row(mainAxisAlignment:MainAxisAlignment.end,children:[
+                  IconButton(tooltip:'Gọi điện',
+                    constraints:const BoxConstraints(minWidth:44,minHeight:44),
+                    onPressed:customerCallUri(c.phone)==null?null:()=>openCustomerCall(context,c),
+                    icon:const Icon(Icons.call_outlined,size:20)),
+                  IconButton(tooltip:'Mở Zalo',
+                    constraints:const BoxConstraints(minWidth:44,minHeight:44),
+                    onPressed:customerZaloUri(c.phone)==null?null:()=>openCustomerZalo(context,c),
+                    icon:const CustomerZaloMark()),
+                  IconButton(tooltip:'Chỉ đường',
+                    constraints:const BoxConstraints(minWidth:44,minHeight:44),
+                    onPressed:()=>openCustomerDirections(context,c),
+                    icon:const Icon(Icons.directions_outlined,size:20)),
+                ]),
+              ])),
+            ])),
+        ));
       })),
     ]);
     });
