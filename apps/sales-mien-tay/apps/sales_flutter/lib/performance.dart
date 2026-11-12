@@ -7,6 +7,7 @@ import 'offline_queue.dart';
 import 'models.dart';
 import 'report_xlsx.dart';
 import 'session.dart';
+import 'responsive_controls.dart';
 
 int _amount(Object? v)=>int.tryParse('$v')??0;
 String _money(Object? v)=>saleMoney(v);
@@ -127,19 +128,20 @@ class _PerformancePageState extends State<PerformancePage> {
        child:Text('${s['code']} · ${s['name']}',overflow:TextOverflow.ellipsis))],
     onChanged:busy?null:(value){if(value!=null){setState((){owner=value;province='';customer='';provinceName='';customerName='';});changed();}}),
    const SizedBox(height:8),
-   Row(children:[
-    Expanded(child:DropdownButtonFormField<int>(key:ValueKey('year:$year'),initialValue:year,
-     decoration:const InputDecoration(labelText:'Năm'),items:[
-      for(var y=year-3;y<=year+3;y++)if(y>=2000&&y<=2100)DropdownMenuItem(value:y,child:Text('$y'))],
-     onChanged:busy?null:(v){if(v!=null){setState(()=>year=v);changed();}})),
-    const SizedBox(width:8),
-    Expanded(child:DropdownButtonFormField<String>(initialValue:period,decoration:const InputDecoration(labelText:'Kỳ'),
-     items:const [DropdownMenuItem(value:'month',child:Text('Tháng')),
-      DropdownMenuItem(value:'quarter',child:Text('Quý')),
-      DropdownMenuItem(value:'year',child:Text('Năm'))],
-     onChanged:busy?null:(v){if(v!=null){setState(()=>period=v);changed();}})),
-   ]),
-   if(period!='year')...[
+   AdaptiveFilterRow(children:[
+      DropdownButtonFormField<int>(key:ValueKey('year:$year'),initialValue:year,isExpanded:true,
+        decoration:const InputDecoration(labelText:'Năm'),
+        items:[for(var y=year-3;y<=year+3;y++)if(y>=2000&&y<=2100)
+          DropdownMenuItem(value:y,child:Text('$y'))],
+        onChanged:busy?null:(v){if(v!=null){setState(()=>year=v);changed();}}),
+      DropdownButtonFormField<String>(initialValue:period,isExpanded:true,
+        decoration:const InputDecoration(labelText:'Kỳ'),
+        items:const [DropdownMenuItem(value:'month',child:Text('Tháng')),
+          DropdownMenuItem(value:'quarter',child:Text('Quý')),
+          DropdownMenuItem(value:'year',child:Text('Năm'))],
+        onChanged:busy?null:(v){if(v!=null){setState(()=>period=v);changed();}}),
+    ]),
+    if(period!='year')...[
     const SizedBox(height:8),
     DropdownButtonFormField<int>(key:ValueKey('period:$period'),initialValue:period=='month'?month:quarter,
      decoration:InputDecoration(labelText:period=='month'?'Tháng':'Quý'),
@@ -147,14 +149,16 @@ class _PerformancePageState extends State<PerformancePage> {
      onChanged:busy?null:(v){if(v!=null){setState((){if(period=='month')month=v;else quarter=v;});changed();}}),
    ],
    const SizedBox(height:8),
-   DropdownButtonFormField<String>(initialValue:group,decoration:const InputDecoration(labelText:'Nhóm báo cáo'),
+   DropdownButtonFormField<String>(initialValue:group,isExpanded:true,decoration:const InputDecoration(labelText:'Nhóm báo cáo'),
     items:[for(final k in const ['employee','province','customer','product','month'])DropdownMenuItem(value:k,child:Text('Theo ${_label(k).toLowerCase()}'))],
     onChanged:busy?null:(v){if(v!=null){setState(()=>group=v);changed();}}),
    const SizedBox(height:8),
-   filterButton('Tỉnh',provinceName,'province'),
-   filterButton('Khách',customerName,'customer'),
-   filterButton('Mã CTY',productName,'product'),
-   if(busy)const LinearProgressIndicator(),
+   AdaptiveFilterRow(children:[
+     filterButton('Tỉnh',provinceName,'province'),
+     filterButton('Khách',customerName,'customer'),
+     filterButton('Mã CTY',productName,'product'),
+    ]),
+    if(busy)const LinearProgressIndicator(),
    if(cached)const Text('Đang xem báo cáo lưu trên máy (offline). Không được xuất hoặc xem chi tiết khi chưa xác minh dữ liệu mới.'),
    if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
    if(hasReport)...[
@@ -172,15 +176,15 @@ class _PerformancePageState extends State<PerformancePage> {
     }),
     const SizedBox(height:8),
     Text(data['target_note']?.toString()??'',style:Theme.of(context).textTheme.bodySmall),
-    Text('Nguồn: ${metricData['records']??0} dòng doanh số đã ghi, không gồm dòng hủy, dự kiến hoặc đơn nháp.',
+    Text('Dựa trên ${metricData['records']??0} dòng doanh số đã ghi (không tính nháp/hủy).',
       style:Theme.of(context).textTheme.bodySmall),
     const SizedBox(height:8),
     Wrap(spacing:8,runSpacing:8,children:[
      FilledButton.icon(onPressed:busy||cached||exporting?null:exportXlsx,
-      icon:const Icon(Icons.file_download_outlined),label:Text(exporting?'Đang xuất…':'Xuất Excel (.xlsx)')),
+      icon:const Icon(Icons.file_download_outlined),label:Text(exporting?'Đang xuất…':'Xuất')),
      OutlinedButton.icon(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>
       FieldWorkPage(queue:widget.queue,regions:widget.regions,service:widget.service,report:true))),
-      icon:const Icon(Icons.table_chart_outlined),label:const Text('Báo cáo hiện diện cũ')),
+      icon:const Icon(Icons.table_chart_outlined),label:const Text('Hiện diện')),
     ]),
     const SizedBox(height:8),
     Text('Chi tiết theo ${_label(group).toLowerCase()}',style:Theme.of(context).textTheme.titleMedium),
