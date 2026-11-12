@@ -50,6 +50,46 @@ Widget directoryHarness(OfflineQueue queue, CustomerService service) =>
   )));
 
 void main() {
+  for(final width in [360.0,390.0,430.0]){
+    testWidgets('customer action row has no overflow at ${width.toInt()}px',(tester)async{
+      tester.view.devicePixelRatio=1;
+      tester.view.physicalSize=Size(width,844);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final q=DirectoryQueue();
+      final c=customer('1','Khách lẻ Miền Tây')
+        ..['category']='khach_le'
+        ..['phone']='0901234567';
+      await q.cache('customers:',[c]);
+      final client=MockClient((_)async=>jsonResponse([c]));
+      await tester.pumpWidget(directoryHarness(q,CustomerService(
+        'https://example.test','',identity:'seller-a',client:client)));
+      await tester.pump();await tester.pump();
+      expect(find.byTooltip('Gọi điện'),findsOneWidget);
+      expect(find.byTooltip('Mở Zalo'),findsOneWidget);
+      expect(find.text('Chỉ đường'),findsOneWidget);
+      expect(find.byIcon(Icons.person_outline),findsOneWidget);
+      expect(tester.takeException(),isNull);
+      await tester.pumpWidget(const SizedBox());
+      client.close();q.dispose();
+    });
+  }
+  testWidgets('quick actions disable invalid and unavailable contact links',(tester)async{
+    final q=DirectoryQueue();
+    final c=customer('1','Không có số')..['phone']='invalid';
+    await q.cache('customers:',[c]);
+    final client=MockClient((_)async=>jsonResponse([c]));
+    await tester.pumpWidget(directoryHarness(q,CustomerService(
+      'https://example.test','',identity:'seller-a',client:client)));
+    await tester.pump();await tester.pump();
+    expect(tester.widget<IconButton>(find.byTooltip('Gọi điện')).onPressed,isNull);
+    expect(tester.widget<IconButton>(find.byTooltip('Mở Zalo')).onPressed,isNull);
+    expect(find.text('Chỉ đường'),findsOneWidget);
+    expect(tester.takeException(),isNull);
+    await tester.pumpWidget(const SizedBox());
+    client.close();q.dispose();
+  });
+
   testWidgets('cached customers render before a slow API resolves (mobile 390px)',
       (tester) async {
     tester.view.devicePixelRatio = 1;
