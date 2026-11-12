@@ -12,6 +12,7 @@ import 'offline_queue.dart';
 import 'customer_categories.dart';
 import 'customer_assortment.dart';
 import 'theme.dart';
+import 'responsive_controls.dart';
 import 'customer_location.dart';
 import 'survey_media.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -647,14 +648,18 @@ class _CustomerEditorState extends State<CustomerEditor> {
       TextFormField(controller:companyCode,decoration:const InputDecoration(labelText:'Mã khách CTY (nếu có)',helperText:'Dùng đối chiếu với app công ty; không phải mã Field Work'),
        validator:(v)=>(v??'').trim().length>80?'Mã khách tối đa 80 ký tự':null),
       const SizedBox(height:12),
-      DropdownButtonFormField<String>(initialValue:province,decoration:const InputDecoration(labelText:'Tỉnh/TP (địa giới cũ) *'),
-        items:widget.regions.provinces.map((p)=>DropdownMenuItem(value:p,child:Text(p))).toList(),
-        onChanged:(v)=>setState(() {province=v;district=null;})),
-      const SizedBox(height:12),
-      DropdownButtonFormField<String>(key:ValueKey(province),initialValue:district,
-        decoration:const InputDecoration(labelText:'Huyện/Quận *'),
-        items:(widget.regions.districts[province]??<String>[]).map((d)=>DropdownMenuItem(value:d,child:Text(d))).toList(),
-        onChanged:province==null?null:(v)=>setState(()=>district=v)),
+      ResponsiveFormRow(children:[
+        DropdownButtonFormField<String>(initialValue:province,isExpanded:true,
+          decoration:const InputDecoration(labelText:'Tỉnh/TP *'),
+          items:widget.regions.provinces.map((p)=>DropdownMenuItem(
+            value:p,child:Text(p,overflow:TextOverflow.ellipsis))).toList(),
+          onChanged:(v)=>setState((){province=v;district=null;})),
+        DropdownButtonFormField<String>(key:ValueKey(province),initialValue:district,isExpanded:true,
+          decoration:const InputDecoration(labelText:'Huyện/Quận *'),
+          items:(widget.regions.districts[province]??<String>[]).map((d)=>
+            DropdownMenuItem(value:d,child:Text(d,overflow:TextOverflow.ellipsis))).toList(),
+          onChanged:province==null?null:(v)=>setState(()=>district=v)),
+      ]),
       const SizedBox(height:12),
       TextFormField(controller:address,decoration:const InputDecoration(labelText:'Địa chỉ chi tiết *'),
         validator:(v)=>(v??'').trim().length<3?'Vui lòng nhập địa chỉ':null),
