@@ -22,7 +22,7 @@ void main(){
       addTearDown(tester.view.resetDevicePixelRatio);
       var opened=0;
       await tester.pumpWidget(shell(update:()=>opened++));
-      await tester.state<ScaffoldState>(find.byType(Scaffold)).openDrawer();
+      tester.state<ScaffoldState>(find.byType(Scaffold)).openDrawer();
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('android-update-menu')),findsOneWidget);
       await tester.tap(find.byKey(const Key('android-update-menu')));
@@ -34,7 +34,7 @@ void main(){
 
   testWidgets('PWA drawer with no native callback hides APK update', (tester)async{
     await tester.pumpWidget(shell());
-    await tester.state<ScaffoldState>(find.byType(Scaffold)).openDrawer();
+    tester.state<ScaffoldState>(find.byType(Scaffold)).openDrawer();
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('android-update-menu')),findsNothing);
     expect(find.text('Cập nhật ứng dụng'),findsNothing);
