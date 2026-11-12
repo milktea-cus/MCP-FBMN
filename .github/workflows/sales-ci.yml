@@ -118,6 +118,24 @@ jobs:
       - run: flutter pub get
       - name: Generate brand icons
         run: python3 scripts/generate_app_icons.py
+      - name: Capture canonical generated Android files for source control
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile
+          root=Path('android')
+          excluded={'local.properties','key.properties','.DS_Store'}
+          with zipfile.ZipFile('/tmp/field-work-android-scaffold.zip','w',zipfile.ZIP_DEFLATED) as out:
+              for file in root.rglob('*'):
+                  if not file.is_file() or file.name in excluded or any(s in file.parts for s in ('.gradle','build','.cxx')):
+                      continue
+                  out.write(file,arcname=file.as_posix())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: field-work-android-scaffold
+          path: /tmp/field-work-android-scaffold.zip
+          retention-days: 1
       - name: Compile debug APK
         run: flutter build apk --debug
       - uses: actions/upload-artifact@v4
