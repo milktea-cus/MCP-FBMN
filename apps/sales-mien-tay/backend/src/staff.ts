@@ -13,6 +13,7 @@ export async function staffRoutes(req:Request,env:AuthEnv,actor:{sub:string;admi
  }
  if(req.method!=='POST')return json({error:'Method not allowed'},405);
  let data:Record<string,unknown>;try{const raw=await req.text();if(raw.length>64000)throw Error();data=JSON.parse(raw);}catch{return json({error:'JSON không hợp lệ'},400);}
+ if(!data||typeof data!=='object'||Array.isArray(data))return json({error:'Dữ liệu nhân viên không hợp lệ.'},400);
  if(data?.job_title!==undefined&&(typeof data.job_title!=='string'||data.job_title.trim().length>120))return json({error:'Chức danh không hợp lệ (tối đa 120 ký tự).'},400);
  const reportChanges=data.report_changes===undefined?[]:data.report_changes;
  if(!Array.isArray(reportChanges)||reportChanges.length>200)return json({error:'Danh sách cấp dưới không hợp lệ.'},400);
