@@ -189,6 +189,20 @@ class _BrandCatalogPageState extends State<BrandCatalogPage>{
    'client_ref':const Uuid().v4(),'name':name,'active':true
   });
  }
+ Future<void> addAlias(Map<String,dynamic> brand)async{
+  if(brand['active']!=true)return;
+  final ctl=TextEditingController();
+  final alias=await showDialog<String>(context:context,builder:(ctx)=>AlertDialog(
+   title:Text('Tên thay thế cho ${brand['name']}'),
+   content:TextField(controller:ctl,maxLength:120,
+    decoration:const InputDecoration(labelText:'Tên cũ / biến thể tên nhãn')),
+   actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Hủy')),
+    FilledButton(onPressed:()=>Navigator.pop(ctx,ctl.text.trim()),child:const Text('Lưu'))]));
+  ctl.dispose();
+  if(alias==null||alias.isEmpty||!mounted)return;
+  await save('/api/v1/catalog/brand-aliases',{
+   'client_ref':const Uuid().v4(),'brand_id':brand['id'],'alias_name':alias});
+ }
  Future<void> toggle(Map<String,dynamic> brand)async{
   final enabled=brand['active']==true;
   final confirmed=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(
@@ -228,9 +242,16 @@ class _BrandCatalogPageState extends State<BrandCatalogPage>{
    if(error!=null)Text(error!),
    for(final brand in brands)Card(child:ListTile(
     title:Text(brand['name'].toString()),
-    subtitle:Text('${brand['product_count']??0} SKU · ${brand['active']==true?'Đang dùng':'Ngừng dùng'}'),
-    trailing:widget.admin?Switch(value:brand['active']==true,
-      onChanged:busy||offline?null:(_)=>toggle(brand)):null)),
+    subtitle:Text('${brand['product_count']??0} SKU · ${brand['active']==true?'Đang dùng':'Ngừng dùng'}'
+     '${(brand['aliases'] as List? ?? []).isNotEmpty?'\nTên khác: ${(brand['aliases'] as List).join(', ')}':''}'),
+    isThreeLine:(brand['aliases'] as List? ?? []).isNotEmpty,
+    trailing:widget.admin?Wrap(mainAxisSize:MainAxisSize.min,children:[
+      IconButton(tooltip:'Thêm tên thay thế',onPressed:busy||offline||
+       brand['active']!=true?null:()=>addAlias(brand),
+       icon:const Icon(Icons.label_outline)),
+      Switch(value:brand['active']==true,
+       onChanged:busy||offline?null:(_)=>toggle(brand)),
+    ]):null)),
   ]),
  );
 }
