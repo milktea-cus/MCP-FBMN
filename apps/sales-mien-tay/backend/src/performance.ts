@@ -56,7 +56,7 @@ async function validateScope(sql:Db,u:User,f:ReportFilters):Promise<string|null>
  if(f.customer){
   const rows=await sql`SELECT 1 FROM customers c WHERE c.id=${f.customer}::uuid
   AND (${f.owner==='all'} OR c.owner_sub=${f.owner})
-  AND public.sales_can_access(${u.sub},c.owner_sub,c.province,c.district)
+  AND public.sales_customer_allowed(${u.sub},c.id,'report')
   AND (${!f.province} OR c.province=${f.province})`;
   if(!rows.length)return 'Không có quyền khách hàng hoặc địa bàn';
  }
@@ -111,7 +111,7 @@ export async function performanceRoutes(req:Request,env:{DATABASE_URL:string},u:
   }
   if(kind==='province'){
    const rows=await sql`SELECT DISTINCT c.province AS id,c.province AS name,'' AS code FROM customers c
-     WHERE public.sales_can_access(${u.sub},c.owner_sub,c.province,c.district)
+     WHERE public.sales_customer_allowed(${u.sub},c.id,'report')
      AND (${owner==='all'&&manager} OR c.owner_sub=${owner}) AND c.province ILIKE '%'||${q}||'%'
      ORDER BY name LIMIT 100`;
    return reply({items:rows});
@@ -119,7 +119,7 @@ export async function performanceRoutes(req:Request,env:{DATABASE_URL:string},u:
   if(kind==='customer'){
    if(owner==='all'&&!manager)return invalid('Không có quyền toàn đội',403);
    const rows=await sql`SELECT c.id::text AS id,c.code, c.name FROM customers c
-     WHERE public.sales_can_access(${u.sub},c.owner_sub,c.province,c.district)
+     WHERE public.sales_customer_allowed(${u.sub},c.id,'report')
      AND (${owner==='all'&&manager} OR c.owner_sub=${owner})
      AND (c.name ILIKE '%'||${q}||'%' OR c.code ILIKE '%'||${q}||'%')
      ORDER BY name LIMIT 100`;
@@ -154,7 +154,7 @@ export async function performanceRoutes(req:Request,env:{DATABASE_URL:string},u:
      AND (${owner==='all'&&manager} OR a.owner_sub=${owner})
      AND (${!province} OR c.province=${province})
      AND (${!customer} OR a.customer_id::text=${customer}) AND (${!product} OR a.product_id::text=${product})
-     AND public.sales_can_access(${u.sub},a.owner_sub,c.province,c.district)
+     AND public.sales_customer_allowed(${u.sub},c.id,'report')
      AND (${!key} OR CASE
         WHEN ${group}='employee' THEN a.owner_sub
         WHEN ${group}='province' THEN c.province
@@ -187,7 +187,7 @@ export async function performanceRoutes(req:Request,env:{DATABASE_URL:string},u:
       AND (${owner==='all'&&manager} OR a.owner_sub=${owner})
       AND (${!province} OR c.province=${province}) AND (${!customer} OR a.customer_id::text=${customer})
       AND (${!product} OR a.product_id::text=${product})
-      AND public.sales_can_access(${u.sub},a.owner_sub,c.province,c.district)
+      AND public.sales_customer_allowed(${u.sub},c.id,'report')
     GROUP BY 1 ORDER BY 1 LIMIT 2001`,
   sql`SELECT coalesce(sum(a.amount),0)::text AS amount,count(*)::int AS records,coalesce(sum(a.quantity),0)::text AS quantity
     FROM sales_actuals a JOIN customers c ON c.id=a.customer_id AND c.owner_sub=a.owner_sub
@@ -195,7 +195,7 @@ export async function performanceRoutes(req:Request,env:{DATABASE_URL:string},u:
       AND (${owner==='all'&&manager} OR a.owner_sub=${owner})
       AND (${!province} OR c.province=${province}) AND (${!customer} OR a.customer_id::text=${customer})
       AND (${!product} OR a.product_id::text=${product})
-      AND public.sales_can_access(${u.sub},a.owner_sub,c.province,c.district)`,
+      AND public.sales_customer_allowed(${u.sub},c.id,'report')`,
   mode==='none'?Promise.resolve([]):sql`SELECT t.owner_sub,t.entity_id,to_char(t.month,'YYYY-MM') AS month,t.amount::text AS amount,
       s.full_name AS employee_name,s.employee_code,
       c.province,c.code AS customer_code,c.name AS customer_name,p.company_code,p.name AS product_name
@@ -205,7 +205,7 @@ export async function performanceRoutes(req:Request,env:{DATABASE_URL:string},u:
      WHERE t.dimension=${mode} AND t.month>=make_date(${year},${start},1) AND t.month<make_date(${endYear},${endMonth},1)
        AND (${owner==='all'&&manager} OR t.owner_sub=${owner})
        AND public.sales_can_access(${u.sub},t.owner_sub,NULL,NULL)
-       AND (${mode!=='customer'} OR (c.id IS NOT NULL AND public.sales_can_access(${u.sub},t.owner_sub,c.province,c.district)))
+       AND (${mode!=='customer'} OR (c.id IS NOT NULL AND public.sales_customer_allowed(${u.sub},c.id,'report')))
        AND (${mode!=='customer'||!customer} OR t.entity_id=${customer})
        AND (${mode!=='customer'||!province} OR c.province=${province})
        AND (${mode!=='product'||!product} OR t.entity_id=${product})
