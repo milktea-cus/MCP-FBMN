@@ -59,8 +59,8 @@ export function marketBrandsFromLegacyAnswers(value:unknown):string[]|null{
  if(!text.trim())return null;
  const excluded=new Set(['khác','không có','không','chưa có','chưa rõ','không rõ','không xác định','none']);
  const names:string[]=[];const known=new Set<string>();
- for(const item of text.split(/[,;\\n/]+|\\s+hoặc\\s+/i)){
-  const brand=item.trim().replace(/\\s+/g,' ');
+ for(const item of text.split(/[,;\n/]+|\s+hoặc\s+/i)){
+  const brand=item.trim().replace(/\s+/g,' ');
   if(!brand||brand.length>100||excluded.has(brand.toLowerCase()))continue;
   const key=brand.toLocaleLowerCase('vi');
   if(!known.has(key)){known.add(key);names.push(brand);}
