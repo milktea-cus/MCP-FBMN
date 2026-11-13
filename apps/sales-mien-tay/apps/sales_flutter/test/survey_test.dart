@@ -1,6 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
 import '../lib/surveys.dart';
 void main(){
+ test('market sighting note parses MGP / Thành Đạt once per brand, no SKU',(){
+  expect(marketBrandNamesFromAnswer('MGP, Thành Đạt, mgp'),['MGP','Thành Đạt']);
+  expect(marketBrandNamesFromAnswer('MGP hoặc Thành Đạt'),['MGP','Thành Đạt']);
+  expect(marketBrandNamesFromAnswer(['MGP','MGP','Thành Đạt']),['MGP','Thành Đạt']);
+  expect(marketBrandNamesFromAnswer('không có'),isEmpty);
+  expect(marketBrandNamesFromAnswer(''),isEmpty);
+ });
+
  test('multi-choice validates distinct allowed brands and required selection',(){
   final qs=<Map<String,dynamic>>[{'id':'brands','label':'Nhãn','type':'multi_choice','required':true,'options':['A','B','Khác']}];
   expect(checklistError(qs,{'brands':['A','B']}),isNull);
