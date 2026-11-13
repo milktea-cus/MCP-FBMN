@@ -8,7 +8,7 @@ void main(){
     'purpose':'Phát triển đại lý','id':'server-1','visit_count':0},
   ];
   final items=routeTemplateStops(stops,[]);
-  expect(items,singleton);
+  expect(items,hasLength(1));
   expect(items.single['stop_kind'],'area');
   expect(items.single.containsKey('customer_id'),false);
   expect(items.single.containsKey('id'),false);
