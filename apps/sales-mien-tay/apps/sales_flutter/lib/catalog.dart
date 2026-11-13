@@ -245,7 +245,7 @@ class _BrandCatalogPageState extends State<BrandCatalogPage>{
     subtitle:Text('${brand['product_count']??0} SKU · ${brand['active']==true?'Đang dùng':'Ngừng dùng'}'
      '${(brand['aliases'] as List? ?? []).isNotEmpty?'\nTên khác: ${(brand['aliases'] as List).join(', ')}':''}'),
     isThreeLine:(brand['aliases'] as List? ?? []).isNotEmpty,
-    trailing:widget.admin?Wrap(mainAxisSize:MainAxisSize.min,children:[
+    trailing:widget.admin?Row(mainAxisSize:MainAxisSize.min,children:[
       IconButton(tooltip:'Thêm tên thay thế',onPressed:busy||offline||
        brand['active']!=true?null:()=>addAlias(brand),
        icon:const Icon(Icons.label_outline)),
