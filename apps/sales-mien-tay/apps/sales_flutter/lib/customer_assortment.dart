@@ -6,6 +6,12 @@ import 'package:uuid/uuid.dart';
 import 'offline_queue.dart';
 import 'session.dart';
 
+String brandStatusLabel(String? status)=>switch(status){
+ 'trading'=>'Đang bán',
+ 'imported'=>'Đã nhập',
+ 'ordered'=>'Đã đặt',
+ _=>'Chưa xác minh',
+};
 String assortmentLabel(String? status)=>switch(status){
  'trading'=>'Đang kinh doanh',
  'imported'=>'Đã nhập hàng',
@@ -76,6 +82,19 @@ class CustomerAssortmentApi{
   });
   return (data['items'] as List)
     .map((v)=>Map<String,dynamic>.from(v as Map)).toList();
+ }
+ Future<List<Map<String,dynamic>>> brands(String customerId)async{
+  final data=await get('/api/v1/customers/$customerId/brands');
+  return (data['items'] as List).map((v)=>Map<String,dynamic>.from(v as Map)).toList();
+ }
+ Future<Map<String,dynamic>> brandAudit(String customerId)async=>
+  get('/api/v1/customers/$customerId/brands/audit');
+ Future<Map<String,dynamic>> updateBrand(String customerId,Map<String,dynamic> data)async{
+  final uri=_uri('/api/v1/customers/$customerId/brands');
+  final response=await (client?.post(uri,headers:headers,body:jsonEncode(data))??
+   http.post(uri,headers:headers,body:jsonEncode(data)))
+   .timeout(const Duration(seconds:12));
+  return decodeApi(response);
  }
  Future<List<Map<String,dynamic>>> audit(String customerId)async{
   final data=await get('/api/v1/customers/$customerId/products/audit',{'limit':'40'});
@@ -256,7 +275,10 @@ class _CustomerAssortmentSectionState extends State<CustomerAssortmentSection>{
   final display=items.where((x)=>q.isEmpty||[
    x['company_code'],x['name'],x['sku'],x['brand']
   ].any((t)=>(t?.toString()??'').toLowerCase().contains(q))).toList();
-  return Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(
+  return Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+   _CustomerBrandsPanel(customerId:widget.customerId,api:widget.api,
+    queue:widget.queue,editable:widget.editable),
+   Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(
    crossAxisAlignment:CrossAxisAlignment.stretch,children:[
     Wrap(alignment:WrapAlignment.spaceBetween,spacing:6,runSpacing:6,children:[
      Text('Sản phẩm của điểm bán',style:Theme.of(context).textTheme.titleMedium),
@@ -313,13 +335,145 @@ class _CustomerAssortmentSectionState extends State<CustomerAssortmentSection>{
        style:Theme.of(context).textTheme.bodySmall)),
     ],
    ],
-  )));
+  )))]);
+ }
+}
+
+
+class _CustomerBrandsPanel extends StatefulWidget{
+ final String customerId;
+ final CustomerAssortmentApi api;
+ final OfflineQueue? queue;
+ final bool editable;
+ const _CustomerBrandsPanel({required this.customerId,required this.api,
+  required this.queue,required this.editable});
+ @override State<_CustomerBrandsPanel> createState()=>_CustomerBrandsPanelState();
+}
+class _CustomerBrandsPanelState extends State<_CustomerBrandsPanel>{
+ List<Map<String,dynamic>> rows=[];
+ bool expanded=false,loading=false,busy=false,offline=false;
+ String? error;
+ int pendingBefore=0;
+ String get cacheKey=>'customer-brands:${widget.customerId}';
+ @override void initState(){
+  super.initState();
+  pendingBefore=widget.queue?.pending.length??0;
+  widget.queue?.addListener(_queueChanged);
+ }
+ @override void dispose(){
+  widget.queue?.removeListener(_queueChanged);
+  super.dispose();
+ }
+ void _queueChanged(){
+  if(!mounted||!expanded||widget.queue==null)return;
+  final count=widget.queue!.pending.length;
+  if(count<pendingBefore)unawaited(refresh());
+  pendingBefore=count;
+ }
+ Future<void> open()async{
+  if(widget.queue!=null){
+   try{final cached=await widget.queue!.cached(cacheKey);
+    if(mounted)setState(()=>rows=cached);}catch(_){}
+  }
+  if(mounted)await refresh();
+ }
+ Future<void> refresh()async{
+  if(loading)return;
+  setState((){loading=true;error=null;});
+  try{
+   final data=await widget.api.brands(widget.customerId);
+   if(widget.queue!=null)await widget.queue!.cache(cacheKey,data);
+   if(mounted)setState((){rows=data;offline=false;});
+  }catch(e){
+   if(!mounted)return;
+   final denied=e is ApiFailure&&(e.status==401||e.status==403||e.status==404);
+   setState((){
+    offline=true;
+    if(denied){rows=[];error='Quyền xem nhãn hàng đã thay đổi.';}
+    else error='Đang xem dữ liệu đã lưu trên máy; chưa cập nhật.';
+   });
+  }finally{if(mounted)setState(()=>loading=false);}
+ }
+ Future<void> change(Map<String,dynamic> row,String action)async{
+  if(busy||!widget.editable||offline)return;
+  final reason=await showDialog<String>(
+   context:context,builder:(_)=>_AssortmentReasonDialog(
+    action:action,label:'nhãn hàng'));
+  if(reason==null||!mounted)return;
+  final brandId=row['brand_id']?.toString()??'';
+  final path='/api/v1/customers/${widget.customerId}/brands';
+  if(widget.queue?.pending.any((job)=>
+     job['path']==path&&(job['payload'] as Map?)?['brand_id']==brandId)==true){
+   ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content:Text('Nhãn này đang chờ đồng bộ.')));
+   return;
+  }
+  final payload=<String,dynamic>{
+    'client_ref':const Uuid().v4(),
+    'brand_id':brandId,
+    'expected_version':(row['manual_version'] as num?)?.toInt()??0,
+    'action':action,'reason':reason,
+  };
+  setState(()=>busy=true);
+  try{
+   if(widget.queue!=null){
+    await widget.queue!.enqueue(path,payload);
+    if(mounted)ScaffoldMessenger.of(context).showSnackBar(
+     const SnackBar(content:Text('Đã lưu xác minh nhãn trên máy · chờ đồng bộ.')));
+   }else{
+    await widget.api.updateBrand(widget.customerId,payload);
+    if(mounted)await refresh();
+   }
+  }catch(e){
+   if(mounted)ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content:Text('Chưa lưu xác minh nhãn: $e')));
+  }finally{if(mounted)setState(()=>busy=false);}
+ }
+ @override Widget build(BuildContext context){
+  final selling=rows.where((r)=>r['is_trading']==true).length;
+  final pending=widget.queue?.pending.where((x)=>
+    x['path']=='/api/v1/customers/${widget.customerId}/brands').length??0;
+  return Card(child:ExpansionTile(
+   initiallyExpanded:false,
+   onExpansionChanged:(value){
+    setState(()=>expanded=value);
+    if(value&&rows.isEmpty)unawaited(open());
+   },
+   title:const Text('Nhãn hàng tại điểm bán'),
+   subtitle:Text('$selling đang bán · $pending thay đổi chờ đồng bộ'),
+   childrenPadding:const EdgeInsets.symmetric(horizontal:10,vertical:6),
+   children:[
+    const Text('Đã đặt, đã nhập và đang bán là ba bằng chứng riêng. '
+     'Khảo sát không tự biến thành xác minh bán hàng.'),
+    if(loading)const LinearProgressIndicator(minHeight:2),
+    if(error!=null)Text(error!,style:Theme.of(context).textTheme.bodySmall),
+    if(rows.isEmpty&&!loading)const Padding(padding:EdgeInsets.all(8),
+     child:Text('Chưa có nhãn hàng chuẩn. Admin tạo nhãn trong Danh mục SKU.')),
+    for(final brand in rows)ListTile(
+     dense:true,
+     leading:Icon(assortmentIcon(brand['status']?.toString())),
+     title:Text(brand['name']?.toString()??''),
+     subtitle:Text('${brandStatusLabel(brand['status']?.toString())}'
+      '${brand['manual_trading']==true?' · Xác minh nhãn':''}'
+      '${brand['sku_trading']==true?' · Xác minh SKU':''}',
+      maxLines:2,overflow:TextOverflow.ellipsis),
+     trailing:widget.editable&&!offline?IconButton(
+      tooltip:brand['manual_trading']==true?'Bỏ xác minh nhãn':'Xác minh nhãn đang bán',
+      onPressed:busy?null:()=>change(brand,
+       brand['manual_trading']==true?'unverify':'verify'),
+      icon:Icon(brand['manual_trading']==true?
+       Icons.remove_circle_outline:Icons.verified_outlined)):null),
+    if(rows.isNotEmpty)Align(alignment:Alignment.centerRight,child:TextButton.icon(
+      onPressed:loading?null:refresh,icon:const Icon(Icons.refresh),
+      label:const Text('Cập nhật nhãn hàng'))),
+   ],
+  ));
  }
 }
 
 class _AssortmentReasonDialog extends StatefulWidget{
- final String action;
- const _AssortmentReasonDialog({required this.action});
+ final String action,label;
+ const _AssortmentReasonDialog({required this.action,this.label='SKU'});
  @override State<_AssortmentReasonDialog> createState()=>_AssortmentReasonDialogState();
 }
 class _AssortmentReasonDialogState extends State<_AssortmentReasonDialog>{
@@ -327,7 +481,7 @@ class _AssortmentReasonDialogState extends State<_AssortmentReasonDialog>{
  String value='';
  @override void dispose(){reason.dispose();super.dispose();}
  @override Widget build(BuildContext context)=>AlertDialog(
-  title:Text(widget.action=='verify'?'Xác minh SKU đang kinh doanh':'Bỏ xác minh SKU'),
+  title:Text(widget.action=='verify'?'Xác minh ${widget.label} đang kinh doanh':'Bỏ xác minh ${widget.label}'),
   content:SizedBox(width:420,child:Column(mainAxisSize:MainAxisSize.min,children:[
    const Text('Chỉ xác minh nếu đã kiểm tra thực tế. Đơn xuất không tự chứng minh khách đang bán.'),
    const SizedBox(height:12),
