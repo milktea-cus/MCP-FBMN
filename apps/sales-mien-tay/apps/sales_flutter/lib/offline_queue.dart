@@ -66,15 +66,15 @@ class OfflineQueue extends ChangeNotifier {
  }
  Future<void> enqueue(String path,Map<String,dynamic> data,{Uint8List? photo,Uint8List? thumbnail,String? sha256,String? thumbnailSha256,String? mime,String method='POST',List<String> dependsOn=const []}) async{
   if(_closed)throw StateError('Phiên đã đóng');
-  if(!['/api/v1/records','/api/v1/customers','/api/v1/monthly-plans','/api/v1/day-routes','/api/v1/area-visits'].contains(path)&&!RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}(/stops(/[a-f0-9-]{36})?)?$').hasMatch(path)&&!RegExp(r'^/api/v1/monthly-plans/[a-f0-9-]{36}$').hasMatch(path)&&!RegExp(r'^/api/v1/records/[a-f0-9-]{36}$').hasMatch(path)&&!RegExp(r'^/api/v1/notifications/[0-9]{1,19}/read$').hasMatch(path)&&!RegExp(r'^/api/v1/customers/[a-f0-9-]{36}(/visits|/photos|/products|/cover)?$').hasMatch(path))throw ArgumentError('Unsupported offline operation');
+  if(!['/api/v1/records','/api/v1/customers','/api/v1/monthly-plans','/api/v1/day-routes','/api/v1/area-visits'].contains(path)&&!RegExp(r'^/api/v1/area-visits/[a-f0-9-]{36}/photos$').hasMatch(path)&&!RegExp(r'^/api/v1/prospects/[a-f0-9-]{36}/convert$').hasMatch(path)&&!RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}(/stops(/[a-f0-9-]{36})?)?$').hasMatch(path)&&!RegExp(r'^/api/v1/monthly-plans/[a-f0-9-]{36}$').hasMatch(path)&&!RegExp(r'^/api/v1/records/[a-f0-9-]{36}$').hasMatch(path)&&!RegExp(r'^/api/v1/notifications/[0-9]{1,19}/read$').hasMatch(path)&&!RegExp(r'^/api/v1/customers/[a-f0-9-]{36}(/visits|/photos|/products|/cover)?$').hasMatch(path))throw ArgumentError('Unsupported offline operation');
   final id=data['client_ref']?.toString()??const Uuid().v4();
   if(photo!=null&&(photo.isEmpty||photo.length>5*1024*1024))throw StateError('Ảnh phải nhỏ hơn 5 MB');
   if(thumbnail!=null&&(photo==null||thumbnail.isEmpty||thumbnail.length>153600||sha256==null||thumbnailSha256==null))throw StateError('Thumbnail/checksum không hợp lệ');
   await _put({'key':'$namespace:$id','namespace':namespace,'account':identity,'created':DateTime.now().millisecondsSinceEpoch,
-    'path':path,'method':method,'payload':{...data,'client_ref':id},'status':'pending','attempts':0,
+    'path':path,'method':method,'payload':{...data,'client_ref':id},'status':'pending','attempts':0,'depends_on':dependsOn,
     if(photo!=null)'photo':photo,if(thumbnail!=null)'thumbnail':thumbnail,
     if(sha256!=null)'sha256':sha256,if(thumbnailSha256!=null)'thumbnail_sha256':thumbnailSha256,
-    if(mime!=null)'mime':mime,'upload_id':const Uuid().v4()});
+    if(mime!=null)'mime':mime,if(RegExp(r'^/api/v1/area-visits/[a-f0-9-]{36}/photos$').hasMatch(path))'area_visit_id':path.split('/')[4], 'upload_id':id});
   await reload();
   if(_timer!=null)unawaited(sync());
  }
@@ -179,7 +179,7 @@ class OfflineQueue extends ChangeNotifier {
      if((row['path'] as String).endsWith('/photos')){
       final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
       final thumb=row['thumbnail'];final modern=thumb is List;
-      final upload=await http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes).timeout(const Duration(seconds:30));
+      final upload=await http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes).timeout(const Duration(seconds:30));
       final result=decodeApi(upload);
       if(row['session_id']!=null){await _ackSurvey(row,result['item'] as Map);}else{await _remove(row['key'] as String);}continue;
      }
