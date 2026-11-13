@@ -237,7 +237,9 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       return response({items:rows});
     }
     if (req.method!=='POST' || match[3])return fail('Method not allowed',405);
-    if(current.owner_sub!==actor.sub)return fail('Chỉ check-in khách hàng của mình',403);
+    // Direct responsibility permits fieldwork on Admin-owned customers, not profile modification.
+    const work=await db`SELECT public.sales_customer_fieldwork_allowed(${actor.sub},${id}::uuid) AS allowed`;
+    if(work[0]?.allowed!==true)return fail('Khách không thuộc phạm vi công tác trực tiếp',403);
     let data:ObjectBody;try{data=await input(req);}catch{return fail('JSON không hợp lệ');}
     if(!uuid.test(String(data.client_ref??'')))return fail('client_ref UUID bắt buộc');
     if(!point(data.latitude,data.longitude,data.accuracy_m) || typeof data.accuracy_m!=='number' || data.accuracy_m>100)
@@ -248,13 +250,24 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
     if(distance>200)return fail('Vị trí check-in ngoài bán kính 200m',422);
     const captured=typeof data.captured_at==='string'?Date.parse(data.captured_at):Date.now();
     if(!Number.isFinite(captured)||captured>Date.now()+60000||captured<Date.now()-30*86400000)return fail('Thời gian ghi nhận GPS không hợp lệ',422);
-    const rows=await db`INSERT INTO field_visits(customer_id,owner_sub,client_ref,latitude,longitude,accuracy_m,distance_m,note,checkin_at)
+    const stop=data.route_stop_id;
+    if(stop!=null&&(typeof stop!=='string'||!uuid.test(stop)))return fail('Điểm ghé không hợp lệ');
+    const rows=await db`INSERT INTO field_visits(customer_id,owner_sub,client_ref,latitude,longitude,accuracy_m,distance_m,note,checkin_at,day_route_stop_id)
       SELECT ${id}::uuid,${actor.sub},${String(data.client_ref)}::uuid,${data.latitude as number},${data.longitude as number},
-        ${data.accuracy_m},${distance},${optional(data.note,2000)},${new Date(captured).toISOString()}::timestamptz
-      WHERE EXISTS(SELECT 1 FROM customers c WHERE c.id=${id}::uuid AND public.sales_customer_allowed(${actor.sub},c.id,'view'))
+        ${data.accuracy_m},${distance},${optional(data.note,2000)},${new Date(captured).toISOString()}::timestamptz,${stop??null}::uuid
+      WHERE EXISTS(SELECT 1 FROM customers c WHERE c.id=${id}::uuid AND public.sales_customer_fieldwork_allowed(${actor.sub},c.id))
+        AND (${stop==null} OR EXISTS(SELECT 1 FROM public.field_route_stops s
+         JOIN public.field_day_routes r ON r.id=s.day_route_id
+         JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id
+         WHERE s.id=${stop??null}::uuid AND s.customer_id=${id}::uuid AND s.stop_kind='customer'
+           AND s.owner_sub=${actor.sub} AND r.owner_sub=${actor.sub}
+           AND r.status='ready' AND p.status='planned'
+           AND r.route_date=(${new Date(captured).toISOString()}::timestamptz AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+           AND public.sales_monthly_plan_scope_allowed(${actor.sub},p.scope_kind,p.scope_key,p.province,p.district)))
       ON CONFLICT(owner_sub,client_ref) DO NOTHING RETURNING *`;
     const existing=rows.length?rows:await db`SELECT * FROM field_visits WHERE owner_sub=${actor.sub} AND client_ref=${String(data.client_ref)}::uuid AND customer_id=${id}::uuid`;
-    if(!existing.length)return fail('client_ref đã dùng cho điểm bán khác',409);
+    if(!existing.length)return fail('Check-in sai tuyến hoặc UUID đã được dùng',409);
+    if((existing[0].day_route_stop_id??null)!==(stop??null))return fail('UUID check-in không khớp điểm ghé',409);
     if(rows.length)await db`INSERT INTO field_audit_events(actor_sub,action,entity_type,entity_id) VALUES (${actor.sub},'checkin','visit',${rows[0].id}::uuid)`;
     return response({item:existing[0],idempotent:rows.length===0},rows.length?201:200);
   }
