@@ -12,6 +12,7 @@ import 'staff_page.dart';
 import 'offline_queue.dart';
 import 'notifications.dart';
 import 'field_work.dart';
+import 'work_hub.dart';
 import 'performance.dart';
 import 'orders.dart';
 import 'surveys.dart';
@@ -98,8 +99,9 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
   bool _loading = false, _fetchingRecords = false;
   int _selectedIndex = 0;
   String? _message;
+  List<int> get _visibleMenuIndices=>[for(var i=0;i<_sections.length;i++)if(widget.me['role']=='admin'||i!=2)i];
 
-  List<String> get _sections => ['Tổng quan', 'Khách hàng / Điểm bán', ...moduleKinds.map((e) => moduleLabels[e]!), 'Báo cáo tháng', 'Danh mục SKU', 'Tra tồn', 'Ra đơn'];
+  List<String> get _sections => ['Tổng quan', 'Khách hàng / Điểm bán', ...moduleKinds.map((e) => e=='survey'?'Quản trị khảo sát':e=='visit'?'Công tác':moduleLabels[e]!), 'Báo cáo tháng', 'Danh mục SKU', 'Tra tồn', 'Ra đơn'];
   List<IconData> get _icons => const [
     Icons.dashboard_outlined, Icons.storefront_outlined, Icons.store_outlined, Icons.flag_outlined,
     Icons.payments_outlined, Icons.route_outlined, Icons.handshake_outlined,
@@ -321,9 +323,9 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
           builder:(_)=>FieldNotificationInbox(store:_notifications))),
       ),
       bottomNavigationBar: narrow ? NavigationBar(
-        selectedIndex: const [0,1,2,5,9].contains(_selectedIndex)?const [0,1,2,5,9].indexOf(_selectedIndex):0,
-        onDestinationSelected:(i)=>setState(()=>_selectedIndex=const [0,1,2,5,9][i]),
-        destinations:const [NavigationDestination(icon:Icon(Icons.dashboard_outlined),label:'Tổng quan'),NavigationDestination(icon:Icon(Icons.storefront_outlined),label:'Khách hàng'),NavigationDestination(icon:Icon(Icons.assignment_outlined),label:'Khảo sát'),NavigationDestination(icon:Icon(Icons.route_outlined),label:'Lịch trình'),NavigationDestination(icon:Icon(Icons.analytics_outlined),label:'Báo cáo')],
+        selectedIndex: const [0,1,5,9].contains(_selectedIndex)?const [0,1,5,9].indexOf(_selectedIndex):0,
+        onDestinationSelected:(i)=>setState(()=>_selectedIndex=const [0,1,5,9][i]),
+        destinations:const [NavigationDestination(icon:Icon(Icons.dashboard_outlined),label:'Tổng quan'),NavigationDestination(icon:Icon(Icons.storefront_outlined),label:'Khách hàng'),NavigationDestination(icon:Icon(Icons.route_outlined),label:'Công tác'),NavigationDestination(icon:Icon(Icons.analytics_outlined),label:'Báo cáo')],
       ):null,
       drawer: SalesHomeDrawer(
         admin:widget.me['role']=='admin', loading:_loading, selectedIndex:_selectedIndex,
@@ -343,11 +345,11 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
         if (!narrow) NavigationRail(
           scrollable: true,
           extended: MediaQuery.of(context).size.width > 1200,
-          selectedIndex: _selectedIndex,
-          onDestinationSelected: (i) => setState(() => _selectedIndex = i),
+          selectedIndex: _visibleMenuIndices.indexOf(_selectedIndex)<0?0:_visibleMenuIndices.indexOf(_selectedIndex),
+          onDestinationSelected: (i) => setState(() => _selectedIndex = _visibleMenuIndices[i]),
           labelType: MediaQuery.of(context).size.width > 1200 ? NavigationRailLabelType.none
             : NavigationRailLabelType.selected,
-          destinations: [for (var i = 0; i < _sections.length; i++)
+          destinations: [for (final i in _visibleMenuIndices)
             NavigationRailDestination(icon: Icon(_icons[i]), label: Text(_sections[i]))],
         ),
         Expanded(child: Column(children: [
@@ -363,7 +365,7 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
               : _selectedIndex==11?StockPage(key:ValueKey('stock:${_queue.namespace}'),queue:_queue,service:CustomerService(_apiUrl,_accessToken,identity:_queue.identity,revision:_queue.revision))
               : _selectedIndex==10?CatalogPage(queue:_queue,service:CustomerService(_apiUrl,_accessToken,identity:_queue.identity,revision:_queue.revision),admin:widget.me['role']=='admin')
               : _selectedIndex==9?PerformancePage(key:ValueKey('report:${_queue.namespace}'),queue:_queue,regions:_catalog,service:_customerService)
-              : _selectedIndex==5?FieldWorkPage(key:ValueKey('field:$_province'),queue:_queue,regions:_catalog,service:_customerService):_records(moduleKinds[_selectedIndex - 2])),
+              : _selectedIndex==5?WorkHubPage(key:ValueKey('field:${_queue.namespace}'),queue:_queue,service:_customerService):_records(moduleKinds[_selectedIndex - 2])),
         ])),
       ]),
     );
@@ -624,7 +626,7 @@ class SalesHomeDrawer extends StatelessWidget {
       const Divider(),
       for(final i in [10,11,12])section(i),
       const Divider(),
-      for(var i=0;i<sections.length;i++)if(i!=10&&i!=11&&i!=12)section(i),
+      for(var i=0;i<sections.length;i++)if(i!=10&&i!=11&&i!=12&&(admin||i!=2))section(i),
     ])));
   }
 }
