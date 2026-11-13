@@ -41,9 +41,9 @@ export async function monthlyPlanRoutes(req:Request,env:AuthEnv,actor:Actor,url:
     WHERE ${actor.admin} OR EXISTS(SELECT 1 FROM public.staff_business_assignments a
       WHERE a.user_sub=${actor.sub} AND a.scope_kind='chain' AND a.scope_key=c.id::text AND a.active)
     ORDER BY c.name LIMIT 1000`,
-   actor.admin?db`SELECT t.name,t.level,p.name AS province FROM public.territory_catalog t
+   db`SELECT t.name,t.level,p.name AS province FROM public.territory_catalog t
      LEFT JOIN public.territory_catalog p ON p.code=t.parent_code
-     WHERE t.active AND t.level IN ('province','district') LIMIT 7000`:Promise.resolve([])
+     WHERE t.active AND t.level IN ('province','district') LIMIT 7000`
   ]);
   const scopes=new Map<string,{scope_kind:string;scope_key:string;province:string;district:string;label:string}>();
   const add=(province:string,district:string)=>{
@@ -54,7 +54,14 @@ export async function monthlyPlanRoutes(req:Request,env:AuthEnv,actor:Actor,url:
   if(actor.admin){
    for(const [p,ds] of Object.entries(areas)){add(p,'');for(const d of ds)add(p,d);}
    for(const t of configured){if(t.level==='province')add(String(t.name),'');else if(t.province)add(String(t.province),String(t.name));}
-  }else for(const s of owned)add(String(s.province),String(s.district));
+  }else for(const s of owned){
+   const p=String(s.province),district=String(s.district);add(p,district);
+   // Province-wide responsibility allows planning individual districts too.
+   if(district===''){
+    for(const name of areas[p]??[])add(p,name);
+    for(const t of configured)if(t.level==='district'&&t.province===p)add(p,String(t.name));
+   }
+  }
   return json({scopes:[...scopes.values(),...chains.map(c=>({scope_kind:'chain',scope_key:String(c.key),province:null,district:null,label:'Chuỗi · '+String(c.label)}))]});
  }
  if(suffix===''&&req.method==='GET'){
