@@ -1,4 +1,7 @@
 import 'dart:typed_data';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:idb_shim/idb_shim.dart';
 import 'package:sales_mien_tay/offline_queue.dart';
@@ -7,7 +10,82 @@ import 'package:sales_mien_tay/session.dart';
 class Disconnected extends SalesSession {
  @override Future<Map<String,dynamic>> get(String path) async => throw const ApiFailure(503,'offline');
 }
+class ReadyForSync extends SalesSession{
+ int meChecks=0;
+ @override Future<Map<String,dynamic>> get(String path)async{
+  meChecks++;
+  return {'identity':'retry-user','scope_revision':'8'};
+ }
+}
+class CountedFailure extends SalesSession{
+ int meChecks=0;
+ @override Future<Map<String,dynamic>> get(String path)async{
+  meChecks++;
+  throw const ApiFailure(503,'Máy chủ không phản hồi');
+ }
+}
 void main(){
+ test('server success without item clears outbox once, never replays receipt',()async{
+  final factory=newIdbFactoryMemory(),session=ReadyForSync();
+  var sends=0;
+  final network=MockClient((req)async{
+   sends++;
+   expect(req.headers['X-Sync-Identity'],'retry-user');
+   expect(req.headers['X-Sync-Revision'],'8');
+   return http.Response(jsonEncode({'ok':true}),200,
+    headers:{'content-type':'application/json'});
+  });
+  final queue=OfflineQueue(session,'retry-user','8',
+   factory:factory,networkClient:network);
+  await queue.enqueue('/api/v1/notifications/42/read',{});
+  await queue.sync();
+  expect(queue.pending,isEmpty);
+  expect(sends,1);
+  expect(queue.syncing,isFalse);
+  await queue.sync();
+  expect(sends,1);
+  queue.dispose();network.close();
+ });
+ test('repeated server 503 is throttled but pending survives restart',()async{
+  final factory=newIdbFactoryMemory(),session=CountedFailure();
+  final queue=OfflineQueue(session,'retry-user','8',factory:factory);
+  await queue.enqueue('/api/v1/notifications/42/read',{});
+  await queue.sync();
+  expect(queue.pending.length,1);
+  expect(queue.error,contains('503'));
+  expect(queue.nextRetryAt,isNotNull);
+  expect(queue.syncing,isFalse);
+  await queue.sync();await queue.sync();
+  expect(session.meChecks,1);
+  final restart=OfflineQueue(session,'retry-user','8',factory:factory);
+  await restart.reload();
+  expect(restart.pending.length,1);
+  queue.dispose();restart.dispose();
+ });
+ test('HTTP 409 becomes blocked, user can retry without dropping operation',()async{
+  final factory=newIdbFactoryMemory(),session=ReadyForSync();
+  var sends=0;
+  final network=MockClient((req)async{
+   sends++;
+   return http.Response(jsonEncode({'error':'Phiên đã thay đổi'}),409,
+    headers:{'content-type':'application/json'});
+  });
+  final queue=OfflineQueue(session,'retry-user','8',
+   factory:factory,networkClient:network);
+  await queue.enqueue('/api/v1/notifications/42/read',{});
+  await queue.sync();
+  expect(queue.pending.single['status'],'blocked');
+  expect(queue.blockedCount,1);
+  expect(queue.describe(queue.pending.single),'Đánh dấu thông báo');
+  expect(queue.pending.single['error'],contains('Phiên đã thay đổi'));
+  await queue.sync();
+  expect(sends,1);
+  await queue.retryBlocked(queue.pending.single['key'].toString());
+  expect(sends,2);
+  expect(queue.pending.single['status'],'blocked');
+  queue.dispose();network.close();
+ });
+
  test('unplanned and missed visits are accepted by account-scoped offline outbox',() async{
   const route='11111111-1111-4111-8111-111111111111';
   const stop='22222222-2222-4222-8222-222222222222';
