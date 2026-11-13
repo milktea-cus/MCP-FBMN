@@ -422,7 +422,6 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
 
 
 
-const _surveyBrands = ['MGP', 'HH', 'Hoa Sen', 'Thành Đạt (đối thủ)', 'Bút Cầu', 'Bến Nghé'];
 
 /// Compact KPI tiles; fixed row extents prevent giant single-column cards on phones.
 class SalesOverviewKpis extends StatelessWidget {
@@ -484,53 +483,52 @@ class _KpiTile extends StatelessWidget {
   }
 }
 
-/// Brand counts only. Distributor fields remain available in survey records.
-class SalesBrandCoverageTable extends StatelessWidget {
-  final List<SalesRecord> surveys;
-  final List<String> provinces;
-  const SalesBrandCoverageTable({super.key,required this.surveys,required this.provinces});
 
-  @override
-  Widget build(BuildContext context) {
-    bool hasBrand(SalesRecord record,String brand) {
-      final v=record.data['brands'];
-      return v is List && v.contains(brand);
-    }
-    final rows=provinces.map((province) {
-      final records=surveys.where((r)=>r.province==province).toList();
-      final td=records.where((r)=>hasBrand(r,'Thành Đạt (đối thủ)')).length;
-      return DataRow(cells:[
-        DataCell(Text(province)),
-        DataCell(Text('${records.length}')),
-        for(final brand in _surveyBrands)
-          DataCell(Text('${records.where((r)=>hasBrand(r,brand)).length}')),
-        DataCell(Text('${records.where((r) =>
-          (r.data['brands'] is List && (r.data['brands'] as List).isNotEmpty) ||
-          (r.data['otherBrand']?.toString().trim().isNotEmpty ?? false)).length}')),
-        DataCell(Text('${records.where((r) =>
-          r.data['otherBrand']?.toString().trim().isNotEmpty ?? false).length}')),
-        DataCell(Text(records.isEmpty ? '0%' : '${(td*100/records.length).toStringAsFixed(1)}%')),
-      ]);
-    }).toList();
-    return Card(child:Padding(padding:const EdgeInsets.all(8),
-      child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-        Padding(padding:const EdgeInsets.all(10),
-          child:Text('Hiện diện nhãn hàng theo 13 tỉnh/TP cũ',
-            style:Theme.of(context).textTheme.titleMedium)),
-        const Padding(padding:EdgeInsets.symmetric(horizontal:10),
-          child:Text('Mỗi điểm bán tính một lần trong cột KH; các nhãn hàng có thể cùng xuất hiện tại một điểm bán.',
-            style:TextStyle(fontSize:12))),
-        SingleChildScrollView(scrollDirection:Axis.horizontal,
-          child:DataTable(columnSpacing:22,columns:[
-            const DataColumn(label:Text('Tỉnh/TP')),const DataColumn(label:Text('KH')),
-            for(final brand in _surveyBrands)DataColumn(label:Text(brand)),
-            const DataColumn(label:Text('≥1 nhãn')),
-            const DataColumn(label:Text('Nhãn khác')),const DataColumn(label:Text('% Thành Đạt')),
-          ],rows:rows)),
-      ])));
-  }
+/// Presence comes from canonical SKU brands and verified trading evidence.
+class SalesBrandCoverageTable extends StatelessWidget{
+ final List<SalesRecord> surveys;
+ final List<String> provinces,brandNames;
+ final List<Map<String,dynamic>> verifiedRows,customerCounts;
+ final bool verifiedData;
+ const SalesBrandCoverageTable({super.key,required this.surveys,
+  required this.provinces,this.brandNames=const [],this.verifiedRows=const [],
+  this.customerCounts=const [],this.verifiedData=false});
+ @override Widget build(BuildContext context){
+  final brands=(brandNames.isNotEmpty?List<String>.from(brandNames):
+   verifiedRows.map((x)=>x['brand']?.toString()??'')
+    .where((x)=>x.isNotEmpty).toSet().toList())..sort();
+  final rows=provinces.map((province){
+   final records=verifiedRows.where((r)=>r['province']==province).toList();
+   final total=customerCounts.where((r)=>r['province']==province)
+    .fold<int>(0,(s,r)=>s+((r['customers'] as num?)?.toInt()??0));
+   return DataRow(cells:[
+    DataCell(Text(province)),DataCell(Text('$total')),
+    for(final brand in brands)DataCell(Text(
+     '${records.where((r)=>r['brand']==brand).fold<int>(0,(s,r)=>s+((r['customers'] as num?)?.toInt()??0))}')),
+   ]);
+  }).toList();
+  return Card(child:Padding(padding:const EdgeInsets.all(8),child:Column(
+   crossAxisAlignment:CrossAxisAlignment.start,children:[
+    Padding(padding:const EdgeInsets.all(10),child:Text(
+     'Nhãn hàng đang kinh doanh theo địa bàn',
+     style:Theme.of(context).textTheme.titleMedium)),
+    const Padding(padding:EdgeInsets.symmetric(horizontal:10),
+     child:Text('Nguồn: danh mục SKU và xác minh đang kinh doanh tại khách. '
+       'Đã đặt/đã nhập không tự tính đang bán; mỗi khách tính một lần cho mỗi nhãn.',
+       style:TextStyle(fontSize:12))),
+    if(!verifiedData)const Padding(padding:EdgeInsets.all(8),
+     child:Text('Chưa có dữ liệu xác minh mới. Không suy đoán từ phiếu khảo sát cũ.')),
+    if(brands.isEmpty)const Padding(padding:EdgeInsets.all(8),
+     child:Text('Chưa có nhãn trong danh mục SKU.')),
+    SingleChildScrollView(scrollDirection:Axis.horizontal,child:DataTable(
+     columnSpacing:22,columns:[
+      const DataColumn(label:Text('Tỉnh/TP')),
+      const DataColumn(label:Text('KH')),
+      for(final brand in brands)DataColumn(label:Text(brand)),
+     ],rows:rows)),
+   ])));
+ }
 }
-
 
 /// Responsive home shortcuts. All routes retain their original indices.
 class SalesModuleGrid extends StatelessWidget {
