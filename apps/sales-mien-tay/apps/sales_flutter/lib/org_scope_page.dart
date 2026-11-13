@@ -28,8 +28,6 @@ class _OrgScopePageState extends State<OrgScopePage> {
     'transfer':'Chuyển giao','approve':'Duyệt','target':'Giao Target',
     'actuals':'Doanh số','report':'Báo cáo','export':'Xuất',
     'media':'Ảnh','staff_manage':'Quản lý nhân viên'};
-  static const bindingKinds = {'staff':'Nhân viên','territory':'Địa bàn',
-    'team':'Đội nhóm','chain':'Chuỗi'};
 
   @override
   void initState() { super.initState(); refresh(); }
