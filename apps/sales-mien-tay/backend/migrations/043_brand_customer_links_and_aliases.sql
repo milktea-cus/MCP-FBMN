@@ -33,8 +33,11 @@ BEGIN
    WHERE a.normalized_alias=lower(btrim(NEW.brand));
   IF resolved_id IS NULL THEN
    INSERT INTO public.catalog_brands(name) VALUES(btrim(NEW.brand))
-   ON CONFLICT(normalized_name) DO UPDATE SET name=EXCLUDED.name
-   RETURNING id INTO resolved_id;
+   ON CONFLICT(normalized_name) DO NOTHING RETURNING id INTO resolved_id;
+   IF resolved_id IS NULL THEN
+     SELECT id INTO resolved_id FROM public.catalog_brands
+     WHERE normalized_name=lower(btrim(NEW.brand));
+   END IF;
   END IF;
  END IF;
  UPDATE public.catalog_products p SET brand_id=resolved_id
