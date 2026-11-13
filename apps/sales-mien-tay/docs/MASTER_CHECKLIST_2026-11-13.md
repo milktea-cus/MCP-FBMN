@@ -58,7 +58,7 @@
 - [ ] L-6: mẫu tuyến có version lưu DB đồng bộ đa thiết bị, sao chép không sửa ngày đã khảo sát; drag/sort, điều chỉnh ngày, xử lý nghỉ/đổi lịch, duplicate UUID/idempotent; mục tiêu tuyến không bắt user mở từng khách trước.
 - [ ] L-7: UAT 0 khách trong tỉnh, 1 khách, nhiều khách, Manager chuỗi xuyên tỉnh, 5 kỳ/tháng nhuận/28–31 ngày, plan offline → khảo sát online/offline → đồng bộ không trùng → Manager xem đúng quyền.
 
-**Đối chiếu MCP Mobi:** nguồn tham chiếu nội bộ `docs/MCP_MOBI_REFERENCE.md` ghi repo `binhnxwjfjxm/mcp-mobi` tại `e8e9bbd` chỉ có ảnh demo `ui-tham-khao.jpg` và README, **không có source mô hình/route/session để xác minh**; tại audit 13/11 repo qua connector trả 404. Do vậy không xác nhận “giống hệt MCP Mobi”. Điểm khác nghiệp vụ Field Work là *kế hoạch tháng di chuyển linh hoạt, không ép tuần cố định*.
+**Đối chiếu MCP Mobi:** nguồn tham chiếu nội bộ `docs/MCP_MOBI_REFERENCE.md` ghi repo `binhnxwjfjxm/mcp-mobi` tại `e8e9bbd` chỉ có ảnh demo `ui-tham-khao.jpg` và README, **không có source mô hình/route/session để xác minh**; tại audit 13/11 đã xác minh trực tiếp **repo private** qua kết nối GitHub owner: nhánh `main` SHA `e8e9bbd99c6d02c93d46ff5458e5e4c5995ab352` chỉ có đúng `README.md` và `ui-tham-khao.jpg`, không chứa code mô hình phiên/tuyến. Do vậy không xác nhận “giống hệt MCP Mobi”. Điểm khác nghiệp vụ Field Work là *kế hoạch tháng di chuyển linh hoạt, không ép tuần cố định*.
 
 ## P0-M — TARGET: BỎ SKU KHỎI PHÂN BỔ, CHUYỂN THÀNH ĐỊA BÀN
 
