@@ -4,7 +4,7 @@ import districts from './districts_old.json';
 type Db=NeonQueryFunction<false,false>;
 type Env={DATABASE_URL:string;PHOTOS_BUCKET?:R2Bucket};
 type Actor={sub:string;admin:boolean;manager:boolean};
-type Question={id:string;label:string;type:'text'|'number'|'boolean'|'choice'|'multi_choice';required:boolean;options?:string[]};
+type Question={id:string;label:string;type:'text'|'number'|'boolean'|'choice'|'multi_choice';required:boolean;options?:string[];catalog_source?:'brands'};
 type Body=Record<string,unknown>;
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const areas=districts as Record<string,string[]>;
@@ -44,7 +44,8 @@ function questions(value:unknown):Question[]|null{
   if(!q||typeof q!=='object'||typeof q.id!=='string'||!/^([a-z][a-z0-9_]{0,39})$/.test(q.id)||seen.has(q.id)||typeof q.label!=='string'||!q.label.trim()||q.label.length>160||!['text','number','boolean','choice','multi_choice'].includes(q.type)||typeof q.required!=='boolean')return null;
   let options:string[]|undefined;
   if(q.type==='choice'||q.type==='multi_choice'){if(!Array.isArray(q.options)||q.options.length<2||q.options.length>50||q.options.some((v:unknown)=>typeof v!=='string'||!v.trim()||v.length>120)||new Set(q.options).size!==q.options.length)return null;options=q.options;}
-  seen.add(q.id);out.push({id:q.id,label:q.label.trim(),type:q.type,required:q.required,...(options?{options}:{})});
+  if(q.catalog_source!==undefined&&(q.catalog_source!=='brands'||!['choice','multi_choice'].includes(q.type)))return null;
+  seen.add(q.id);out.push({id:q.id,label:q.label.trim(),type:q.type,required:q.required,...(options?{options}:{}),...(q.catalog_source?{catalog_source:'brands' as const}:{})});
  }
  return out;
 }
@@ -120,6 +121,14 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   let v:Body;try{v=await body(req);}catch{return bad('JSON không hợp lệ');}
   const province=String(v.province??''),qs=questions(v.questions);
   if(!areas[province]||!qs||!isUuid(v.client_ref)||!Number.isInteger(v.expected_version)||Number(v.expected_version)<0)return bad('Mẫu, tỉnh hoặc phiên bản không hợp lệ');
+  // A catalog-backed question snapshots official names in the published version;
+  // unchecked free text and expired aliases must never enter a canonical survey.
+  if(qs.some(q=>q.catalog_source==='brands')){
+   const rows=await db`SELECT name FROM public.catalog_brands WHERE active ORDER BY name`;
+   const accepted=new Set(rows.map(row=>String(row.name)));
+   if(qs.some(q=>q.catalog_source==='brands'&&q.options?.some(name=>!accepted.has(name))))
+     return bad('Lựa chọn nhãn hàng đã thay đổi; tải lại danh mục chuẩn',409);
+  }
   const prior=await db`SELECT * FROM field_survey_templates WHERE id=${v.client_ref}::uuid AND province=${province}`;
   if(prior.length)return json({item:prior[0],idempotent:true});
   const rows=await db`INSERT INTO field_survey_templates(id,province,version,questions,created_by)
