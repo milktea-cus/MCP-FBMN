@@ -252,7 +252,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
   final regions=await RegionCatalog.load();
   if(!mounted)return;
   await Navigator.push(context,MaterialPageRoute(builder:(_)=>SurveyPage(
-   queue:widget.queue,service:widget.service,regions:regions,initialCustomer:customerId)));
+   queue:widget.queue,service:widget.service,regions:regions,initialCustomer:customerId,initialStop:stop)));
   if(mounted)await load();
  }
  Future<void> openSurveys()async{
@@ -337,7 +337,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
         IconButton(tooltip:'Xuống dưới',icon:const Icon(Icons.arrow_downward),
          onPressed:i==sorted.length-1?null:()=>shift(sorted[i],1)),
        ],
-       if(isOwner)IconButton(tooltip:'Check-in GPS',icon:const Icon(Icons.my_location),
+       if(isOwner&&((sorted[i]['visit_count'] as num?)?.toInt()??0)==0)IconButton(tooltip:'Check-in GPS (không khảo sát)',icon:const Icon(Icons.my_location),
         onPressed:()=>visit(sorted[i])),
       ]),
      )),
