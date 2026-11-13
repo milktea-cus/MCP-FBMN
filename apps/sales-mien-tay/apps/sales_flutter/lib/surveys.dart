@@ -143,7 +143,7 @@ class _SurveyPageState extends State<SurveyPage>{
    var pos=verified==null?await captureGps(context):null;
    while(pos!=null&&(!pos.accuracy.isFinite||pos.accuracy>100||pos.accuracy<0)){
     if(!mounted)return;
-    final retry=await showDialog<bool>(context:context,builder:(c)=>AlertDialog(title:const Text('Vị trí thiết bị chưa đủ chính xác'),content:Text('Sai số hiện tại: ${pos.accuracy.isFinite?pos.accuracy.toStringAsFixed(0):"không xác định"} m. Cần tối đa 100 m. Nếu dùng máy tính, hãy thử trên điện thoại có GPS; bật Vị trí chính xác và đứng nơi thoáng. Tọa độ khách hàng chưa được kiểm tra ở bước này.'),actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Hủy')),FilledButton(onPressed:()=>Navigator.pop(c,true),child:const Text('Lấy lại GPS'))]));
+    final retry=await showDialog<bool>(context:context,builder:(c)=>AlertDialog(title:const Text('Vị trí thiết bị chưa đủ chính xác'),content:Text('Sai số hiện tại: ${pos!.accuracy.isFinite?pos!.accuracy.toStringAsFixed(0):"không xác định"} m. Cần tối đa 100 m. Nếu dùng máy tính, hãy thử trên điện thoại có GPS; bật Vị trí chính xác và đứng nơi thoáng. Tọa độ khách hàng chưa được kiểm tra ở bước này.'),actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Hủy')),FilledButton(onPressed:()=>Navigator.pop(c,true),child:const Text('Lấy lại GPS'))]));
     if(retry!=true||!mounted)return;
     pos=await captureGps(context);
    }
