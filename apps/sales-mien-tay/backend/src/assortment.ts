@@ -20,7 +20,7 @@ function errorResponse(e:unknown){
 export async function assortmentRoutes(
  req:Request,env:{DATABASE_URL:string},actor:AssortmentActor,url:URL,
 ):Promise<Response|null>{
- const brandPath=/^\\/api\\/v1\\/customers\\/([a-f0-9-]{36})\\/brands(?:\\/(audit))?$/i.exec(url.pathname);
+ const brandPath=/^\/api\/v1\/customers\/([a-f0-9-]{36})\/brands(?:\/(audit))?$/i.exec(url.pathname);
  if(brandPath){
   const cid=brandPath[1];
   if(!isUuid(cid))return bad('Mã khách hàng không hợp lệ');
