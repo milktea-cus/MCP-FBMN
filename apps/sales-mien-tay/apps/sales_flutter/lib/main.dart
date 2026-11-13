@@ -247,6 +247,7 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
       SalesModuleGrid(
         sections: _sections,
         icons: _icons,
+        hiddenIndices:widget.me['role']=='admin'?const {}:const {2},
         onSelect: (index) => setState(() => _selectedIndex = index),
       ),
       const SizedBox(height: 20),
@@ -489,24 +490,26 @@ class SalesModuleGrid extends StatelessWidget {
   final List<String> sections;
   final List<IconData> icons;
   final ValueChanged<int> onSelect;
+  final Set<int> hiddenIndices;
   const SalesModuleGrid({super.key, required this.sections, required this.icons,
-    required this.onSelect});
+    this.hiddenIndices=const {},required this.onSelect});
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(builder: (context, size) {
     final columns = size.maxWidth >= 1000 ? 6
       : size.maxWidth >= 650 ? 4 : size.maxWidth >= 315 ? 3 : 2;
+    final available=[for(var i=1;i<sections.length;i++)if(!hiddenIndices.contains(i))i];
     return GridView.builder(
       primary: false,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      itemCount: sections.length - 1,
+      itemCount: available.length,
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: columns, mainAxisSpacing: 10, crossAxisSpacing: 10,
         mainAxisExtent: 110,
       ),
       itemBuilder: (context, slot) {
-        final index = slot + 1;
+        final index = available[slot];
         final label = index == 1 ? 'Khách hàng'
           : index == 9 ? 'Báo cáo' : sections[index];
         return Card(
