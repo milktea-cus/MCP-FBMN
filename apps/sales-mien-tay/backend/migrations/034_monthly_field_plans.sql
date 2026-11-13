@@ -104,4 +104,7 @@ $fbmn$;
 REVOKE ALL ON FUNCTION public.sales_save_monthly_plan(text,uuid,uuid,integer,text,text,text,text,text,date,text,integer,text,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.sales_save_monthly_plan(text,uuid,uuid,integer,text,text,text,text,text,date,text,integer,text,text) TO sales_api;
 GRANT SELECT ON public.field_monthly_plans TO sales_api;
--- sales_api intentionally has no direct INSERT/UPDATE/DELETE or audit write grant.
+-- Default privileges in this DB grant DML to sales_api: revoke them explicitly.
+REVOKE INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER ON public.field_monthly_plans FROM sales_api;
+REVOKE ALL ON public.field_monthly_plan_audit FROM sales_api;
+-- Only SELECT on plans and EXECUTE on the audited SECDEF function remain.
