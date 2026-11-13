@@ -62,7 +62,7 @@
 
 ## P0-M — TARGET: BỎ SKU KHỎI PHÂN BỔ, CHUYỂN THÀNH ĐỊA BÀN
 
-- [ ] M-1: phân bổ Target theo **nhân viên** (cha) → **địa lý/vùng bán hàng** (con); hiển thị vùng/tỉnh/khu vực được giao theo chính sách P0-K; không cho chọn SKU trong phần phân bổ.
+- [ ] M-1: phân bổ Target theo **nhân viên** (cha) → **địa lý/vùng bán hàng** (con) đối với người có địa bàn; hiển thị vùng/tỉnh/khu vực được giao theo chính sách P0-K; **Manager phụ trách chuỗi không có địa bàn vẫn nhận Target theo nhân viên/nhóm hoặc chuỗi được giao, không bắt chọn tỉnh**. Không cho chọn SKU trong phần phân bổ.
 - [ ] M-2: migrate `sales_targets.dimension='product'` sang hỗ trợ `territory` bằng additive versioning/check constraint; dữ liệu SKU cũ nếu có thì lưu lịch sử/ẩn khỏi form, **không xóa hay tự đổi amount**. Audit hiện 0 dòng Target nên chuyển dạng UI khả thi, vẫn giữ migration an toàn.
 - [ ] M-3: nếu có phân bổ KH riêng, đây là một cách phân tích *song song*, **không cộng Target KH + địa bàn + nhân viên** (tránh double count). Tổng con theo địa bàn không vượt chỉ tiêu cha; qua cấp Manager, không đếm chỉ tiêu team hai lần.
 - [ ] M-4: kiểm doanh số thực tế theo mã địa bàn của giao dịch/khách tại thời điểm phát sinh (snapshot, lưu lịch sử khi chuyển địa giới); dashboard người/địa bàn đúng quyền.
