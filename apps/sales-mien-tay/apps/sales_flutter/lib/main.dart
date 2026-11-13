@@ -486,65 +486,166 @@ class _KpiTile extends StatelessWidget {
 }
 
 
-/// Presence comes from canonical SKU brands and verified trading evidence.
+/// Market intelligence: observations at each real customer, never product SKU.
 class SalesBrandCoverageTable extends StatefulWidget{
  final List<SalesRecord> surveys;
  final List<String> provinces,brandNames;
- final List<Map<String,dynamic>> verifiedRows,customerCounts;
+ final List<Map<String,dynamic>> verifiedRows,customerCounts,brandEntries;
  final bool verifiedData;
+ final CustomerService? service;
  const SalesBrandCoverageTable({super.key,required this.surveys,
   required this.provinces,this.brandNames=const [],this.verifiedRows=const [],
-  this.customerCounts=const [],this.verifiedData=false});
+  this.customerCounts=const [],this.brandEntries=const [],
+  this.verifiedData=false,this.service});
  @override State<SalesBrandCoverageTable> createState()=>_SalesBrandCoverageTableState();
 }
 class _SalesBrandCoverageTableState extends State<SalesBrandCoverageTable>{
- String status='trading';
- String get valueKey=>switch(status){
-  'ordered'=>'ordered_customers',
-  'imported'=>'imported_customers',
-  _=>'customers',
- };
+ final search=TextEditingController();
+ String brand='',area='',lookupError='';
+ bool searching=false,hasSearched=false,truncated=false;
+ List<Map<String,dynamic>> matches=[];
+ int generation=0;
+ @override void dispose(){search.dispose();super.dispose();}
+ String get selectedProvince=>area.isEmpty?'':area.split('||').first;
+ String get selectedDistrict=>area.isEmpty?'':area.split('||').last;
+ List<String> get names{
+  final values={...widget.brandNames,...widget.verifiedRows
+    .map((r)=>r['brand']?.toString()??'').where((s)=>s.isNotEmpty)}.toList()..sort();
+  return values;
+ }
+ List<String> get areas{
+  final list=<String>{};
+  for(final row in widget.customerCounts){
+   final province=row['province']?.toString()??'';
+   final district=row['district']?.toString()??'';
+   if(province.isNotEmpty&&district.isNotEmpty&&widget.provinces.contains(province))
+    list.add('$province||$district');
+  }
+  return list.toList()..sort();
+ }
+ Future<void> findCustomers({String? byBrand,String? province,String? district})async{
+  if(widget.service==null)return;
+  final request=++generation;
+  final targetBrand=byBrand??brand;
+  final brandEntry=widget.brandEntries.where((b)=>b['name']==targetBrand).firstOrNull;
+  final selectedId=brandEntry?['id']?.toString()??
+   widget.verifiedRows.where((row)=>row['brand']==targetBrand).firstOrNull?['brand_id']?.toString()??'';
+  final options=<String,String>{
+   if(targetBrand.isNotEmpty&&selectedId.isNotEmpty)'brand_id':selectedId,
+   if(province!=null&&province.isNotEmpty)'province':province
+   else if(selectedProvince.isNotEmpty)'province':selectedProvince
+   else if(widget.provinces.length==1)'province':widget.provinces.single,
+   if(district!=null&&district.isNotEmpty)'district':district
+   else if(selectedDistrict.isNotEmpty)'district':selectedDistrict,
+   if(search.text.trim().isNotEmpty)'q':search.text.trim(),
+   'limit':'150',
+  };
+  setState((){searching=true;lookupError='';hasSearched=true;matches=[];truncated=false;});
+  try{
+   final payload=decodeApi(await http.get(widget.service!.uri(
+     '/api/v1/market/customers',options),
+     headers:widget.service!.headers).timeout(const Duration(seconds:18)));
+   if(mounted&&generation==request)setState((){
+    matches=(payload['items'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
+    truncated=payload['truncated']==true;
+   });
+  }catch(e){
+   if(mounted&&generation==request)setState(()=>lookupError='Không tải được khách theo nhãn: $e');
+  }finally{
+   if(mounted&&generation==request)setState(()=>searching=false);
+  }
+ }
  @override Widget build(BuildContext context){
-  final brands=(widget.brandNames.isNotEmpty?List<String>.from(widget.brandNames):
-   widget.verifiedRows.map((x)=>x['brand']?.toString()??'')
-    .where((x)=>x.isNotEmpty).toSet().toList())..sort();
-  final rows=widget.provinces.map((province){
-   final records=widget.verifiedRows.where((r)=>r['province']==province).toList();
-   final total=widget.customerCounts.where((r)=>r['province']==province)
+  final allNames=names;
+  final visibleNames=brand.isEmpty?allNames:[brand];
+  final availableAreas=areas;
+  // Keep old filters safe if the permitted area list changes on scope revoke.
+  final activeArea=availableAreas.contains(area)?area:'';
+  final provinces=widget.provinces.where((p)=>activeArea.isEmpty||
+   activeArea.startsWith('$p||')).toList();
+  final rows=provinces.map((province){
+   final records=widget.verifiedRows.where((r)=>r['province']==province&&
+    (activeArea.isEmpty||r['district']==activeArea.split('||').last)).toList();
+   final total=widget.customerCounts.where((r)=>r['province']==province&&
+    (activeArea.isEmpty||r['district']==activeArea.split('||').last))
     .fold<int>(0,(s,r)=>s+((r['customers'] as num?)?.toInt()??0));
+   final rowProvince=activeArea.isEmpty?province:
+    '${activeArea.split('||').last} · $province';
    return DataRow(cells:[
-    DataCell(Text(province)),DataCell(Text('$total')),
-    for(final brand in brands)DataCell(Text(
-     '${records.where((r)=>r['brand']==brand).fold<int>(0,(s,r)=>s+((r[valueKey] as num?)?.toInt()??0))}')),
+    DataCell(Text(rowProvince)),DataCell(Text('$total')),
+    for(final name in visibleNames)DataCell(
+     Text('${records.where((r)=>r['brand']==name)
+      .fold<int>(0,(s,r)=>s+((r['customers'] as num?)?.toInt()??0))}'),
+     onTap:widget.service==null?null:()=>findCustomers(
+      byBrand:name,province:province,
+      district:activeArea.isEmpty?null:activeArea.split('||').last)),
    ]);
   }).toList();
-  return Card(child:Padding(padding:const EdgeInsets.all(8),child:Column(
+  return Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(
    crossAxisAlignment:CrossAxisAlignment.start,children:[
-    Padding(padding:const EdgeInsets.all(10),child:Wrap(
-     spacing:8,runSpacing:8,crossAxisAlignment:WrapCrossAlignment.center,children:[
-      Text('Nhãn hàng đang kinh doanh theo địa bàn',
-       style:Theme.of(context).textTheme.titleMedium),
-      DropdownButton<String>(value:status,items:const [
-       DropdownMenuItem(value:'trading',child:Text('Đang bán')),
-       DropdownMenuItem(value:'imported',child:Text('Đã nhập')),
-       DropdownMenuItem(value:'ordered',child:Text('Đã đặt')),
-      ],onChanged:(v){if(v!=null)setState(()=>status=v);}),
-     ])),
-    const Padding(padding:EdgeInsets.symmetric(horizontal:10),
-     child:Text('Nguồn: nhãn hàng chuẩn, SKU và xác minh tại điểm bán. '
-       'Đã đặt/đã nhập không tự tính đang bán; mỗi khách tính một lần cho mỗi nhãn.',
-       style:TextStyle(fontSize:12))),
+    Text('Nhãn hàng thị trường theo khách và khu vực',
+     style:Theme.of(context).textTheme.titleMedium),
+    const SizedBox(height:5),
+    const Text('Một khách có MGP hoặc Thành Đạt được tính 1 lần cho mỗi nhãn '
+      'trong khu vực. Khảo sát lại chỉ cập nhật ghi nhận, không cộng dồn lượt. '
+      'Dữ liệu từ phiên công tác, không từ SKU Futurebook.',
+      style:TextStyle(fontSize:12)),
+    const SizedBox(height:10),
+    Wrap(spacing:8,runSpacing:8,children:[
+     SizedBox(width:230,child:DropdownButtonFormField<String>(
+      key:ValueKey('market-brand:$brand'),initialValue:allNames.contains(brand)?brand:'',
+      isExpanded:true,decoration:const InputDecoration(labelText:'Nhãn hàng',isDense:true),
+      items:[const DropdownMenuItem(value:'',child:Text('Tất cả nhãn hàng')),
+       for(final name in allNames)DropdownMenuItem(value:name,
+        child:Text(name,overflow:TextOverflow.ellipsis))],
+      onChanged:(v)=>setState(()=>brand=v??''))),
+     SizedBox(width:230,child:DropdownButtonFormField<String>(
+      key:ValueKey('market-area:$activeArea'),initialValue:activeArea,
+      isExpanded:true,decoration:const InputDecoration(labelText:'Địa bàn',isDense:true),
+      items:[const DropdownMenuItem(value:'',child:Text('Tất cả huyện')),
+       for(final key in availableAreas)DropdownMenuItem(value:key,
+        child:Text('${key.split('||').last} · ${key.split('||').first}',
+         overflow:TextOverflow.ellipsis))],
+      onChanged:(v)=>setState(()=>area=v??''))),
+    ]),
+    const SizedBox(height:7),
+    Row(children:[
+     Expanded(child:TextField(controller:search,
+      decoration:const InputDecoration(prefixIcon:Icon(Icons.search),
+       isDense:true,labelText:'Tên khách / mã khách / nhãn hàng'),
+      onSubmitted:(_)=>findCustomers())),
+     const SizedBox(width:6),
+     FilledButton.icon(onPressed:searching||widget.service==null?null:()=>findCustomers(),
+      icon:const Icon(Icons.search),label:const Text('Tìm')),
+    ]),
     if(!widget.verifiedData)const Padding(padding:EdgeInsets.all(8),
-     child:Text('Chưa có dữ liệu xác minh mới. Không suy đoán từ phiếu khảo sát cũ.')),
-    if(brands.isEmpty)const Padding(padding:EdgeInsets.all(8),
-     child:Text('Chưa có nhãn trong danh mục SKU.')),
+     child:Text('Chưa cập nhật được thống kê thị trường; đang dùng dữ liệu lưu trên máy.')),
+    if(allNames.isEmpty)const Padding(padding:EdgeInsets.all(8),
+     child:Text('Chưa có nhãn hàng thị trường. Ghi MGP, Thành Đạt hoặc nhãn khác '
+      'tại phiên khảo sát khách; sau khi đồng bộ sẽ hiện ở đây.')),
     SingleChildScrollView(scrollDirection:Axis.horizontal,child:DataTable(
-     columnSpacing:22,columns:[
-      const DataColumn(label:Text('Tỉnh/TP')),
-      const DataColumn(label:Text('KH')),
-      for(final brand in brands)DataColumn(label:Text(brand)),
+     columnSpacing:20,columns:[
+      const DataColumn(label:Text('Tỉnh / Huyện')),
+      const DataColumn(label:Text('Khách')),
+      for(final name in visibleNames)DataColumn(label:Text(name)),
      ],rows:rows)),
-   ])));
+    if(searching)const LinearProgressIndicator(minHeight:2),
+    if(lookupError.isNotEmpty)Text(lookupError),
+    if(hasSearched&&!searching)...[
+     Padding(padding:const EdgeInsets.symmetric(vertical:8),
+      child:Text('Khách phù hợp: ${matches.length}${truncated?' (còn kết quả khác)':''}',
+       style:Theme.of(context).textTheme.titleSmall)),
+     if(matches.isEmpty)const Text('Không có khách phù hợp nhãn và khu vực đã chọn.'),
+     for(final row in matches.take(150))ListTile(
+      dense:true,
+      leading:const Icon(Icons.storefront_outlined),
+      title:Text(row['customer_name']?.toString()??''),
+      subtitle:Text('${row['brand']??''} · ${row['district']??''}, ${row['province']??''}'),
+      trailing:Text(row['field_code']?.toString()??'',
+       style:Theme.of(context).textTheme.bodySmall)),
+    ],
+   ],
+  )));
  }
 }
 
