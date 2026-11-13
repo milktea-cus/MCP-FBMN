@@ -52,7 +52,7 @@ export async function orderRoutes(req:Request,env:{DATABASE_URL:string},u:User,u
     c.province,c.district,m.company_code AS mapping_code,
     coalesce(nullif(btrim(m.company_code),''),nullif(btrim(c.code),'')) AS export_code
     FROM customers c LEFT JOIN catalog_customer_mapping m ON m.customer_id=c.id
-    WHERE c.status<>'inactive' AND public.sales_can_access(${u.sub},c.owner_sub,c.province,c.district)
+    WHERE c.status<>'inactive' AND public.sales_customer_allowed(${u.sub},c.id,'view')
       AND (c.name ILIKE '%'||${q}||'%' OR c.field_code ILIKE '%'||${q}||'%' OR c.code ILIKE '%'||${q}||'%'
        OR m.company_code ILIKE '%'||${q}||'%')
     ORDER BY c.name LIMIT 100`;
@@ -106,7 +106,7 @@ export async function orderRoutes(req:Request,env:{DATABASE_URL:string},u:User,u
        WHERE l.order_id=o.id),'[]'::jsonb) AS lines
     FROM field_orders o JOIN customers c ON c.id=o.customer_id AND c.owner_sub=o.owner_sub
     LEFT JOIN catalog_customer_mapping m ON m.customer_id=c.id
-    WHERE public.sales_can_access(${u.sub},o.owner_sub,c.province,c.district)
+    WHERE public.sales_customer_allowed(${u.sub},c.id,'view')
       AND (${status}='' OR o.status=${status})
       AND (${q}='' OR c.name ILIKE '%'||${q}||'%'
        OR c.field_code ILIKE '%'||${q}||'%'
@@ -135,7 +135,7 @@ export async function orderRoutes(req:Request,env:{DATABASE_URL:string},u:User,u
  WHERE l.order_id=o.id),'[]'::jsonb) AS lines
     FROM field_orders o JOIN customers c ON c.id=o.customer_id AND c.owner_sub=o.owner_sub
     LEFT JOIN catalog_customer_mapping m ON m.customer_id=c.id
-    WHERE o.id=${id}::uuid AND public.sales_can_access(${u.sub},o.owner_sub,c.province,c.district)`;
+    WHERE o.id=${id}::uuid AND public.sales_customer_allowed(${u.sub},c.id,'view')`;
    if(rows.length===0)return bad('Không có quyền hoặc không tìm thấy đơn',404);
    if(detail[2]==='/audit'){
     return respond({item:rows[0],events:await sql`SELECT op_id,actor_sub,
@@ -143,6 +143,8 @@ export async function orderRoutes(req:Request,env:{DATABASE_URL:string},u:User,u
      FROM field_order_ops WHERE order_id=${id}::uuid ORDER BY created_at DESC LIMIT 100`});
    }
    if(detail[2]==='/export'){
+     const allowed=await sql`SELECT public.sales_customer_allowed(${u.sub},${rows[0].customer_id}::uuid,'export') AS ok`;
+     if(allowed[0]?.ok!==true)return bad('Không có quyền xuất đơn',403);
     if(rows[0].status!=='exported'&&rows[0].status!=='imported')return bad('Đơn chưa xác nhận xuất',409);
     return respond({item:rows[0],format:'FIELD_WORK_RETAIL_PREP_V1',
      import_certified:false,warning:'Mẫu Excel chuẩn bị nhập; chưa được xác minh với file import app công ty.',
