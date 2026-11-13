@@ -28,7 +28,8 @@ class OfflineQueue extends ChangeNotifier {
  final SalesSession session;
  final String identity,revision;
  final IdbFactory? factory;
- OfflineQueue(this.session,this.identity,this.revision,{this.factory});
+ final http.Client? networkClient;
+ OfflineQueue(this.session,this.identity,this.revision,{this.factory,this.networkClient});
  Future<Database>? _opening;
  bool _closed=false, syncing=false;
  String? error;
@@ -235,11 +236,16 @@ class OfflineQueue extends ChangeNotifier {
      if((row['path'] as String).endsWith('/photos')){
       final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
       final thumb=row['thumbnail'];final modern=thumb is List;
-      final upload=await http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes).timeout(const Duration(seconds:30));
+      final upload=await (networkClient?.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)??http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)).timeout(const Duration(seconds:30));
       final result=decodeApi(upload);
       if(row['session_id']!=null){await _ackSurvey(row,result['item'] as Map);}else{await _remove(row['key'] as String);}continue;
      }
-     final response=await (row['method']=='PATCH'?http.patch(uri,headers:headers,body:jsonEncode(payload)):http.post(uri,headers:headers,body:jsonEncode(payload))).timeout(const Duration(seconds:30));
+     final response=await (row['method']=='PATCH'
+       ?(networkClient?.patch(uri,headers:headers,body:jsonEncode(payload))??
+          http.patch(uri,headers:headers,body:jsonEncode(payload)))
+       :(networkClient?.post(uri,headers:headers,body:jsonEncode(payload))??
+          http.post(uri,headers:headers,body:jsonEncode(payload)))
+      ).timeout(const Duration(seconds:30));
      final result=decodeApi(response);
      // Some successful endpoints only acknowledge the write; entity is optional.
      final item=(row['session_id']!=null||row['photo']!=null)
@@ -248,10 +254,15 @@ class OfflineQueue extends ChangeNotifier {
       final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
       if(_closed)break;
       final thumb=row['thumbnail'],modern=thumb is List;
-       final upload=await http.post(session.uri('/api/v1/customers/${item['id']}/photos'),
+       final upload=await (networkClient?.post(session.uri('/api/v1/customers/${item['id']}/photos'),
         headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
         body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
-          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes).timeout(const Duration(seconds:30));
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)??http.post(
+        session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)
+       ).timeout(const Duration(seconds:30));
        decodeApi(upload);
      }
      if(row['session_id']!=null){await _ackSurvey(row,item);}else{await _remove(row['key'] as String);}
