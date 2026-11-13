@@ -19,9 +19,9 @@ async function parseBody(req:Request):Promise<Record<string,unknown>>{
 export function validateMonthPlan(v:Record<string,unknown>,editing:boolean):string|null{
  const month=v.period_ym,date=v.work_date,kind=v.scope_kind,key=v.scope_key;
  if(typeof month!=='string'||!validMonth(month)||typeof date!=='string'||!validDay(date)||date.slice(0,7)!==month)return 'Ngày phải nằm trong tháng kế hoạch';
- if((kind!=='territory'&&kind!=='chain')||typeof key!=='string'||!key||key.length>240)return 'Phạm vi không hợp lệ';
+ if((kind!=='territory'&&kind!=='chain'&&kind!=='customer')||typeof key!=='string'||!key||key.length>240)return 'Phạm vi không hợp lệ';
  if(kind==='territory'&&(typeof v.province!=='string'||!v.province||typeof v.district!=='string'||key!==v.province+'|'+v.district))return 'Địa bàn không hợp lệ';
- if(kind==='chain'&&(v.province!=null||v.district!=null||!uuid.test(key)))return 'Chuỗi không hợp lệ';
+ if((kind==='chain'||kind==='customer')&&(v.province!=null||v.district!=null||!uuid.test(key)))return 'Chuỗi hoặc khách hàng không hợp lệ';
  if(typeof v.purpose!=='string'||v.purpose.trim().length<2||v.purpose.length>500)return 'Mục đích phải có 2–500 ký tự';
  if(typeof v.target_new_customers!=='number'||!Number.isInteger(v.target_new_customers)||v.target_new_customers<0||v.target_new_customers>9999)return 'Chỉ tiêu khách mới không hợp lệ';
  if(v.note!=null&&(typeof v.note!=='string'||v.note.length>2000))return 'Ghi chú quá dài';
@@ -35,7 +35,7 @@ export async function monthlyPlanRoutes(req:Request,env:AuthEnv,actor:Actor,url:
  const suffix=url.pathname.slice('/api/v1/monthly-plans'.length);
  const db=neon(env.DATABASE_URL);
  if(suffix==='/options'&&req.method==='GET'){
-  const [owned,chains,configured]=await Promise.all([
+  const [owned,chains,configured,customers]=await Promise.all([
    actor.admin?Promise.resolve([]):db`SELECT province,district FROM public.staff_scopes WHERE user_sub=${actor.sub} ORDER BY province,district`,
    db`SELECT c.id::text AS key,c.name AS label FROM public.customer_chains c
     WHERE ${actor.admin} OR EXISTS(SELECT 1 FROM public.staff_business_assignments a
@@ -43,7 +43,10 @@ export async function monthlyPlanRoutes(req:Request,env:AuthEnv,actor:Actor,url:
     ORDER BY c.name LIMIT 1000`,
    db`SELECT t.name,t.level,p.name AS province FROM public.territory_catalog t
      LEFT JOIN public.territory_catalog p ON p.code=t.parent_code
-     WHERE t.active AND t.level IN ('province','district') LIMIT 7000`
+     WHERE t.active AND t.level IN ('province','district') LIMIT 7000`,
+   db`SELECT c.id::text AS key,c.name AS label,c.province,c.district
+    FROM public.customers c WHERE public.sales_customer_plannable(${actor.sub},c.id)
+    ORDER BY c.name,c.id LIMIT 2000`
   ]);
   const scopes=new Map<string,{scope_kind:string;scope_key:string;province:string;district:string;label:string}>();
   const add=(province:string,district:string)=>{
@@ -62,7 +65,30 @@ export async function monthlyPlanRoutes(req:Request,env:AuthEnv,actor:Actor,url:
     for(const t of configured)if(t.level==='district'&&t.province===p)add(p,String(t.name));
    }
   }
-  return json({scopes:[...scopes.values(),...chains.map(c=>({scope_kind:'chain',scope_key:String(c.key),province:null,district:null,label:'Chuỗi · '+String(c.label)}))]});
+  return json({scopes:[...scopes.values(),...chains.map(c=>({scope_kind:'chain',scope_key:String(c.key),province:null,district:null,label:'Chuỗi · '+String(c.label)})),
+   ...customers.map(c=>({scope_kind:'customer',scope_key:String(c.key),province:null,district:null,
+     label:'Khách · '+String(c.label)+' · '+String(c.district)+', '+String(c.province)}))]});
+ }
+ if(suffix==='/candidates'&&req.method==='GET'){
+  const kind=url.searchParams.get('scope_kind')??'',key=url.searchParams.get('scope_key')??'';
+  if(!['territory','chain','customer'].includes(kind)||!key||key.length>240 ||
+     (kind!=='territory'&&!uuid.test(key))||(kind==='territory'&&!key.includes('|')))
+    return fail('Phạm vi không hợp lệ');
+  const split=key.indexOf('|'),province=kind==='territory'?key.slice(0,split):null;
+  const district=kind==='territory'?key.slice(split+1):null;
+  const access=await db`SELECT public.sales_monthly_plan_scope_allowed(
+    ${actor.sub},${kind},${key},${province},${district}) AS allowed`;
+  if(access[0]?.allowed!==true)return fail('Ngoài phạm vi được phân công',403);
+  const rows=await db`SELECT c.id,c.name,c.code,c.category,c.province,c.district
+   FROM public.customers c
+   WHERE public.sales_customer_plannable(${actor.sub},c.id)
+     AND ((${kind}='territory' AND c.province=${province}
+            AND (${district}='' OR c.district=${district}))
+       OR (${kind}='chain' AND EXISTS(SELECT 1 FROM public.customer_scope_bindings b
+          WHERE b.customer_id=c.id AND b.active AND b.scope_kind='chain' AND b.scope_key=${key}))
+       OR (${kind}='customer' AND c.id::text=${key}))
+   ORDER BY c.name,c.id LIMIT 1001`;
+  return json({items:rows.slice(0,1000),truncated:rows.length>1000});
  }
  if(suffix===''&&req.method==='GET'){
   const month=url.searchParams.get('month')??'';
