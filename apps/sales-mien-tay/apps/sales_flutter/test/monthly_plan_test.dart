@@ -37,8 +37,12 @@ void main() {
    },child:const Text('Start'))))));
   await tester.tap(find.text('Start'));await tester.pumpAndSettle();
   expect(find.text('Đã chọn 0 · 3 phạm vi'),findsOneWidget);
-  await tester.tap(find.byType(CheckboxListTile).at(0));await tester.pump();
-  await tester.tap(find.byType(CheckboxListTile).at(1));await tester.pump();
+  await tester.ensureVisible(find.byType(CheckboxListTile).at(0));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byType(CheckboxListTile).at(0));await tester.pumpAndSettle();
+  await tester.ensureVisible(find.byType(CheckboxListTile).at(1));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byType(CheckboxListTile).at(1));await tester.pumpAndSettle();
   expect(find.text('Đã chọn 2 · 3 phạm vi'),findsOneWidget);
   await tester.enterText(find.byType(TextField).first,'Đi tìm điểm bán mới');
   await tester.ensureVisible(find.text('Lưu 2 công việc'));
