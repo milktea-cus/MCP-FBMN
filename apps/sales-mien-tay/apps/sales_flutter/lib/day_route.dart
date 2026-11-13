@@ -7,6 +7,7 @@ import 'models.dart';
 import 'offline_queue.dart';
 import 'session.dart';
 import 'surveys.dart';
+import 'route_workflow.dart';
 
 /// A day route may be a customer route or a market-development trip with no customers.
 class DayRoutePage extends StatefulWidget {
@@ -246,6 +247,18 @@ class _DayRoutePageState extends State<DayRoutePage>{
    queue:widget.queue,service:widget.service,regions:regions)));
   if(mounted)await load();
  }
+ Future<void> openTemplates()async{
+  if(route==null)return;
+  await Navigator.push(context,MaterialPageRoute(builder:(_)=>RouteTemplatePage(
+   queue:widget.queue,service:widget.service,route:route!,stops:stops)));
+  if(mounted)await load();
+ }
+ Future<void> openEvidence(Map<String,dynamic> stop)async{
+  if(route==null)return;
+  await Navigator.push(context,MaterialPageRoute(builder:(_)=>AreaEvidencePage(
+   queue:widget.queue,service:widget.service,route:route!,stop:stop)));
+  if(mounted)await load();
+ }
  @override Widget build(BuildContext context){
   final pending=pendingStops;
   final sorted=[...stops]..sort((a,b)=>(a['sequence'] as num).compareTo(b['sequence'] as num));
@@ -266,6 +279,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
        icon:const Icon(Icons.place_outlined),label:Text(route!['scope_kind']=='chain'?'Điểm công tác chuỗi':'Điểm tìm khách')),
       OutlinedButton.icon(onPressed:canModify?addCustomers:null,
        icon:const Icon(Icons.group_add_outlined),label:const Text('Chọn nhiều khách')),
+      OutlinedButton.icon(onPressed:openTemplates,icon:const Icon(Icons.bookmark_outline),label:const Text('Mẫu tuyến')),
       OutlinedButton.icon(onPressed:openSurveys,icon:const Icon(Icons.fact_check_outlined),
        label:const Text('Khảo sát hôm nay')),
      ]),
@@ -293,8 +307,9 @@ class _DayRoutePageState extends State<DayRoutePage>{
        'survey_started'=>'Đang khảo sát',
        'survey_completed'=>'Hoàn thành khảo sát',
        _=>'Chưa đi',
-      }}'),
+      }}${sorted[i]['stop_kind']=='customer'?'':' · Chạm xem ảnh/lead'}'),
       isThreeLine:true,
+      onTap:sorted[i]['stop_kind']=='customer'?null:()=>openEvidence(sorted[i]),
       trailing:Row(mainAxisSize:MainAxisSize.min,children:[
        if(canModify&&pending.isEmpty)...[
         IconButton(tooltip:'Lên trên',icon:const Icon(Icons.arrow_upward),
