@@ -124,3 +124,17 @@
 - [x] TypeScript typecheck, Wrangler dry-run/minify, Flutter Analyze (117 infos, không lỗi/warning gây chặn), Flutter Web release, offline shell 42 tài nguyên không cache API, push check PASS; trang chủ production HTTP 200.
 - [ ] **UAT còn mở:** đăng nhập bằng phiên Admin và dùng chọn nhiều cấp dưới trên điện thoại thật; kiểm 401/403/409 API, mất mạng/IndexedDB và Android SQLite; URL /api qua Vercel tool bị share-link authentication chặn, không có bằng chứng HTTP API với cookie thật. Android APK chưa phát hành lại.
 
+
+
+## Cập nhật 13/11/2026 — Giao địa bàn trực tiếp & quyền lập lịch
+
+- [x] **UX Phân công kinh doanh:** chọn nhân viên → **Giao / sửa tỉnh, huyện** ngay trong tab; tìm tỉnh, chọn toàn tỉnh hoặc nhiều huyện, lưu một lượt. Tóm tắt địa bàn gọn để không tràn màn hình điện thoại. Không trộn cây cấp trên với phạm vi kinh doanh.
+- [x] **Migrations additive 033** (`033_territory_assignments_route_planning.sql`): `sales_set_staff_territories` Admin-only, validate revision, chống dữ liệu sai/trùng, cập nhật `staff_scopes`, tăng revision nhân viên/cấp trên, audit; `sales_customer_plannable` chỉ xét Admin hoặc phạm vi khách được giao **trực tiếp** (owner, địa bàn, chuỗi, khách riêng), không tự cho cấp trên lập lịch toàn bộ khách cấp dưới.
+- [x] **Backend:** endpoint Admin `POST /api/v1/admin/org/territory-assignments` kiểm tra tỉnh/huyện trong danh mục; `GET /api/v1/customers` trả `can_plan` theo backend; lịch `visit` của nhân viên có thể tham chiếu khách **do Admin/nhân viên khác tạo** nếu khách thuộc phạm vi của chính người lập. Bản ghi lịch thuộc người lập, không chuyển `owner_sub` khách. Sửa lịch của chính mình kiểm tra lại phạm vi, không cấp quyền sửa hồ sơ khách.
+- [x] **Flutter Web/PWA:** lịch chọn khách theo `can_plan` thay vì chỉ `owner_sub`; lưu cờ `can_plan` vào cache account/revision, fallback cũ an toàn; tuyến GET nối lịch theo `owner_sub` người lập.
+- [x] **Neon test branch:** giao Kiên Giang cho KB: 5 khách Kiên Giang lập lịch được, An Giang 0; Admin-owned customers `can_plan=true` nhưng `create/edit customer=false`; thử ghi 1 visit trong branch trả đúng `owner_sub` người lập; kiểm lỗi non-admin và stale revision đều bị chặn. **Không sửa phân công trên production để test.**
+- [x] **Triển khai:** source commit `3fa2bf310442276c82a5ec3f4939e96cb1d97e46`, Vercel production `dpl_5ZWkgchmkSbicdpoYRXetq6VN1By` READY, domain `sales-mien-tay.vercel.app` HTTP 200; Worker deployment `99854665-61b7-4d57-9723-d81ade4cdaa2`, version `318bed93-1bd2-4cd5-9b92-601a50449f5e` 100%; SHA256 `83a45fcdafc29234e81ecc14e3fc6d585a8518c0f66d0b2042e609bc7071855b`; 7 binding/secret giữ nguyên. Neon production migration 033 (6 SQL statements).
+- [x] TypeScript typecheck, Wrangler dry-run/minify, Flutter Analyze (124 issues `info`, không có error), Flutter Web release, offline shell 42 assets/no API caching, Push shell PASS; Vercel root HTTP 200.
+- [ ] **Chưa UAT API có session thật và thiết bị thật:** Vercel `/api/*` bị lớp share-link auth chặn; container/web tools không thể lấy HTTP chính xác. Không coi Worker 100%/Vercel READY là nghiệm thu. Nhân viên cần đăng nhập/khởi động lại sau đổi `scope_revision`.
+- [ ] **Kế tiếp P0-L:** lịch **địa bàn không có khách** và lead/khảo sát khu vực chưa triển khai trong sửa lần này; check-in/khảo sát khách do Admin tạo vẫn còn chính sách `owner_sub` cần chỉnh quyền nghiệp vụ riêng và UAT. Android APK chưa phát hành lại. Tài khoản mekong03 email chưa verified nên chưa nghiệm thu login.
+
