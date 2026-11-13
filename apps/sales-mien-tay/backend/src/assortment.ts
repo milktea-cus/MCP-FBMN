@@ -29,8 +29,7 @@ export async function assortmentRoutes(
    FROM public.customers c JOIN public.staff_members owner
     ON owner.user_sub=c.owner_sub AND owner.active
    WHERE c.id=${customerId}::uuid
-     AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)
-     AND public.sales_can_access(c.owner_sub,c.owner_sub,c.province,c.district)
+     AND public.sales_customer_allowed(${actor.sub},c.id,'view')
    LIMIT 1`;
  if(!eligible.length)return bad('Không tìm thấy khách hàng hoặc không có quyền',404);
  if(req.method==='GET'){
@@ -93,8 +92,8 @@ export async function assortmentRoutes(
    }});
  }
  if(req.method==='POST'&&!kind){
-  if(eligible[0].owner_sub!==actor.sub&&!actor.admin&&!actor.manager)
-   return bad('Không được xác minh khách hàng của nhân viên khác',403);
+  const permission=await sql`SELECT public.sales_customer_allowed(${actor.sub},${customerId}::uuid,'edit') AS allowed`;
+   if(permission[0]?.allowed!==true)return bad('Không có quyền sửa danh mục khách',403);
   let data:Record<string,unknown>;
   try{
    const raw=await req.text();
