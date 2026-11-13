@@ -13,18 +13,17 @@
 7. **Nhãn hàng nguồn dữ liệu chung (pha riêng nối tiếp):** chuẩn hóa catalog nhãn hàng/các biến thể tên, liên kết SKU, tình trạng bán tại khách, khảo sát và báo cáo tổng. Bỏ mảng `_surveyBrands` viết cứng; không lấy số nhãn cũ làm số thực tế. Khách có thể kinh doanh nhiều nhãn, trạng thái *đã đặt/đã nhập/đang bán* không được đánh đồng. Không nhầm danh mục SKU với nhãn được xác minh ở điểm bán.
 
 
-## Cập nhật P0-2 sau thi công code (13/11/2026)
+## P0-2 — Thực thi code và production (13/11/2026)
 
-**Phân loại chính xác:** Đã đưa mã lên GitHub `main`; CHƯA hoàn thành nghiệm thu, CHƯA chạy migration `042_work_stop_outcomes_unplanned.sql` trên Neon production và CHƯA deploy Cloudflare Worker/Vercel production. Không sử dụng GitHub Actions do quota dự án hết; chưa có log `flutter analyze`, `flutter test` hoặc Worker typecheck tại phiên làm việc này. Không đánh dấu các checkbox L2-A/B/C/E bên dưới là nghiệm thu.
+**Triển khai mã nguồn:** P0-2A/B/C/D/E đã cập nhật vào `main` tới commit `c94fc43c3890b49c0fd60445ba9b9e501eb4df0a`. P0-2B sử dụng nền tảng `monthly_plans`/migration 040 đã có; P0-2C/E bổ sung migration 042, API và UI. Luồng Sales: Công tác → Kế hoạch/Hôm nay/Kết quả, khảo sát mở theo điểm ghé, không dùng GPS làm dấu hoàn thành khảo sát.
 
-- **P0-2A — code:** màn Kế hoạch tháng đổi chip lọc sang một dropdown duy nhất, cùng hàng nút **Thêm công tác**, bỏ text thừa; test widget dropdown/mobile 320dp được viết.
-- **P0-2B — code nền kiểm tra lại:** `monthly_plan.dart`, `monthly_plans.ts` và migration 040 đã hỗ trợ ba loại `territory/customer/chain`, gợi ý khách theo quyền, tick nhiều, tuyến rỗng khách tạo area/chain stop không tạo khách giả. Cần test quyền, offline và dữ liệu thực.
-- **P0-2C — code mới:** kết quả `missed_code/missed_note` cho khách đóng cửa/không gặp/không đi được; `is_unplanned` cho điểm ngoài kế hoạch; migration 042 và hai API POST kiểm tra owner/scope/idempotency. Flutter có ghi lý do, thêm điểm phát sinh, outbox offline và ngăn sửa kế hoạch sau thực tế.
-- **P0-2D — code:** khảo sát mở từ điểm ghé `day_route_stop_id`, hạn chế sang đúng điểm/ngày, chặn mở khảo sát khi đã ghi không ghé; bỏ nút `Khảo sát hôm nay` độc lập trong tuyến; Sales vẫn vào `Công tác`, Admin giữ màn khảo sát lịch sử/template/media.
-- **P0-2E — code:** `/day-routes` trả riêng `stop_count/visited_count/missed_count/unplanned_count/unplanned_visited_count/survey_count/lead_count`; `WorkHub` đối chiếu ngày theo kế hoạch, GPS, khảo sát, lead và điểm ngoài kế hoạch.
-- **Kiểm thử mới chỉ được viết, chưa chạy:** `monthly_plan_test.dart`, `work_hub_test.dart`, `offline_queue_test.dart`. Flutter/Dart SDK không có trong môi trường thực thi; không chạy workflow tính quota.
+**Neon production:** migration `042_work_stop_outcomes_unplanned.sql` thực thi giao dịch thành công. Đã kiểm tra đủ **5 cột** `is_unplanned,missed_code,missed_note,missed_at,missed_ref` và **2 hàm** `sales_add_unplanned_route_stop`, `sales_mark_route_stop_missed`. Hai hàm chỉ cấp EXECUTE cho `sales_api`, PUBLIC bị chặn. Trước/sau migration vẫn có 1 tuyến/1 điểm đã tồn tại; không tạo, xóa hay cập nhật fixture production.
 
-**Điều kiện tiếp:** kiểm thử cú pháp/DB migration 042 trên nhánh an toàn và quyền DB thật; áp dụng schema theo quy trình phê duyệt Neon; kiểm tra Worker typecheck/API/Auth 401/403/409; chạy Flutter analyze/test, PWA IndexedDB/Android SQLite; triển khai đúng Cloudflare và Vercel production và smoke bằng tài khoản có quyền. Chưa qua các cổng này thì giữ nguyên production, không gọi P0-2 hoàn thành.
+**Cloudflare Worker production:** Worker `field-sales-api` được cập nhật nội dung module trên script hiện hành (không tạo Worker khác), deployment ID `19939e3d-1ac4-4839-8e74-22f6e1f2f87f`, version `bfe7a2fc-62b9-414a-b501-bca98aed03f3` **100%**. Kiểm lại 7 bindings/secret đã được giữ nguyên: `ALLOWED_ORIGINS`, `APP_RELEASES_BUCKET`, `DATABASE_URL`, `PHOTOS_BUCKET`, `VAPID_PRIVATE_JWK`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`. Nội dung bundle có handler missed/unplanned, counter, guard khảo sát/plan. Production bundle được patch có kiểm tra từ bản triển khai hiện tại; chưa có build Worker typecheck độc lập từ SHA `main`, cần kiểm chứng lại khi chuẩn hóa pipeline Worker tiếp theo.
+
+**Flutter Web/Vercel production:** build trực tiếp từ SHA `c94fc43c...` qua dự án hiện hữu `sales-mien-tay`; deployment `dpl_8sMFCXZaHrxQbSRmciU2RJDWGY9E` **READY**, alias `https://sales-mien-tay.vercel.app`. Build đã chạy `flutter analyze --no-fatal-infos` (pass, 137 thông tin lint không chặn), **175 Flutter tests PASS**, `flutter build web --release` PASS, offline shell **42 assets**, `vercel.json` có rewrite /api đến Worker. Không dùng GitHub Actions quota.
+
+**Giới hạn nghiệm thu còn mở:** kiểm tra HTTP 200/401/403/409 trực tiếp từ URL production bị hạn chế bởi môi trường kiểm tra web (không thể đọc phản hồi URL), chưa có UAT hai tài khoản, GPS, offline trên PWA/Android thật, camera, kiểm tra chéo quyền và hồi quy runtime. Vercel READY + 175 test **không** thay thế UAT. Không đóng checklist L2-E/P0-J và không báo hoàn thành sản phẩm v1.0 chỉ từ những bằng chứng trên.
 
 ## Thứ tự thực hiện và tiêu chí nghiệm thu
 
