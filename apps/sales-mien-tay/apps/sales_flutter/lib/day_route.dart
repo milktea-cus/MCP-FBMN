@@ -240,6 +240,21 @@ class _DayRoutePageState extends State<DayRoutePage>{
    if(mounted)await load();
   }catch(e){notice('Không ghi được GPS: $e');}
  }
+ /// For scheduled customer stops, open the existing survey linked by
+ /// day_route_stop_id. SurveyPage handles its own GPS first verification.
+ Future<void> openCustomerSurvey(Map<String,dynamic> stop)async{
+  final customerId=stop['customer_id']?.toString();
+  if(customerId==null||customerId.isEmpty)return;
+  if(pendingStops.any((p)=>(p['payload'] as Map)['customer_id']?.toString()==customerId)){
+   notice('Điểm ghé chờ đồng bộ. Đồng bộ tuyến trước khi bắt đầu khảo sát.');
+   return;
+  }
+  final regions=await RegionCatalog.load();
+  if(!mounted)return;
+  await Navigator.push(context,MaterialPageRoute(builder:(_)=>SurveyPage(
+   queue:widget.queue,service:widget.service,regions:regions,initialCustomer:customerId)));
+  if(mounted)await load();
+ }
  Future<void> openSurveys()async{
   final regions=await RegionCatalog.load();
   if(!mounted)return;
@@ -289,7 +304,11 @@ class _DayRoutePageState extends State<DayRoutePage>{
     if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
     for(final p in pending)Card(child:ListTile(
      leading:const Icon(Icons.cloud_upload_outlined),
-     title:Text('Điểm ghé · ${(p['payload'] as Map)['stop_kind']}'),
+     title:Text((p['payload'] as Map)['stop_kind']=='customer'
+       ? (candidates.where((c)=>c['id']==(p['payload'] as Map)['customer_id'])
+            .map((c)=>c['name']?.toString()??'Điểm bán').firstOrNull??'Khách đã chọn')
+       : (p['payload'] as Map)['stop_kind']=='area'?'Tìm khách mới · địa bàn'
+         :'Công tác chuỗi'),
      subtitle:Text(p['error']?.toString()??'Đã lưu máy · chờ đồng bộ'),
      trailing:p['status']=='blocked'?IconButton(tooltip:'Đồng bộ lại',
       icon:const Icon(Icons.refresh),onPressed:()=>widget.queue.retryBlocked(p['key'].toString())):null,
@@ -307,9 +326,10 @@ class _DayRoutePageState extends State<DayRoutePage>{
        'survey_started'=>'Đang khảo sát',
        'survey_completed'=>'Hoàn thành khảo sát',
        _=>'Chưa đi',
-      }}${sorted[i]['stop_kind']=='customer'?'':' · Chạm xem ảnh/lead'}'),
+      }}${sorted[i]['stop_kind']=='customer'?' · Chạm để khảo sát':' · Chạm xem ảnh/lead'}'),
       isThreeLine:true,
-      onTap:sorted[i]['stop_kind']=='customer'?null:()=>openEvidence(sorted[i]),
+      onTap:sorted[i]['stop_kind']=='customer'
+        ?()=>openCustomerSurvey(sorted[i]):()=>openEvidence(sorted[i]),
       trailing:Row(mainAxisSize:MainAxisSize.min,children:[
        if(canModify&&pending.isEmpty)...[
         IconButton(tooltip:'Lên trên',icon:const Icon(Icons.arrow_upward),
