@@ -15,6 +15,7 @@ class _OrgScopePageState extends State<OrgScopePage> {
   final search = TextEditingController();
   final territory = TextEditingController();
   final unitName = TextEditingController();
+  final provinceName=TextEditingController(),districtName=TextEditingController();
   bool loading = true, busy = false, morePreview = false;
   String? error, selectedStaff, selectedCustomer;
   String kind = 'staff', action = 'view', bindingKind = 'staff';
@@ -33,7 +34,7 @@ class _OrgScopePageState extends State<OrgScopePage> {
   @override
   void initState() { super.initState(); refresh(); }
   @override
-  void dispose() { search.dispose(); territory.dispose(); unitName.dispose(); super.dispose(); }
+  void dispose() { search.dispose(); territory.dispose(); unitName.dispose();provinceName.dispose();districtName.dispose(); super.dispose(); }
 
   List<Map<String,dynamic>> maps(dynamic raw) =>
       (raw as List? ?? []).map((v)=>Map<String,dynamic>.from(v as Map)).toList();
@@ -171,6 +172,24 @@ class _OrgScopePageState extends State<OrgScopePage> {
     finally{if(mounted)setState(()=>busy=false);}
   }
 
+  Future<void> createTerritory() async {
+    final province=provinceName.text.trim(),district=districtName.text.trim();
+    if(province.length<2||(!district.isEmpty&&district.length<2)){
+      setState(()=>error='Nhập tên tỉnh và tên huyện (nếu có).');return;
+    }
+    setState((){busy=true;error=null;});
+    try{
+      await widget.session.post('/api/v1/admin/org/territories',{
+        'level':district.isEmpty?'province':'district',
+        'name':district.isEmpty?province:district,
+        if(district.isNotEmpty)'province':province,
+      });
+      if(mounted){await refresh();ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content:Text('Đã cập nhật địa bàn. Mở lại sửa nhân viên để chọn địa bàn mới.')));}
+    }catch(e){if(mounted)setState(()=>error=e.toString());}
+    finally{if(mounted)setState(()=>busy=false);}
+  }
+
   Widget section(String title, List<Widget> children)=>Padding(
     padding:const EdgeInsets.only(bottom:22),
     child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
@@ -275,6 +294,18 @@ class _OrgScopePageState extends State<OrgScopePage> {
               onChanged:busy?null:(v)=>teamMember(t,m['user_sub'].toString(),v==true))]),
           for(final c in chains)ListTile(dense:true,
             leading:const Icon(Icons.account_tree_outlined),title:Text(label(c))),
+        ]),
+        section('4. Mở rộng địa bàn toàn quốc',[
+          const Text('Thêm tỉnh trước, sau đó thêm huyện thuộc tỉnh. Dữ liệu lưu trên Neon, không giới hạn danh sách cũ.'),
+          const SizedBox(height:12),
+          TextField(controller:provinceName,enabled:!busy,
+            decoration:const InputDecoration(labelText:'Tên tỉnh / thành phố')),
+          const SizedBox(height:12),
+          TextField(controller:districtName,enabled:!busy,
+            decoration:const InputDecoration(labelText:'Tên huyện / khu vực (để trống khi thêm tỉnh)')),
+          const SizedBox(height:12),
+          OutlinedButton.icon(onPressed:busy?null:createTerritory,
+            icon:const Icon(Icons.add_location_alt_outlined),label:const Text('Lưu địa bàn')),
         ]),
       ]),
     ),
