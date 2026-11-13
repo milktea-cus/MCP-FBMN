@@ -38,3 +38,11 @@ Các con số ở ví dụ chỉ minh họa logic, **không ghi khách giả và
 Cần kiểm tra các mục DB schema+permission, Flutter tests và build production; nhưng **không gọi UAT thực tế là đạt** khi chưa có kiểm tra đăng nhập HTTP, khảo sát GPS/ảnh, đồng bộ offline trên điện thoại và tài khoản Sales–Manager.
 
 **Bản ghi này thay thế định nghĩa KPI nhãn hàng dựa vào SKU ở biên bản P0-3 trước đó.**
+
+## Bằng chứng triển khai 14/11/2026
+
+- **Neon production:** migration 045 transaction 15 statements PASS; kiểm tra 609 SKU được map Futurebook, 25 khách thật giữ nguyên, ràng buộc unique `market_customer_brands(customer_id,brand_id)`, hàm `sales_complete_survey_market` chỉ `sales_api` có EXECUTE và PUBLIC không có. SQL `EXPLAIN` thống kê theo tỉnh/huyện, quyền đọc theo khách chạy thành công.
+- **Cloudflare Worker:** deployment `89e16492-385d-4b84-807f-db9d23b0a072` **100%**, đã xác nhận route market, survey atomic + bridge đọc checklist offline cũ trong bundle production. Giữ nguyên 7 binding/secret hiện hữu.
+- **Vercel production:** `dpl_C9d9c5H9VW3dhx1cDxijTVFxmA4c` **READY**, code SHA `b87e9adec8012192cae0759af515e24dd3030146`, source backend TypeScript typecheck PASS, Flutter analyze --no-fatal-infos PASS, **180/180 Flutter tests PASS**, web release PASS, offline shell 42 assets. Production alias `https://sales-mien-tay.vercel.app`.
+- **UAT chưa xác minh:** hiện không có phiên `field_survey_sessions` hoàn thành trong production, nên 0 quan sát nhãn thị trường là đúng; không tạo MGP/Thành Đạt hoặc khách giả. Chưa có end-to-end HTTP thật với GPS+ảnh, người dùng Sales/Manager và offline phone; không tuyên bố nghiệm thu thiết bị đã đạt. Worker production được cập nhật bằng patch trên compiled script hiện hữu vì môi trường không có backend build local; TypeScript source đã được typecheck trong Vercel.
+
