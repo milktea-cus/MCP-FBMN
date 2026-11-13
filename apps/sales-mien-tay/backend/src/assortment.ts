@@ -128,10 +128,11 @@ export async function assortmentRoutes(
   if(kind==='catalog'){
    // Selection exposes version even for previously unverified manual rows.
    const items=await sql`SELECT p.id::text AS product_id,p.company_code,
-      p.sku,p.name,p.brand,p.unit,p.category,cp.version AS manual_version,
+      p.sku,p.name,coalesce(b.name,p.brand) AS brand,p.unit,p.category,cp.version AS manual_version,
       coalesce(cp.verified,false) AS manual_verified,
       a.status AS evidence_status
      FROM public.catalog_products p
+     LEFT JOIN public.catalog_brands b ON b.id=p.brand_id
      LEFT JOIN public.customer_products cp ON cp.product_id=p.id
       AND cp.customer_id=${customerId}::uuid
      LEFT JOIN public.customer_product_assortment a ON a.customer_id=${customerId}::uuid
@@ -140,17 +141,19 @@ export async function assortmentRoutes(
       AND (${q}='' OR p.name ILIKE '%'||${q}||'%'
        OR p.company_code ILIKE '%'||${q}||'%'
        OR p.sku ILIKE '%'||${q}||'%'
-       OR p.brand ILIKE '%'||${q}||'%')
+       OR coalesce(b.name,p.brand) ILIKE '%'||${q}||'%')
      ORDER BY p.company_code ASC LIMIT ${limit+1}`;
    const more=items.length>limit,page=items.slice(0,limit);
    return response({items:page,next_cursor:more?page[page.length-1]?.company_code:null});
   }
   const items=await sql`SELECT a.product_id::text AS product_id,
-     a.company_code,a.sku,a.name,a.brand,a.unit,a.category,
+     a.company_code,a.sku,a.name,coalesce(b.name,a.brand) AS brand,a.unit,a.category,
      a.status,a.is_trading,a.ordered_orders,a.imported_orders,
      a.manual_version,a.verification_note,a.verified_at,a.verified_by,
      a.last_ordered_at,a.last_imported_at,a.evidence_at
     FROM public.customer_product_assortment a
+    JOIN public.catalog_products p ON p.id=a.product_id
+    LEFT JOIN public.catalog_brands b ON b.id=p.brand_id
     WHERE a.customer_id=${customerId}::uuid AND a.company_code>${after}
      AND (${status}='' OR (${status}='trading' AND a.is_trading)
       OR (${status}='imported' AND a.imported_orders>0)
@@ -158,7 +161,7 @@ export async function assortmentRoutes(
      AND (${q}='' OR a.name ILIKE '%'||${q}||'%'
       OR a.company_code ILIKE '%'||${q}||'%'
       OR a.sku ILIKE '%'||${q}||'%'
-      OR a.brand ILIKE '%'||${q}||'%')
+      OR coalesce(b.name,a.brand) ILIKE '%'||${q}||'%')
     ORDER BY a.company_code ASC LIMIT ${limit+1}`;
   const more=items.length>limit,page=items.slice(0,limit);
   return response({items:page,next_cursor:more?page[page.length-1]?.company_code:null,
