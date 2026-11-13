@@ -147,12 +147,35 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   let v:Body;try{v=await body(req);}catch{return bad('JSON không hợp lệ');}
   const id=v.client_ref,cid=v.customer_id,tid=v.template_id,rid=v.route_stop_id??null,drid=v.day_route_stop_id??null,started=captureTime(v.started_at);
   if(!isUuid(id)||!isUuid(cid)||!isUuid(tid)||(rid!==null&&!isUuid(rid))||(drid!==null&&!isUuid(drid))||(rid!==null&&drid!==null)||!started||!point(v.latitude,v.longitude,v.accuracy_m))return bad('Phiên hoặc GPS không hợp lệ (độ chính xác tối đa 100m)');
+  // A verified GPS check-in on this exact scheduled stop can be reused for
+  // the survey. Reuse is owned, same-day, recent, and coordinates are immutable.
+  const visitRef=v.visit_ref??null;
+  if(visitRef!==null){
+   if(!isUuid(visitRef)||drid===null)return bad('GPS tham chiếu không hợp lệ',400);
+   const checkin=await db`SELECT v.client_ref,v.latitude,v.longitude,v.accuracy_m,v.checkin_at
+    FROM public.field_visits v
+    JOIN public.field_route_stops st ON st.id=v.day_route_stop_id
+    WHERE v.client_ref=${visitRef}::uuid AND v.owner_sub=${actor.sub}
+      AND v.customer_id=${cid}::uuid AND st.id=${drid}::uuid
+      AND st.owner_sub=${actor.sub} AND st.customer_id=${cid}::uuid
+      AND (v.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date=${vnDay(started!)}::date
+      AND v.checkin_at<=${started!}::timestamptz
+      AND v.checkin_at >= (${started!}::timestamptz-interval '12 hours')
+    LIMIT 1`;
+   if(!checkin.length)return bad('Check-in đã hết hạn hoặc không thuộc điểm ghé',409);
+   const existing=checkin[0];
+   if(Math.abs(Number(existing.latitude)-Number(v.latitude))>0.0000001
+     ||Math.abs(Number(existing.longitude)-Number(v.longitude))>0.0000001
+     ||Math.abs(Number(existing.accuracy_m)-Number(v.accuracy_m))>0.000001)
+    return bad('GPS không khớp lượt check-in đã xác minh',409);
+  }
   const prior=await getSession(db,actor,id);
   if(prior)return prior.owner_sub===actor.sub&&prior.customer_id===cid&&prior.template_id===tid&&(prior.route_stop_id??null)===rid&&(prior.day_route_stop_id??null)===drid?json({item:prior,idempotent:true}):bad('UUID phiên đã được sử dụng',409);
   const customers=await db`SELECT c.* FROM customers c WHERE c.id=${cid}::uuid AND public.sales_customer_fieldwork_allowed(${actor.sub},c.id)`;
   const c=customers[0];if(!c)return bad('Không có quyền điểm bán',403);
   const first=c.latitude===null&&c.longitude===null;
   const initializeCustomer=first&&c.owner_sub===actor.sub;
+  if(first&&visitRef!==null)return bad('Mốc GPS đầu tiên chưa được xác nhận',409);
   if(first&&v.initialize_location!==true)return bad('Điểm bán chưa có tọa độ. Cần xác nhận ghi nhận vị trí lần đầu tại điểm bán.',409);
   if(!first&&(!c.location_consent||c.latitude===null||c.longitude===null))return bad('Tọa độ điểm bán chưa được phép sử dụng',409);
   const distance=first?0:meters(c.latitude,c.longitude,v.latitude as number,v.longitude as number);
@@ -192,8 +215,10 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
    INSERT INTO field_visits(customer_id,owner_sub,client_ref,checkin_at,latitude,longitude,accuracy_m,distance_m,note,day_route_stop_id)
    SELECT customer_id,owner_sub,id,started_at,latitude,longitude,accuracy_m,distance_m,
     CASE WHEN location_initialized THEN 'Phiên khảo sát · ghi nhận tọa độ lần đầu' ELSE 'Phiên khảo sát' END,day_route_stop_id
-   FROM created WHERE NOT location_initialized OR EXISTS(SELECT 1 FROM initialized) RETURNING id
-  ) SELECT created.* FROM created JOIN gps ON true`;
+   FROM created WHERE ${visitRef===null} AND
+    (NOT location_initialized OR EXISTS(SELECT 1 FROM initialized)) RETURNING id
+  ) SELECT created.* FROM created
+    WHERE ${visitRef!==null} OR EXISTS(SELECT 1 FROM gps)`;
   const item=await getSession(db,actor,id);
   if(!item||item.owner_sub!==actor.sub||item.customer_id!==cid||item.template_id!==tid||(item.route_stop_id??null)!==rid||(item.day_route_stop_id??null)!==drid)return bad('Xung đột phiên hoặc quyền',409);
   return json({item,idempotent:!rows.length},rows.length?201:200);
