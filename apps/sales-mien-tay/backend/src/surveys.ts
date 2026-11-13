@@ -124,7 +124,7 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   // A catalog-backed question snapshots official names in the published version;
   // unchecked free text and expired aliases must never enter a canonical survey.
   if(qs.some(q=>q.catalog_source==='brands')){
-   const rows=await db`SELECT name FROM public.catalog_brands WHERE active ORDER BY name`;
+   const rows=await db`SELECT name FROM public.market_brands ORDER BY name`;
    const accepted=new Set(rows.map(row=>String(row.name)));
    if(qs.some(q=>q.catalog_source==='brands'&&q.options?.some(name=>!accepted.has(name))))
      return bad('Lựa chọn nhãn hàng đã thay đổi; tải lại danh mục chuẩn',409);
