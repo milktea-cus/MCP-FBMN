@@ -58,7 +58,11 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
         OR EXISTS(SELECT 1 FROM public.field_area_visits a WHERE a.day_route_stop_id=s.id)))::integer AS visited_count,
     (SELECT count(DISTINCT se.day_route_stop_id) FROM public.field_survey_sessions se
       JOIN public.field_route_stops s ON s.id=se.day_route_stop_id
-      WHERE s.day_route_id=r.id AND se.status='completed')::integer AS survey_count
+      WHERE s.day_route_id=r.id AND se.status='completed')::integer AS survey_count,
+    (SELECT count(*)::integer FROM public.field_prospects prospect
+      JOIN public.field_area_visits area ON area.id=prospect.area_visit_id
+      JOIN public.field_route_stops stop ON stop.id=area.day_route_stop_id
+      WHERE stop.day_route_id=r.id) AS lead_count
    FROM public.field_day_routes r JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id
    WHERE p.period_ym=${month} AND
     (r.owner_sub=${actor.sub} OR ${actor.admin} OR
