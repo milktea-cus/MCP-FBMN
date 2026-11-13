@@ -13,7 +13,7 @@ const bindingKinds=['territory','team','chain','staff'];
 function validString(x:unknown,max=240):x is string{return typeof x==='string'&&x.trim().length>0&&x.trim().length<=max;}
 async function body(req:Request){
  if(!req.headers.get('content-type')?.includes('application/json'))throw Error('json');
- const raw=await req.text();if(raw.length>8000)throw Error('size');
+ const raw=await req.text();if(raw.length>64000)throw Error('size');
  const value=JSON.parse(raw) as unknown;
  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('object');
  return value as Record<string,unknown>;
