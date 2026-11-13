@@ -13,10 +13,16 @@ export async function staffRoutes(req:Request,env:AuthEnv,actor:{sub:string;admi
  }
  if(req.method!=='POST')return json({error:'Method not allowed'},405);
  let data:Record<string,unknown>;try{const raw=await req.text();if(raw.length>64000)throw Error();data=JSON.parse(raw);}catch{return json({error:'JSON không hợp lệ'},400);}
- if(!data || typeof data.user_sub!=='string'|| !/^[0-9a-f-]{36}$/i.test(data.user_sub)||typeof data.employee_code!=='string'||!data.employee_code.trim()||data.employee_code.length>80||typeof data.full_name!=='string'||!data.full_name.trim()||data.full_name.length>240||!['admin','manager','sales'].includes(String(data.role))||typeof data.active!=='boolean'||!Array.isArray(data.scopes)||data.scopes.length>134)return json({error:'Thông tin nhân viên không hợp lệ'},400);
+ if(!data || typeof data.user_sub!=='string'|| !/^[0-9a-f-]{36}$/i.test(data.user_sub)||typeof data.employee_code!=='string'||!data.employee_code.trim()||data.employee_code.length>80||typeof data.full_name!=='string'||!data.full_name.trim()||data.full_name.length>240||!['admin','manager','sales'].includes(String(data.role))||typeof data.active!=='boolean'||!Array.isArray(data.scopes)||data.scopes.length>1000)return json({error:'Thông tin nhân viên không hợp lệ'},400);
+ const configured=await db`SELECT t.name,t.level,p.name AS province FROM public.territory_catalog t
+   LEFT JOIN public.territory_catalog p ON p.code=t.parent_code WHERE t.active`;
+ const extended=new Map<string,Set<string>>();
+ for(const row of configured)if(row.level==='province')extended.set(String(row.name),new Set());
+ for(const row of configured)if(row.level==='district'&&row.province)
+   extended.get(String(row.province))?.add(String(row.name));
  const scopes=new Map<string,{province:string;district:string}>();
  for(const scope of data.scopes){
-  if(!scope||typeof scope.province!=='string'||typeof scope.district!=='string'||!areas[scope.province]||(scope.district!==''&&!areas[scope.province].includes(scope.district)))return json({error:'Địa bàn không hợp lệ'},400);
+  if(!scope||typeof scope.province!=='string'||typeof scope.district!=='string'||(!areas[scope.province]&&!extended.has(scope.province))||(scope.district!==''&&!areas[scope.province]?.includes(scope.district)&&!extended.get(scope.province)?.has(scope.district)))return json({error:'Địa bàn không hợp lệ'},400);
   scopes.set(scope.province+'|'+scope.district,{province:scope.province,district:scope.district});
  }
  const canonical=[...scopes.values()].filter(s=>s.district===''||!scopes.has(s.province+'|'));
