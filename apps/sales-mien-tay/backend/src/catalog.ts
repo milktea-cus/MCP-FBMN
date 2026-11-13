@@ -145,9 +145,14 @@ export async function catalogRoutes(req:Request,env:{DATABASE_URL:string},actor:
   const q=(url.searchParams.get('q')??'').trim().slice(0,120),after=url.searchParams.get('after')??'';
   const limit=Number(url.searchParams.get('limit')??'50');
   if(!Number.isInteger(limit)||limit<1||limit>100||after.length>80)return bad('Phân trang không hợp lệ');
-  const rows=await db`SELECT * FROM catalog_products WHERE (${actor.admin} OR active) AND company_code>${after}
-   AND (${!q} OR strpos(lower(company_code),lower(${q}))>0 OR strpos(lower(name),lower(${q}))>0 OR strpos(lower(coalesce(sku,'')),lower(${q}))>0 OR strpos(lower(coalesce(brand,'')),lower(${q}))>0)
-   ORDER BY company_code LIMIT ${limit+1}`;
+  const rows=await db`SELECT p.*,coalesce(b.name,p.brand) AS canonical_brand
+   FROM public.catalog_products p
+   LEFT JOIN public.catalog_brands b ON b.id=p.brand_id
+   WHERE (${actor.admin} OR p.active) AND p.company_code>${after}
+   AND (${!q} OR strpos(lower(p.company_code),lower(${q}))>0
+    OR strpos(lower(p.name),lower(${q}))>0 OR strpos(lower(coalesce(p.sku,'')),lower(${q}))>0
+    OR strpos(lower(coalesce(b.name,p.brand,'')),lower(${q}))>0)
+   ORDER BY p.company_code LIMIT ${limit+1}`;
   const items=rows.slice(0,limit);return json({items,next_cursor:rows.length>limit?items[items.length-1].company_code:null,synced_at:new Date().toISOString()});
  }
  if(path==='/api/v1/catalog/edits'&&req.method==='GET'){
