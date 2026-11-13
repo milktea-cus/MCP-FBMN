@@ -244,7 +244,7 @@ export default {
         if(body.kind&&['visit','forecast','survey'].includes(body.kind)&&body.data?.customerId!==undefined){
           const id=body.data.customerId,day=body.data.plannedDate,sequence=body.data.sequence;
           if(typeof id!=='string'||!/^[0-9a-f-]{36}$/i.test(id)||(body.kind==='visit'&&(typeof day!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day))||new Date(day).toISOString().slice(0,10)!==day||typeof sequence!=='number'||!Number.isInteger(sequence)||sequence<1||sequence>9999)))return bad('Điểm ghé, ngày hoặc thứ tự không hợp lệ');
-          const customer=await sql`SELECT name,province,district,owner_sub FROM customers WHERE id::text=${id} AND public.sales_record_allowed(${user.sub},id,'view')`;
+          const customer=await sql`SELECT name,province,district,owner_sub FROM customers WHERE id::text=${id} AND public.sales_customer_allowed(${user.sub},id,'view')`;
           if(!customer.length)return bad('Không có quyền điểm bán',403);
           if(customer[0].owner_sub!==user.sub)return bad('Chỉ lập tuyến/biểu mẫu cho khách hàng của mình',403);
           if(body.province!==customer[0].province||body.district!==customer[0].district)return bad('Địa bàn tuyến không khớp điểm bán');
@@ -285,7 +285,7 @@ export default {
           const day=body.data.plannedDate,sequence=body.data.sequence;
           if(typeof day!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day))||new Date(day).toISOString().slice(0,10)!==day||typeof sequence!=='number'||!Number.isInteger(sequence)||sequence<1||sequence>9999)return bad('Ngày hoặc thứ tự không hợp lệ');
           const data={...old.data,plannedDate:day,sequence,purpose:String(body.data.purpose??'').slice(0,1000)};
-          try{const rows=await sql`UPDATE sales_records SET data=${JSON.stringify(data)}::jsonb,version=version+1,last_mutation_ref=${body.client_ref}::uuid,updated_at=now() WHERE id=${match[1]}::uuid AND version=${body.version!} AND public.sales_record_allowed(${user.sub},id,'view') AND EXISTS(SELECT 1 FROM customers c WHERE c.id::text=${String(old.data.customerId)} AND public.sales_customer_allowed(${user.sub},c.id,'view'))
+          try{const rows=await sql`UPDATE sales_records SET data=${JSON.stringify(data)}::jsonb,version=version+1,last_mutation_ref=${body.client_ref}::uuid,updated_at=now() WHERE id=${match[1]}::uuid AND version=${body.version!} AND public.sales_record_allowed(${user.sub},id,'edit') AND EXISTS(SELECT 1 FROM customers c WHERE c.id::text=${String(old.data.customerId)} AND public.sales_customer_allowed(${user.sub},c.id,'edit'))
           AND NOT EXISTS(SELECT 1 FROM field_visits v WHERE v.customer_id::text=${String(old.data.customerId)} AND v.owner_sub=sales_records.owner_sub AND (v.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date=(sales_records.data->>'plannedDate')::date) RETURNING *`;return rows.length?json({item:rows[0]}):bad('Tuyến đã ghé, xung đột phiên bản hoặc quyền',409);}
           catch(e){if((e as {code?:string}).code==='23505')return bad('Khách đã có lịch ngày này',409);throw e;}
         }
@@ -297,7 +297,7 @@ export default {
           const error=validate({kind:old.kind,province:old.province,district:old.district,customer_name:old.customer_name,period_ym:old.period_ym,data},true);
           if(error)return bad(error);
           if(old.kind==='target'&&(typeof data.monthlyTarget!=='number'||!Number.isFinite(data.monthlyTarget)||data.monthlyTarget<0))return bad('Chỉ tiêu không hợp lệ');
-          const rows=await sql`UPDATE sales_records SET data=${JSON.stringify(data)}::jsonb,version=version+1,last_mutation_ref=${body.client_ref}::uuid,updated_at=now() WHERE id=${match[1]}::uuid AND version=${body.version!} AND public.sales_record_allowed(${user.sub},id,'view') RETURNING *`;
+          const rows=await sql`UPDATE sales_records SET data=${JSON.stringify(data)}::jsonb,version=version+1,last_mutation_ref=${body.client_ref}::uuid,updated_at=now() WHERE id=${match[1]}::uuid AND version=${body.version!} AND public.sales_record_allowed(${user.sub},id,'edit') RETURNING *`;
           return rows.length?json({item:rows[0]}):bad('Xung đột phiên bản hoặc quyền',409);
         }
         const province = body.province ?? current[0].province;
@@ -313,7 +313,7 @@ export default {
         const rows = await sql`
           UPDATE sales_records SET province=${province}, district=${district},
             data=${JSON.stringify(body.data)}::jsonb, updated_at=now()
-          WHERE id=${match[1]}::uuid AND public.sales_record_allowed(${user.sub},id,'view') AND public.sales_can_access(${user.sub},owner_sub,${province},${district}) RETURNING *`;
+          WHERE id=${match[1]}::uuid AND public.sales_record_allowed(${user.sub},id,'edit') AND public.sales_can_access(${user.sub},owner_sub,${province},${district}) RETURNING *`;
         return rows.length ? json({item: rows[0]}) : bad('Không tìm thấy hoặc không có quyền', 404);
       }
       if (match && req.method === 'DELETE') {
