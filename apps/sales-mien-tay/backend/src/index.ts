@@ -10,6 +10,7 @@ import {monthlyPlanRoutes} from './monthly_plans';
 import {dayRouteRoutes} from './day_routes';
 import {areaVisitRoutes} from './area_visits';
 import {areaVisitMediaRoutes} from './area_visit_media';
+import {routeTemplateRoutes} from './route_templates';
 import {catalogRoutes} from './catalog';
 import {catalogImportRoutes} from './catalog_import';
 import {inventoryRoutes} from './inventory';
@@ -180,6 +181,8 @@ export default {
       if(catalogResponse)return catalogResponse;
       const monthlyResponse=await monthlyPlanRoutes(req,env,user,url);
       if(monthlyResponse)return monthlyResponse;
+      const templateResponse=await routeTemplateRoutes(req,env,user,url);
+      if(templateResponse)return templateResponse;
       const dayRouteResponse=await dayRouteRoutes(req,env,user,url);
       if(dayRouteResponse)return dayRouteResponse;
       const areaPhotoResponse=await areaVisitMediaRoutes(req,env,user,url);
