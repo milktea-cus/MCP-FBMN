@@ -55,7 +55,7 @@ class _CatalogPageState extends State<CatalogPage>{
   Row(children:[Expanded(child:Text('Danh mục SKU',style:Theme.of(context).textTheme.titleLarge)),IconButton(tooltip:'Đồng bộ',onPressed:busy?null:()=>load(),icon:const Icon(Icons.sync))]),
   const SizedBox(height:8),
   TextField(controller:search,decoration:const InputDecoration(prefixIcon:Icon(Icons.search),labelText:'Mã CTY, SKU, tên hoặc nhãn hàng'),onChanged:(_){timer?.cancel();timer=Timer(const Duration(milliseconds:350),()=>load());}),
-  if(widget.admin)Padding(padding:const EdgeInsets.symmetric(vertical:8),child:Wrap(spacing:8,runSpacing:8,children:[FilledButton.icon(onPressed:busy||offline?null:()=>edit(),icon:const Icon(Icons.add),label:const Text('Thêm')),OutlinedButton(onPressed:busy||offline?null:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>CustomerMappingPage(service:widget.service))),child:const Text('Mã KH')),OutlinedButton.icon(onPressed:busy||offline?null:()async{await Navigator.push(context,MaterialPageRoute(builder:(_)=>InventoryImportHubPage(service:widget.service)));if(mounted)await load();},icon:const Icon(Icons.upload_file),label:const Text('Nhập')),TextButton(onPressed:busy||offline?null:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>CatalogAuditPage(service:widget.service))),child:const Text('Nhật ký'))])),
+  if(widget.admin)Padding(padding:const EdgeInsets.symmetric(vertical:8),child:Wrap(spacing:8,runSpacing:8,children:[FilledButton.icon(onPressed:busy||offline?null:()=>edit(),icon:const Icon(Icons.add),label:const Text('Thêm')),OutlinedButton(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>BrandCatalogPage(service:widget.service,queue:widget.queue,admin:widget.admin))),child:const Text('Nhãn hàng')),OutlinedButton(onPressed:busy||offline?null:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>CustomerMappingPage(service:widget.service))),child:const Text('Mã KH')),OutlinedButton.icon(onPressed:busy||offline?null:()async{await Navigator.push(context,MaterialPageRoute(builder:(_)=>InventoryImportHubPage(service:widget.service)));if(mounted)await load();},icon:const Icon(Icons.upload_file),label:const Text('Nhập')),TextButton(onPressed:busy||offline?null:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>CatalogAuditPage(service:widget.service))),child:const Text('Nhật ký'))])),
   if(busy)const LinearProgressIndicator(),if(error!=null)Padding(padding:const EdgeInsets.all(8),child:Text(error!)),
   if(rows.isEmpty&&!busy)const Padding(padding:EdgeInsets.all(16),child:Text('Không có sản phẩm phù hợp.')),
   for(final p in rows)Card(child:ListTile(title:Text(p['name'].toString()),subtitle:Text('Mã CTY: ${p['company_code']} · SKU: ${p['sku']??"—"}\n${p['brand']??"—"} · ${p['category']??"—"} · ĐVT: ${p['unit']??"Chưa xác minh"}${p['active']==false?" · Ngừng sử dụng":""}'),trailing:widget.admin&&!offline?IconButton(tooltip:'Sửa sản phẩm',onPressed:()=>edit(p),icon:const Icon(Icons.edit_outlined)):const Icon(Icons.chevron_right),onTap:()=>showDialog<void>(context:context,builder:(c)=>AlertDialog(title:Text(p['name'].toString()),content:Text('Mã CTY: ${p['company_code']}\nĐVT: ${p['unit']??"Chưa xác minh"}\n${specSummary(map(p['product_spec']??{}))}\nXem số tồn tại Tra tồn'),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng'))])))),
@@ -124,4 +124,92 @@ class CatalogAuditPage extends StatelessWidget{
  final CustomerService service;
  const CatalogAuditPage({super.key,required this.service});
  @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Nhật ký danh mục')),body:FutureBuilder<http.Response>(future:http.get(service.uri('/api/v1/catalog/edits'),headers:service.headers),builder:(c,s){if(s.hasError)return Center(child:Text(s.error.toString()));if(!s.hasData)return const Center(child:CircularProgressIndicator());try{final rows=(decodeApi(s.data!)['items'] as List).map(map);return ListView(children:[for(final r in rows)ListTile(title:Text('${r['before_data']==null?"Tạo":"Sửa"} · ${(r['after_data'] as Map)['company_code']}'),subtitle:Text('${r['created_at']} · ${r['actor_sub']}'))]);}catch(e){return Center(child:Text(e.toString()));}}));
+}
+
+class BrandCatalogPage extends StatefulWidget{
+ final CustomerService service;
+ final OfflineQueue queue;
+ final bool admin;
+ const BrandCatalogPage({super.key,required this.service,required this.queue,required this.admin});
+ @override State<BrandCatalogPage> createState()=>_BrandCatalogPageState();
+}
+class _BrandCatalogPageState extends State<BrandCatalogPage>{
+ List<Map<String,dynamic>> brands=[];
+ bool busy=false,offline=false;String? error;
+ @override void initState(){super.initState();unawaited(load());}
+ Future<void> load()async{
+  if(busy)return;
+  setState((){busy=true;error=null;});
+  try{
+   final cached=await widget.queue.cached('canonical-brand-admin-v1');
+   if(mounted)setState(()=>brands=cached);
+   final res=decodeApi(await http.get(widget.service.uri('/api/v1/catalog/brands'),
+    headers:widget.service.headers).timeout(const Duration(seconds:18)));
+   final list=(res['items'] as List).map(map).toList();
+   await widget.queue.cache('canonical-brand-admin-v1',list);
+   if(mounted)setState((){brands=list;offline=false;});
+  }catch(e){
+   if(e is ApiFailure&&(e.status==401||e.status==403)){
+    if(mounted)setState((){brands=[];offline=true;error='Quyền truy cập đã thay đổi';});
+   }else if(mounted)setState((){offline=true;error='Dữ liệu nhãn hàng lưu trên máy; chưa cập nhật.';});
+  }finally{if(mounted)setState(()=>busy=false);}
+ }
+ Future<void> add()async{
+  final ctl=TextEditingController();
+  final name=await showDialog<String>(context:context,builder:(ctx)=>AlertDialog(
+   title:const Text('Thêm nhãn hàng'),
+   content:TextField(controller:ctl,maxLength:120,
+    decoration:const InputDecoration(labelText:'Tên nhãn hàng chính thức')),
+   actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Hủy')),
+    FilledButton(onPressed:()=>Navigator.pop(ctx,ctl.text.trim()),child:const Text('Lưu'))]));
+  ctl.dispose();
+  if(name==null||name.isEmpty||!mounted)return;
+  await save('/api/v1/catalog/brands',{
+   'client_ref':const Uuid().v4(),'name':name,'active':true
+  });
+ }
+ Future<void> toggle(Map<String,dynamic> brand)async{
+  final enabled=brand['active']==true;
+  final confirmed=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(
+   title:Text(enabled?'Ngừng dùng nhãn hàng?':'Kích hoạt nhãn hàng?'),
+   content:Text('Nhãn: ${brand['name']}\nKhông xóa SKU hoặc lịch sử cũ.'),
+   actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('Hủy')),
+    FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('Xác nhận'))]));
+  if(confirmed!=true||!mounted)return;
+  await save('/api/v1/catalog/brands/${brand['id']}',{
+   'client_ref':const Uuid().v4(),'name':brand['name'],
+   'version':brand['version'],'active':!enabled,
+  },patch:true);
+ }
+ Future<void> save(String path,Map<String,dynamic> data,{bool patch=false})async{
+  if(busy||offline)return;
+  setState(()=>busy=true);
+  try{
+   final uri=widget.service.uri(path);
+   final response=await (patch?http.patch(uri,headers:widget.service.headers,
+      body:jsonEncode(data)):http.post(uri,headers:widget.service.headers,
+      body:jsonEncode(data))).timeout(const Duration(seconds:20));
+   decodeApi(response);
+  }catch(e){
+   if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('$e')));
+  }finally{if(mounted)setState(()=>busy=false);}
+  if(mounted)await load();
+ }
+ @override Widget build(BuildContext context)=>Scaffold(
+  appBar:AppBar(title:const Text('Danh mục nhãn hàng'),actions:[
+   IconButton(tooltip:'Làm mới',onPressed:busy?null:load,icon:const Icon(Icons.sync))]),
+  body:ListView(padding:const EdgeInsets.all(12),children:[
+   const Text('Nhãn hàng dùng chung với SKU, hồ sơ điểm bán và thống kê tổng quan.'),
+   if(widget.admin)Padding(padding:const EdgeInsets.symmetric(vertical:8),
+    child:FilledButton.icon(onPressed:busy||offline?null:add,
+     icon:const Icon(Icons.add),label:const Text('Thêm nhãn hàng'))),
+   if(busy)const LinearProgressIndicator(minHeight:2),
+   if(error!=null)Text(error!),
+   for(final brand in brands)Card(child:ListTile(
+    title:Text(brand['name'].toString()),
+    subtitle:Text('${brand['product_count']??0} SKU · ${brand['active']==true?'Đang dùng':'Ngừng dùng'}'),
+    trailing:widget.admin?Switch(value:brand['active']==true,
+      onChanged:busy||offline?null:(_)=>toggle(brand)):null)),
+  ]),
+ );
 }
