@@ -8,10 +8,14 @@ void main(){
    {'month':5,'dimension':'employee','amount':'200'},
    {'month':4,'dimension':'customer','entity_id':'c','amount':'80'},
    {'month':4,'dimension':'product','entity_id':'p','amount':'90'},
+   {'month':4,'dimension':'territory','entity_id':'An Giang|','amount':'70'},
+   {'month':4,'dimension':'chain','entity_id':'chain-1','amount':'20'},
   ];
   expect(targetTotal(rows,[4,5,6],'employee'),300);
   expect(targetTotal(rows,[4],'customer'),80);
-  expect(targetTotal(rows,[4],'product'),90);
+  expect(targetTotal(rows,[4],'product'),90); // historical SKU preserved, never allocated again
+  expect(targetTotal(rows,[4],'territory')+targetTotal(rows,[4],'chain'),90);
+  expect(targetTotal(rows,[4,5],'employee'),300);
   expect(targetMoney(1000000),'1.000.000 đ');
  });
 }
