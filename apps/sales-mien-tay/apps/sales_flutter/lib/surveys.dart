@@ -116,7 +116,7 @@ class _SurveyPageState extends State<SurveyPage>{
   return mergeSessions(sessions,drafts).where((s){
    final started=DateTime.tryParse(s['started_at'].toString());if(started==null)return false;
    final d=dayKey(started.toUtc().add(const Duration(hours:7)));
-   return s['customer_id']==row['customer_id']&&s['owner_sub']==row['owner_sub']&&d.compareTo(start)>=0&&d.compareTo(end)<=0&&(row['planned']!=true?(s['route_stop_id']==null&&s['day_route_stop_id']==null):row['day_route_stop_id']!=null?s['day_route_stop_id']==row['id']:s['route_stop_id']==row['id']);
+   return s['customer_id']==row['customer_id']&&(s['owner_sub']==row['owner_sub']||row['planned']!=true&&s['owner_sub']==widget.queue.identity)&&d.compareTo(start)>=0&&d.compareTo(end)<=0&&(row['planned']!=true?(s['route_stop_id']==null&&s['day_route_stop_id']==null):row['day_route_stop_id']!=null?s['day_route_stop_id']==row['id']:s['route_stop_id']==row['id']);
   }).toList();
  }
  Future<void> pickDay()async{
@@ -128,8 +128,9 @@ class _SurveyPageState extends State<SurveyPage>{
   if(items.isEmpty)throw StateError('Chưa có mẫu khảo sát tỉnh này trên máy; cần đồng bộ hoặc Admin tạo mẫu.');
   return items.first;
  }
+ bool canStart(Map<String,dynamic> row)=>row['owner_sub']==widget.queue.identity||row['planned']!=true&&row['can_fieldwork']==true;
  Future<void> begin(Map<String,dynamic> row)async{
-  if(busy||row['owner_sub']!=widget.queue.identity||!isToday(row))return;
+  if(busy||!canStart(row)||!isToday(row))return;
   setState(()=>busy=true);
   try{
    final t=await template(row['province'].toString());if(!mounted)return;
@@ -169,7 +170,7 @@ class _SurveyPageState extends State<SurveyPage>{
     Text(row['planned']==true?'Theo lịch ${(row['data'] as Map)['plannedDate']}':'Ngoài tuyến · ghé đột xuất'),
     if(history.isEmpty)const Text('Chưa có phiên khảo sát.'),
     for(final s in history)ListTile(title:Text(surveyStatus(s)),subtitle:Text('${s['started_at']} · Mẫu v${s['template_version']} · ${s['route_stop_id']==null?'Ngoài tuyến':'Theo tuyến'}'),onTap:()=>Navigator.pop(c,s)),
-   ])),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng')),if(row['owner_sub']==widget.queue.identity&&isToday(row))FilledButton(onPressed:()=>Navigator.pop(c,{'new':true}),child:const Text('Bắt đầu phiên mới'))]));
+   ])),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng')),if(canStart(row)&&isToday(row))FilledButton(onPressed:()=>Navigator.pop(c,{'new':true}),child:const Text('Bắt đầu phiên mới'))]));
    if(chosen==null||!mounted)return;
    if(chosen['new']==true){await begin(row);}else{await open(chosen);}
   }catch(e){notify(e.toString());}
