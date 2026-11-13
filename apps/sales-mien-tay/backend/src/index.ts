@@ -211,6 +211,7 @@ export default {
         )
         SELECT r.id,r.version,coalesce(r.owner_sub,c.owner_sub) AS owner_sub,c.full_name,c.province,c.district,
           coalesce(r.data,'{}'::jsonb) AS data,c.id AS customer_id,c.name,c.category,c.address_line,c.latitude,c.longitude,c.location_consent,
+           public.sales_customer_fieldwork_allowed(${user.sub},c.id) AS can_fieldwork,
           r.id IS NOT NULL AS planned,
           coalesce(v.visited,false) AS visited,coalesce(v.visited_week,false) AS visited_week,coalesce(v.visited_period,false) AS visited_period,v.last_visit,v.week_visits,coalesce(s.completed_sessions,0) AS completed_sessions
         FROM eligible c LEFT JOIN planned r ON r.data->>'customerId'=c.id::text AND r.owner_sub=${user.sub}
