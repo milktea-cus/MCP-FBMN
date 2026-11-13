@@ -18,6 +18,8 @@ class FakeSession extends SalesSession {
 }
 void main(){
  testWidgets('Save provisions once, keeps errors visible and retries with two provinces',(tester) async{
+  tester.view.physicalSize=const Size(1000,1600);tester.view.devicePixelRatio=1;
+  addTearDown(tester.view.resetPhysicalSize);addTearDown(tester.view.resetDevicePixelRatio);
   final session=FakeSession();
   await tester.pumpWidget(MaterialApp(home:Scaffold(body:Builder(builder:(context)=>TextButton(onPressed:()=>showDialog<bool>(context:context,builder:(_)=>StaffEditor(session:session,catalog:const RegionCatalog({'Tiền Giang':['Cái Bè'],'Bến Tre':['Ba Tri']}),staff:null,allStaff:const [])),child:const Text('Mở'))))));
   await tester.tap(find.text('Mở'));await tester.pumpAndSettle();
@@ -27,6 +29,7 @@ void main(){
   await tester.enterText(fields.at(0),'Sales Test');
   await tester.enterText(fields.at(1),'sales@example.invalid');
   await tester.enterText(fields.at(2),'TEST-001');
+  await tester.ensureVisible(find.text('Địa bàn phụ trách riêng'));await tester.tap(find.text('Địa bàn phụ trách riêng'));await tester.pumpAndSettle();
   await tester.ensureVisible(find.text('Tiền Giang'));await tester.tap(find.text('Tiền Giang'));await tester.pumpAndSettle();
   await tester.ensureVisible(find.text('Toàn tỉnh').first);await tester.tap(find.text('Toàn tỉnh').first);await tester.pumpAndSettle();
   await tester.ensureVisible(find.text('Bến Tre'));await tester.tap(find.text('Bến Tre'));await tester.pumpAndSettle();
