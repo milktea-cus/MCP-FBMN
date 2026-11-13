@@ -43,6 +43,9 @@ class OfflineQueue extends ChangeNotifier {
   final power=transientFailures.clamp(1,5).toInt();
   return Duration(seconds:(15*(1<<power)).clamp(30,300).toInt());
  }
+ String describeFailure(Object failure)=>failure is ApiFailure
+  ?'HTTP ${failure.status}: ${failure.message}'
+  :failure is TimeoutException?'Quá thời gian kết nối':failure.toString();
  String describe(Map<String,dynamic> row){
   final path=row['path']?.toString()??'';
   if(path.startsWith('/api/v1/sessions/')){
@@ -272,10 +275,10 @@ class OfflineQueue extends ChangeNotifier {
      await _updateIfPresent({...row,
       'status':blocked?'blocked':'pending',
       'attempts':((row['attempts'] as num?)?.toInt()??0)+1,
-      'error':e.toString(),
+      'error':describeFailure(e),
       'last_error_at':DateTime.now().toIso8601String(),
      });
-     error='${describe(row)}: $e';
+     error='${describe(row)}: ${describeFailure(e)}';
      if(!blocked){
       transientFailures++;
       nextRetryAt=DateTime.now().add(retryDelay);
@@ -287,7 +290,7 @@ class OfflineQueue extends ChangeNotifier {
     error='Đang chờ $waitingDependencies thao tác liên quan được hoàn tất.';
    }
   }catch(e){
-   error='Không kiểm tra/gửi được dữ liệu: $e';
+   error='Không kiểm tra/gửi được dữ liệu: ${describeFailure(e)}';
    transientFailures++;
    nextRetryAt=DateTime.now().add(retryDelay);
   }
