@@ -16,7 +16,7 @@ BEGIN
        AND missed_note IS NOT NULL AND length(missed_note)<=1000
        AND missed_at IS NOT NULL AND missed_ref IS NOT NULL));
  END IF;
-END
+END;
 $fbmn$;
 CREATE INDEX IF NOT EXISTS field_route_stops_unplanned
  ON public.field_route_stops(day_route_id,is_unplanned);
@@ -52,7 +52,7 @@ BEGIN
    VALUES(p_actor,'stop',p_id,'update',saved,to_jsonb(updated));
  END IF;
  RETURN to_jsonb(updated);
-END
+END;
 $fbmn$;
 
 -- A missed visit is a reason, not GPS evidence or a survey completion.
@@ -96,7 +96,7 @@ BEGIN
  INSERT INTO public.field_route_audit(actor_sub,entity_kind,entity_id,action,before_state,after_state)
  VALUES(p_actor,'stop',p_stop,'update',to_jsonb(prior),to_jsonb(saved));
  RETURN to_jsonb(saved);
-END
+END;
 $fbmn$;
 REVOKE ALL ON FUNCTION public.sales_add_unplanned_route_stop(
  text,uuid,uuid,uuid,text,uuid,uuid,text,text,integer,text,timestamptz) FROM PUBLIC;
