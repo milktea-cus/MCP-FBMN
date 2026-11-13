@@ -9,6 +9,16 @@ import 'session.dart';
 import 'surveys.dart';
 import 'route_workflow.dart';
 
+bool scopeSupportsExtra(Map<String,dynamic> route)=>
+ route['scope_kind']=='territory'||route['scope_kind']=='chain';
+String missedReasonLabel(Object? value)=>switch(value){
+ 'closed'=>'Khách đóng cửa',
+ 'unavailable'=>'Không gặp được khách',
+ 'unable'=>'Không đi được',
+ 'other'=>'Lý do khác',
+ _=>'Chưa rõ',
+};
+
 /// A day route may be a customer route or a market-development trip with no customers.
 class DayRoutePage extends StatefulWidget {
  final OfflineQueue queue;
@@ -78,8 +88,23 @@ class _DayRoutePageState extends State<DayRoutePage>{
    if(mounted)setState(()=>error=e.toString());
   }finally{if(mounted)setState(()=>busy=false);}
  }
- List<Map<String,dynamic>> get pendingStops=>widget.queue.pending.where((op)=>
-  (op['path']?.toString()??'').startsWith('/api/v1/day-routes/${widget.routeId}/stops')).toList();
+ List<Map<String,dynamic>> get pendingStops=>widget.queue.pending.where((op){
+  final path=op['path']?.toString()??'';
+  return path.startsWith('/api/v1/day-routes/${widget.routeId}/stops')||
+   path=='/api/v1/day-routes/${widget.routeId}/unplanned-stops';
+ }).toList();
+ bool get isTodayRoute{
+  final date=DateTime.tryParse(route?['route_date']?.toString()??'');
+  final today=DateTime.now().toUtc().add(const Duration(hours:7));
+  return date!=null&&date.year==today.year&&date.month==today.month&&date.day==today.day;
+ }
+ bool get hasRecordedActivity=>stops.any((stop)=>
+  ((stop['visit_count'] as num?)?.toInt()??0)>0||
+  ((stop['session_count'] as num?)?.toInt()??0)>0||
+  stop['missed_code']!=null);
+ bool get canEditPlannedStops=>canModify&&!hasRecordedActivity;
+ bool missedPending(String id)=>widget.queue.pending.any((op)=>
+  op['path']=='/api/v1/day-routes/${widget.routeId}/stops/$id/missed');
  int get nextOrder{
   var maxSeq=0;
   for(final r in stops){
@@ -96,7 +121,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
  bool get canModify=>isOwner&&route!['status']=='ready'
    &&route!['plan_status']!='cancelled'&&!busy;
  Future<void> addAreaOrChain()async{
-  if(!canModify)return;
+  if(!canEditPlannedStops)return;
   final r=route!;
   if(r['scope_kind']=='customer'){
    notice('Lịch khách riêng không được tạo điểm thuộc địa bàn/chuỗi khác. Lập thêm công tác theo địa bàn hoặc chuỗi đã được giao.');return;
@@ -122,7 +147,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
     widget.routeId
  ];
  Future<void> addCustomers()async{
-  if(!canModify)return;
+  if(!canEditPlannedStops)return;
   if(candidates.isEmpty){
    notice('Chưa có khách gợi ý trên tuyến. Anh vẫn có thể thêm điểm công tác địa bàn để tìm khách mới.');
    return;
@@ -193,9 +218,10 @@ class _DayRoutePageState extends State<DayRoutePage>{
  }
  Future<void> visit(Map<String,dynamic> stop)async{
   if(!isOwner)return;
-  final date=DateTime.tryParse(route?['route_date']?.toString()??'');
-  final now=DateTime.now().toUtc().add(const Duration(hours:7));
-  if(date==null||date.year!=now.year||date.month!=now.month||date.day!=now.day){
+  if(stop['missed_code']!=null||missedPending(stop['id'].toString())){
+   notice('Điểm đã ghi nhận không ghé, không tạo check-in giả.');return;
+  }
+  if(!isTodayRoute){
    notice('Chỉ check-in tuyến ngày hôm nay. Có thể dời ngày tuyến trước khi bắt đầu.');
    return;
   }
@@ -243,6 +269,105 @@ class _DayRoutePageState extends State<DayRoutePage>{
    if(mounted)await load();
   }catch(e){notice('Không ghi được GPS: $e');}
  }
+
+ Future<void> recordMissed(Map<String,dynamic> stop)async{
+  if(!isOwner||!isTodayRoute||
+    ((stop['visit_count'] as num?)?.toInt()??0)>0||
+    ((stop['session_count'] as num?)?.toInt()??0)>0||
+    stop['missed_code']!=null||missedPending(stop['id'].toString()))return;
+  var reason='closed';
+  final note=TextEditingController();
+  final accepted=await showDialog<bool>(context:context,builder:(dialog)=>StatefulBuilder(
+   builder:(dialog,update)=>AlertDialog(
+    title:const Text('Lý do không ghé'),
+    content:Column(mainAxisSize:MainAxisSize.min,children:[
+     DropdownButtonFormField<String>(
+      initialValue:reason,isExpanded:true,
+      decoration:const InputDecoration(labelText:'Tình trạng'),
+      items:const [
+       DropdownMenuItem(value:'closed',child:Text('Khách đóng cửa')),
+       DropdownMenuItem(value:'unavailable',child:Text('Không gặp được khách')),
+       DropdownMenuItem(value:'unable',child:Text('Không đi được')),
+       DropdownMenuItem(value:'other',child:Text('Lý do khác')),
+      ],onChanged:(v)=>update(()=>reason=v??'closed')),
+     TextField(controller:note,maxLength:1000,maxLines:2,
+      decoration:InputDecoration(labelText:reason=='other'?'Ghi rõ lý do *':'Ghi chú (tùy chọn)')),
+    ]),
+    actions:[
+     TextButton(onPressed:()=>Navigator.pop(dialog,false),child:const Text('Hủy')),
+     FilledButton(onPressed:()=>Navigator.pop(dialog,true),child:const Text('Ghi nhận')),
+    ],
+   )));
+  final detail=note.text.trim();note.dispose();
+  if(accepted!=true)return;
+  if(reason=='other'&&detail.length<2){notice('Vui lòng ghi rõ lý do.');return;}
+  try{
+   await widget.queue.enqueue('/api/v1/day-routes/${widget.routeId}/stops/${stop['id']}/missed',{
+    'client_ref':const Uuid().v4(),'reason_code':reason,
+    'reason_note':detail,'captured_at':DateTime.now().toUtc().toIso8601String(),
+   });
+   notice('Đã lưu lý do, không tính là đã ghé · chờ đồng bộ.');
+   if(mounted)await load();
+  }catch(e){notice('Không lưu được lý do: $e');}
+ }
+
+ Future<void> addUnplanned()async{
+  if(!canModify||!isTodayRoute)return;
+  final scope=route!['scope_kind'].toString();
+  if(scope=='customer'){
+   notice('Khách riêng không cho phép thêm địa bàn khác.');return;
+  }
+  final kind=scope=='chain'?'chain':'area';
+  final scopeAlready=stops.any((s)=>s['stop_kind']==kind)||
+    pendingStops.any((op)=>(op['payload'] as Map)['stop_kind']==kind);
+  final occupied=<String>{
+   for(final s in stops)if(s['customer_id']!=null)s['customer_id'].toString(),
+   for(final op in pendingStops)if((op['payload'] as Map)['customer_id']!=null)
+    (op['payload'] as Map)['customer_id'].toString(),
+  };
+  final eligible=candidates.where((c)=>!occupied.contains(c['id'].toString())).toList();
+  var query='';
+  final selected=await showDialog<String>(context:context,builder:(dialog)=>StatefulBuilder(
+   builder:(dialog,update){
+    final visible=eligible.where((c)=>('${c['name']} ${c['code']??''}')
+      .toLowerCase().contains(query.toLowerCase())).toList();
+    return AlertDialog(
+     title:const Text('Thêm điểm phát sinh'),
+     content:SizedBox(width:420,height:320,child:Column(children:[
+      if(!scopeAlready)ListTile(
+       leading:const Icon(Icons.add_location_alt_outlined),
+       title:const Text('Tìm điểm bán / lead mới'),
+       subtitle:const Text('Không cần tạo khách giả'),
+       onTap:()=>Navigator.pop(dialog,'__area__')),
+      TextField(onChanged:(v)=>update(()=>query=v),
+       decoration:const InputDecoration(prefixIcon:Icon(Icons.search),hintText:'Tìm khách trong quyền')),
+      Expanded(child:ListView.builder(itemCount:visible.length,itemBuilder:(context,i){
+       final c=visible[i];return ListTile(dense:true,
+        title:Text(c['name'].toString()),
+        subtitle:Text('${c['code']??''} · ${c['district']??''}'),
+        onTap:()=>Navigator.pop(dialog,c['id'].toString()));
+      })),
+      if(scopeAlready&&eligible.isEmpty)
+       const Text('Đã có điểm địa bàn/chuỗi: mở điểm đó để ghi lead.'),
+     ])),
+     actions:[TextButton(onPressed:()=>Navigator.pop(dialog),child:const Text('Hủy'))],
+    );
+   }));
+  if(selected==null||!mounted)return;
+  final isArea=selected=='__area__';
+  try{
+   await widget.queue.enqueue('/api/v1/day-routes/${widget.routeId}/unplanned-stops',{
+    'client_ref':const Uuid().v4(),'stop_kind':isArea?kind:'customer',
+    'sequence':nextOrder,'purpose':isArea?'Tìm điểm bán phát sinh':'Ghé khách phát sinh',
+    'captured_at':DateTime.now().toUtc().toIso8601String(),
+    if(isArea&&kind=='area')...{'province':route!['province'],'district':route!['district']},
+    if(isArea&&kind=='chain')'chain_id':route!['scope_key'],
+    if(!isArea)'customer_id':selected,
+   },dependsOn:_routeDependencies());
+   notice('Đã thêm điểm ngoài kế hoạch trên máy · chờ đồng bộ.');
+   if(mounted)await load();
+  }catch(e){notice('Không thêm được điểm phát sinh: $e');}
+ }
  /// For scheduled customer stops, open the existing survey linked by
  /// day_route_stop_id. SurveyPage handles its own GPS first verification.
  Future<void> openCustomerSurvey(Map<String,dynamic> stop)async{
@@ -256,13 +381,6 @@ class _DayRoutePageState extends State<DayRoutePage>{
   if(!mounted)return;
   await Navigator.push(context,MaterialPageRoute(builder:(_)=>SurveyPage(
    queue:widget.queue,service:widget.service,regions:regions,initialCustomer:customerId,initialStop:stop)));
-  if(mounted)await load();
- }
- Future<void> openSurveys()async{
-  final regions=await RegionCatalog.load();
-  if(!mounted)return;
-  await Navigator.push(context,MaterialPageRoute(builder:(_)=>SurveyPage(
-   queue:widget.queue,service:widget.service,regions:regions)));
   if(mounted)await load();
  }
  Future<void> openTemplates()async{
