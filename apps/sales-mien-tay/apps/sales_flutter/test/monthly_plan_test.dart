@@ -23,6 +23,8 @@ void main() {
   }
  });
  testWidgets('editor selects multiple business scopes without existing customers', (tester) async {
+  tester.view.physicalSize=const Size(1000,1600);tester.view.devicePixelRatio=1;
+  addTearDown(tester.view.resetPhysicalSize);addTearDown(tester.view.resetDevicePixelRatio);
   final month=DateTime(2026,11);
   const areas=[
    {'scope_kind':'territory','scope_key':'An Giang|','province':'An Giang','district':'','label':'Toàn tỉnh · An Giang'},
