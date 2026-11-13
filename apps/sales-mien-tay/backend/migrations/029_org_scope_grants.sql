@@ -227,4 +227,59 @@ CREATE TRIGGER staff_grant_scope_revision AFTER UPDATE OF manager_sub,active,rol
 GRANT SELECT ON public.territory_catalog,public.org_teams,public.org_team_members,public.customer_chains,public.scope_grants,public.customer_scope_bindings,public.scope_change_audit TO sales_api;
 -- Unit membership and names are writable only through DB-checked functions.
 GRANT USAGE,SELECT ON SEQUENCE public.scope_change_audit_id_seq TO sales_api;
+
+-- Fail closed for legacy owner/area-only checks. The old signature has no
+-- customer ID or action: it cannot authorize a multi-dimensional organization.
+-- All delegated customer access must use sales_customer_allowed.
+CREATE OR REPLACE FUNCTION public.sales_can_access(actor text,owner_id text,p text,d text)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public AS $acl$
+ SELECT EXISTS(SELECT 1 FROM public.staff_members s
+ WHERE s.user_sub=actor AND s.active AND public.sales_identity_exists(s.user_sub)
+ AND (s.role='admin' OR (actor=owner_id AND
+   (p IS NULL OR EXISTS (SELECT 1 FROM public.staff_scopes scope
+      WHERE scope.user_sub=actor AND scope.province=p
+        AND (scope.district='' OR scope.district=d))))));
+$acl$;
+REVOKE ALL ON FUNCTION public.sales_can_access(text,text,text,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.sales_can_access(text,text,text,text) TO sales_api;
+
+-- Record scope is always tied to either its creator or its explicit customer.
+-- A legacy unlinked record cannot be seen via another person's province.
+CREATE OR REPLACE FUNCTION public.sales_record_allowed(p_actor text,p_record uuid,p_action text)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public AS $acl$
+ SELECT EXISTS(SELECT 1 FROM public.staff_members m
+ JOIN public.sales_records r ON r.id=p_record
+ LEFT JOIN public.customers c ON c.id::text=r.data->>'customerId'
+ WHERE m.user_sub=p_actor AND m.active AND public.sales_identity_exists(m.user_sub)
+ AND (m.role='admin' OR
+      (r.owner_sub=p_actor AND p_action IN ('view','edit','report','target','create')) OR
+      (c.id IS NOT NULL AND public.sales_customer_allowed(p_actor,c.id,p_action))));
+$acl$;
+REVOKE ALL ON FUNCTION public.sales_record_allowed(text,uuid,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.sales_record_allowed(text,uuid,text) TO sales_api;
+
+-- Staff actions still require an independent grant, not a matching province.
+CREATE OR REPLACE FUNCTION public.sales_staff_action_allowed(p_actor text,p_owner text,p_action text)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public AS $acl$
+ SELECT EXISTS (
+ SELECT 1 FROM public.staff_members actor JOIN public.staff_members owner
+   ON owner.user_sub=p_owner AND owner.active
+ WHERE actor.user_sub=p_actor AND actor.active AND public.sales_identity_exists(actor.user_sub)
+ AND (actor.role='admin' OR (actor.user_sub=p_owner AND p_action IN ('view','target','actuals','report','export'))
+      OR EXISTS(SELECT 1 FROM public.scope_grants g
+         WHERE g.grantee_sub=p_actor AND g.active AND g.action=p_action
+           AND (
+             (g.scope_kind='staff' AND public.sales_staff_in_subtree(g.scope_key,p_owner))
+             OR (g.scope_kind='team' AND EXISTS(
+               SELECT 1 FROM public.org_team_members tm WHERE tm.team_id::text=g.scope_key AND tm.user_sub=p_owner))
+             OR (g.scope_kind='customer' AND EXISTS(
+               SELECT 1 FROM public.customers c WHERE c.id::text=g.scope_key AND c.owner_sub=p_owner))
+             OR (g.scope_kind='chain' AND EXISTS(
+               SELECT 1 FROM public.customer_scope_bindings b JOIN public.customers c ON c.id=b.customer_id
+               WHERE b.active AND b.scope_kind='chain' AND b.scope_key=g.scope_key AND c.owner_sub=p_owner))
+           ))));
+$acl$;
+REVOKE ALL ON FUNCTION public.sales_staff_action_allowed(text,text,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.sales_staff_action_allowed(text,text,text) TO sales_api;
+
 COMMIT;
