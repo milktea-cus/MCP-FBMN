@@ -89,7 +89,7 @@ class _RouteTemplatePageState extends State<RouteTemplatePage>{
   if(widget.route['owner_sub']!=widget.queue.identity)return;
   final existing=routeTemplateStops(widget.stops,pendingStops);
   if(existing.isEmpty){note('Tuyến chưa có điểm ghé để lưu mẫu.');return;}
-  final input=TextEditingController(text:previous?['name']?.toString()??'':'Mẫu tuyến mới');
+  final input=TextEditingController(text:previous==null?'Mẫu tuyến mới':(previous['name']?.toString()??''));
   final name=await showDialog<String>(context:context,builder:(ctx)=>AlertDialog(
    title:Text(previous==null?'Lưu mẫu tuyến':'Cập nhật mẫu tuyến'),
    content:TextField(controller:input,maxLength:120,decoration:const InputDecoration(labelText:'Tên mẫu')),
