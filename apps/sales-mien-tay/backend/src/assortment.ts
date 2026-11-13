@@ -31,10 +31,8 @@ export async function assortmentRoutes(
   if(!allowed.length)return bad('Không tìm thấy khách hoặc không có quyền',404);
   if(req.method==='GET'){
    if(brandPath[2]==='audit'){
-    const items=await sql`SELECT a.actor_sub,a.action,a.reason,a.created_at,b.name AS brand_name
-     FROM public.customer_brand_verification_audit a
-     JOIN public.catalog_brands b ON b.id=a.brand_id
-     WHERE a.customer_id=${cid}::uuid ORDER BY a.created_at DESC,a.id DESC LIMIT 50`;
+    const items=await sql`SELECT * FROM public.sales_customer_brand_audit(
+      ${actor.sub},${cid}::uuid)`;
     return response({items});
    }
    const items=await sql`WITH sku AS (
