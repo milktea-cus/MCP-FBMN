@@ -120,8 +120,40 @@ export default {
        const orgResponse=await orgRoutes(req,env,user,url);
        if(orgResponse)return orgResponse;
       if (url.pathname === '/api/v1/meta' && req.method === 'GET') {
-        const allowed = user.admin ? locationMap : Object.fromEntries(Object.entries(locationMap).filter(([p])=>user.scopes.some(s=>s.province===p)).map(([p,ds])=>[p,ds.filter(d=>user.scopes.some(s=>s.province===p && (s.district==='' || s.district===d)))]));
-        return json({districts: allowed, kinds});
+        const allowed:Record<string,string[]>=user.admin
+          ?Object.fromEntries(Object.entries(locationMap).map(([p,ds])=>[p,[...ds]]))
+          :Object.fromEntries(Object.entries(locationMap)
+            .filter(([p])=>user.scopes.some(s=>s.province===p))
+            .map(([p,ds])=>[p,ds.filter(d=>user.scopes.some(s=>s.province===p
+              && (s.district===''||s.district===d)))]));
+        const metaDb=neon(env.DATABASE_URL);
+        const [configured,visible]=await Promise.all([
+          metaDb`SELECT t.name,t.level,p.name AS province FROM public.territory_catalog t
+            LEFT JOIN public.territory_catalog p ON p.code=t.parent_code WHERE t.active`,
+          metaDb`SELECT DISTINCT c.province,c.district FROM public.customers c
+            WHERE public.sales_customer_allowed(${user.sub},c.id,'view')`
+        ]);
+        for(const t of configured){
+          const province=t.level==='province'?String(t.name):String(t.province??'');
+          if(!province)continue;
+          if(!user.admin&&!user.scopes.some(s=>s.province===province)
+             &&!visible.some(v=>v.province===province))continue;
+          const ds=allowed[province]??[];
+          if(t.level==='province')allowed[province]=ds;
+          if(t.level==='district'&&(user.admin||user.scopes.some(
+                s=>s.province===province&&(s.district===''||s.district===t.name))
+                ||visible.some(v=>v.province===province&&v.district===t.name))){
+            if(!ds.includes(String(t.name)))ds.push(String(t.name));
+            allowed[province]=ds;
+          }
+        }
+        for(const c of visible){
+          const province=String(c.province),district=String(c.district);
+          const ds=allowed[province]??[];
+          if(district&&!ds.includes(district))ds.push(district);
+          allowed[province]=ds;
+        }
+        return json({districts:allowed,kinds});
       }
       if (!env.DATABASE_URL) return bad('DATABASE_URL chưa được cấu hình', 503);
       const assortmentResponse=await assortmentRoutes(req,env,user,url);
