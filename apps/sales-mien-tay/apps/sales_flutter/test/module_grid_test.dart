@@ -34,4 +34,22 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+  testWidgets('Sales only sees Cong tac; independent survey is not a shortcut',(tester) async {
+    final names=[
+      'Tổng quan','Khách hàng / Điểm bán','Quản trị khảo sát',
+      'Target','Dự kiến','Công tác','Hỗ trợ','Chính sách','Yêu cầu',
+      'Báo cáo tháng','Danh mục SKU','Tra tồn','Ra đơn',
+    ];
+    final picked=<int>[];
+    await tester.pumpWidget(MaterialApp(home:Scaffold(body:SingleChildScrollView(
+      child:SalesModuleGrid(sections:names,
+       icons:List.filled(names.length,Icons.dashboard_outlined),
+       hiddenIndices:const {2},onSelect:picked.add)))));
+    expect(find.text('Công tác'),findsOneWidget);
+    expect(find.text('Quản trị khảo sát'),findsNothing);
+    await tester.ensureVisible(find.byKey(const ValueKey('module-grid-5')));
+    await tester.tap(find.byKey(const ValueKey('module-grid-5')));
+    expect(picked,[5]);
+  });
+
 }
