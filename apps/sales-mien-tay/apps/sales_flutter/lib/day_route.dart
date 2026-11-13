@@ -387,7 +387,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
   final regions=await RegionCatalog.load();
   if(!mounted)return;
   await Navigator.push(context,MaterialPageRoute(builder:(_)=>SurveyPage(
-   queue:widget.queue,service:widget.service,regions:regions,initialCustomer:customerId,initialStop:stop)));
+   queue:widget.queue,service:widget.service,regions:regions,initialCustomer:customerId,initialStop:{...stop,'route_date':route?['route_date']})));
   if(mounted)await load();
  }
  Future<void> openTemplates()async{
