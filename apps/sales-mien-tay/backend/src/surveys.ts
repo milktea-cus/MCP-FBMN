@@ -187,7 +187,7 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
    const stops=await db`SELECT s.id FROM public.field_route_stops s
     JOIN public.field_day_routes r ON r.id=s.day_route_id
     JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id
-    WHERE s.id=${drid}::uuid AND s.stop_kind='customer'
+    WHERE s.id=${drid}::uuid AND s.missed_code IS NULL AND s.stop_kind='customer'
       AND s.customer_id=${cid}::uuid AND s.owner_sub=${actor.sub}
       AND r.owner_sub=${actor.sub} AND r.status='ready' AND p.status='planned'
       AND r.route_date=${vnDay(started)}::date
@@ -200,7 +200,7 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
    AND public.sales_customer_fieldwork_allowed(${actor.sub},c.id)
    AND ((${first} AND c.latitude IS NULL AND c.longitude IS NULL) OR (NOT ${first} AND c.location_consent AND c.latitude IS NOT DISTINCT FROM ${c.latitude}::double precision AND c.longitude IS NOT DISTINCT FROM ${c.longitude}::double precision))
    AND (${rid===null} OR EXISTS(SELECT 1 FROM sales_records r WHERE r.id=${rid}::uuid AND r.kind='visit' AND r.owner_sub=${actor.sub} AND r.data->>'customerId'=${cid} AND r.data->>'plannedDate'=${vnDay(started)}))
-   AND (${drid===null} OR EXISTS(SELECT 1 FROM public.field_route_stops st JOIN public.field_day_routes r ON r.id=st.day_route_id JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id WHERE st.id=${drid}::uuid AND st.customer_id=${cid}::uuid AND st.owner_sub=${actor.sub} AND st.stop_kind='customer' AND r.owner_sub=${actor.sub} AND r.status='ready' AND p.status='planned' AND r.route_date=${vnDay(started)}::date AND public.sales_monthly_plan_scope_allowed(${actor.sub},p.scope_kind,p.scope_key,p.province,p.district)))
+   AND (${drid===null} OR EXISTS(SELECT 1 FROM public.field_route_stops st JOIN public.field_day_routes r ON r.id=st.day_route_id JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id WHERE st.id=${drid}::uuid AND st.missed_code IS NULL AND st.customer_id=${cid}::uuid AND st.owner_sub=${actor.sub} AND st.stop_kind='customer' AND r.owner_sub=${actor.sub} AND r.status='ready' AND p.status='planned' AND r.route_date=${vnDay(started)}::date AND public.sales_monthly_plan_scope_allowed(${actor.sub},p.scope_kind,p.scope_key,p.province,p.district)))
    FOR UPDATE
   ), created AS (
    INSERT INTO field_survey_sessions(id,customer_id,owner_sub,province,district,route_stop_id,day_route_stop_id,template_id,started_at,latitude,longitude,accuracy_m,distance_m,location_initialized)
