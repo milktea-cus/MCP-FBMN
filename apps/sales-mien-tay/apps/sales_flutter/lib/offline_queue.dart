@@ -32,6 +32,34 @@ class OfflineQueue extends ChangeNotifier {
  Future<Database>? _opening;
  bool _closed=false, syncing=false;
  String? error;
+ /// Visible sync diagnostics; committed outbox rows are never dropped on errors.
+ DateTime? lastAttemptAt,lastSuccessAt,nextRetryAt;
+ String? activePath;
+ int transientFailures=0;
+ int get blockedCount=>pending.where((r)=>r['status']=='blocked').length;
+ int get readyCount=>pending.length-blockedCount;
+ Duration get retryDelay{
+  final power=transientFailures.clamp(1,5);
+  return Duration(seconds:(15*(1<<power)).clamp(30,300));
+ }
+ String describe(Map<String,dynamic> row){
+  final path=row['path']?.toString()??'';
+  if(path.startsWith('/api/v1/sessions/')){
+   if(path.endsWith('/photos'))return 'Ảnh khảo sát';
+   return 'Hoàn tất phiên khảo sát';
+  }
+  if(path=='/api/v1/sessions')return 'Bắt đầu phiên khảo sát';
+  if(path.contains('/unplanned-stops'))return 'Điểm đến ngoài kế hoạch';
+  if(path.endsWith('/missed'))return 'Lý do chưa ghé điểm bán';
+  if(path.startsWith('/api/v1/day-routes'))return 'Lịch trình trong ngày';
+  if(path.startsWith('/api/v1/monthly-plans'))return 'Kế hoạch tháng';
+  if(path.startsWith('/api/v1/records'))return 'Biểu mẫu / kế hoạch';
+  if(path.startsWith('/api/v1/customers'))return 'Cập nhật khách hàng';
+  if(path.startsWith('/api/v1/notifications'))return 'Đánh dấu thông báo';
+  if(path.startsWith('/api/v1/area-visits'))return 'Ghi nhận công tác';
+  return 'Thao tác lưu trên máy';
+ }
+
  List<Map<String,dynamic>> pending=[];
  int quarantined=0;
  Timer? _timer;
@@ -153,7 +181,7 @@ class OfflineQueue extends ChangeNotifier {
   if(_closed||syncing)return;
   final d=await db,t=d.transaction('outbox',idbModeReadWrite),store=t.objectStore('outbox');final raw=await store.getObject('$namespace:$op');
   if(raw is Map&&raw['session_id']!=null&&raw['status']=='blocked')await store.put({...Map<String,dynamic>.from(raw),'status':'pending','error':null});
-  await t.completed;await reload();await sync();
+  await t.completed;await reload();await retryNow();
  }
  /// Explicit user retry; errors and 409 conflicts are never discarded.
  Future<void> retryBlocked(String key)async{
@@ -163,7 +191,7 @@ class OfflineQueue extends ChangeNotifier {
   if(raw is Map&&raw['namespace']==namespace&&raw['status']=='blocked'){
    await store.put({...Map<String,dynamic>.from(raw),'status':'pending','error':null});
   }
-  await t.completed;await reload();await sync();
+  await t.completed;await reload();await retryNow();
  }
  Future<void> start() async{
   try{await reload();}catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
@@ -171,17 +199,35 @@ class OfflineQueue extends ChangeNotifier {
   _timer=Timer.periodic(const Duration(seconds:30),(_)=>unawaited(sync()));
   unawaited(sync());
  }
- Future<void> sync() async{
+ Future<void> sync({bool manual=false}) async{
   if(_closed||syncing)return;
-  syncing=true;error=null;_notify();
+  final now=DateTime.now();
+  if(!manual&&nextRetryAt!=null&&now.isBefore(nextRetryAt!))return;
+  if(manual){nextRetryAt=null;transientFailures=0;}
+  // 4xx rejects stay on disk for the user, without retrying endlessly.
+  if(pending.isNotEmpty&&readyCount==0){
+   error='Có $blockedCount thao tác bị từ chối. Nhấn vào thanh đồng bộ để xem lỗi.';
+   _notify();return;
+  }
+  syncing=true;error=null;activePath=null;lastAttemptAt=now;_notify();
   try{
    await reload();
-   if(pending.isEmpty)return;
+   if(pending.isEmpty){nextRetryAt=null;transientFailures=0;return;}
+   if(readyCount==0){
+    error='Có $blockedCount thao tác bị từ chối. Mở chi tiết để thử lại.';
+    return;
+   }
    final me=await session.get('/api/v1/me');
-   if(_closed||me['identity']!=identity||me['scope_revision'].toString()!=revision){error='Quyền đã thay đổi. Dữ liệu cũ được cách ly.';return;}
+   if(_closed||me['identity']!=identity||me['scope_revision'].toString()!=revision){
+    error='Phiên đăng nhập hoặc phạm vi quyền đã thay đổi. Dữ liệu vẫn lưu trên máy.';
+    nextRetryAt=DateTime.now().add(const Duration(minutes:5));return;
+   }
+   var waitingDependencies=0;
    for(final row in List.of(pending)){
     if(_closed)break;
-    if(row['status']=='blocked'||await _dependencyPending(row))continue;
+    if(row['status']=='blocked')continue;
+    if(await _dependencyPending(row)){waitingDependencies++;continue;}
+    activePath=describe(row);_notify();
     try{
      final payload=Map<String,dynamic>.from(row['payload'] as Map);
      final headers={...sessionHeaders(session.cookie),'X-Sync-Identity':identity,'X-Sync-Revision':revision};
@@ -195,7 +241,9 @@ class OfflineQueue extends ChangeNotifier {
      }
      final response=await (row['method']=='PATCH'?http.patch(uri,headers:headers,body:jsonEncode(payload)):http.post(uri,headers:headers,body:jsonEncode(payload))).timeout(const Duration(seconds:30));
      final result=decodeApi(response);
-     final item=result['item'] as Map;
+     // Some successful endpoints only acknowledge the write; entity is optional.
+     final item=(row['session_id']!=null||row['photo']!=null)
+       ?(result['item'] as Map):<String,dynamic>{};
      if(row['photo']!=null){
       final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
       if(_closed)break;
@@ -207,16 +255,39 @@ class OfflineQueue extends ChangeNotifier {
        decodeApi(upload);
      }
      if(row['session_id']!=null){await _ackSurvey(row,item);}else{await _remove(row['key'] as String);}
+     lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;
     }catch(e){
-     final blocked=e is ApiFailure&&[400,403,404,409,413,415,422].contains(e.status);
-     await _updateIfPresent({...row,'status':blocked?'blocked':'pending','attempts':(row['attempts'] as int)+1,'error':e.toString()});
-     error=e.toString();
-     if(!blocked)break;
+     final blocked=e is ApiFailure&&[400,401,403,404,409,413,415,422].contains(e.status);
+     await _updateIfPresent({...row,
+      'status':blocked?'blocked':'pending',
+      'attempts':((row['attempts'] as num?)?.toInt()??0)+1,
+      'error':e.toString(),
+      'last_error_at':DateTime.now().toIso8601String(),
+     });
+     error='${describe(row)}: $e';
+     if(!blocked){
+      transientFailures++;
+      nextRetryAt=DateTime.now().add(retryDelay);
+      break;
+     }
     }
    }
-  }catch(e){error=e.toString();}
-  finally{try{await reload();}catch(e){error=e.toString();}syncing=false;_notify();}
+   if(error==null&&waitingDependencies>0){
+    error='Đang chờ $waitingDependencies thao tác liên quan được hoàn tất.';
+   }
+  }catch(e){
+   error='Không kiểm tra/gửi được dữ liệu: $e';
+   transientFailures++;
+   nextRetryAt=DateTime.now().add(retryDelay);
+  }
+  finally{
+   activePath=null;
+   try{await reload();}catch(e){error='Không đọc được hàng đợi lưu máy: $e';}
+   syncing=false;_notify();
+  }
  }
+ /// Explicit retry bypasses the background cooldown, without deleting rows.
+ Future<void> retryNow()=>sync(manual:true);
  @override void dispose(){_closed=true;_timer?.cancel();super.dispose();}
 }
 class OfflineLease {
