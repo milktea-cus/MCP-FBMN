@@ -9,6 +9,7 @@ import 'models.dart';
 import 'offline_queue.dart';
 import 'session.dart';
 import 'planning_periods.dart';
+import 'monthly_plan.dart';
 export 'planning_periods.dart';
 
 String money(dynamic value){final n=num.tryParse(value.toString())??0;return '${n.round().toString().replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'),(m)=>'.')} đ';}
@@ -196,7 +197,7 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
   final completed=unique.values.fold<int>(0,(n,r)=>n+(int.tryParse(r['completed_sessions'].toString())??0));
   final visible=filtered.where((r)=>(!monthly||period==0||r['planned']!=true||planningPeriod(DateTime.parse((r['data'] as Map)['plannedDate'].toString()))==period)&&(status.isEmpty||status=='planned'&&r['planned']==true||status=='visited'&&r['visited_period']==true||status=='unvisited'&&r['visited_period']!=true)).toList();
   return ListView(padding:const EdgeInsets.only(bottom:12),children:[
-   Padding(padding:const EdgeInsets.all(12),child:Row(children:[Expanded(child:Text(widget.report?'Báo cáo tháng':'Tuyến đi',style:Theme.of(context).textTheme.titleLarge)),IconButton(onPressed:busy?null:load,icon:const Icon(Icons.sync)),if(!widget.report)FilledButton.icon(onPressed:busy?null:addStop,icon:const Icon(Icons.add),label:const Text('Điểm ghé'))])),
+   Padding(padding:const EdgeInsets.all(12),child:Row(children:[Expanded(child:Text(widget.report?'Báo cáo tháng':'Tuyến đi',style:Theme.of(context).textTheme.titleLarge)),IconButton(onPressed:busy?null:load,icon:const Icon(Icons.sync)),if(!widget.report)...[IconButton(tooltip:'Kế hoạch tháng',onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>MonthlyPlanPage(queue:widget.queue,service:widget.service))),icon:const Icon(Icons.calendar_month_outlined)),FilledButton.icon(onPressed:busy?null:addStop,icon:const Icon(Icons.add),label:const Text('Điểm ghé'))]])),
    Padding(padding:const EdgeInsets.symmetric(horizontal:12),child:OutlinedButton.icon(onPressed:busy?null:chooseDate,icon:const Icon(Icons.calendar_today),label:Text(widget.report?monthKey(day):dayKey(day)))),
    if(!widget.report)...[
     SegmentedButton<String>(segments:const [ButtonSegment(value:'day',label:Text('Ngày')),ButtonSegment(value:'week',label:Text('Tuần')),ButtonSegment(value:'month',label:Text('Tháng'))],selected:{monthly?'month':weekly?'week':'day'},onSelectionChanged:busy?null:(v){setState((){monthly=v.first=='month';weekly=v.first=='week';period=0;rows=[];employee='';district='';});load();}),
