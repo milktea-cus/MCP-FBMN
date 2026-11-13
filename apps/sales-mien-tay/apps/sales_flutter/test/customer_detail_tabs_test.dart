@@ -57,7 +57,7 @@ class CoverSelectionProbe extends OfflineQueue {
   @override
   Future<void> enqueue(String path,Map<String,dynamic> data,{
     Uint8List? photo,Uint8List? thumbnail,String? sha256,
-    String? thumbnailSha256,String? mime,String method='POST',
+    String? thumbnailSha256,String? mime,String method='POST',List<String> dependsOn=const [],
   })async{
     lastPath=path;
     lastPayload=Map<String,dynamic>.from(data);
