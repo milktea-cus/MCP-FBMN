@@ -12,6 +12,7 @@ import {areaVisitRoutes} from './area_visits';
 import {areaVisitMediaRoutes} from './area_visit_media';
 import {routeTemplateRoutes} from './route_templates';
 import {catalogRoutes} from './catalog';
+import {marketRoutes} from './market';
 import {catalogImportRoutes} from './catalog_import';
 import {inventoryRoutes} from './inventory';
 import {targetRoutes} from './targets';
@@ -161,6 +162,8 @@ export default {
         return json({districts:allowed,kinds});
       }
       if (!env.DATABASE_URL) return bad('DATABASE_URL chưa được cấu hình', 503);
+      const marketResponse=await marketRoutes(req,env,user,url);
+      if(marketResponse)return marketResponse;
       const assortmentResponse=await assortmentRoutes(req,env,user,url);
       if(assortmentResponse)return assortmentResponse;
       const productResponse = await customerRoutes(req, env, user, url);
