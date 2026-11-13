@@ -115,7 +115,8 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       const rows = await db`SELECT c.id,c.client_ref,c.owner_sub,c.name,c.code,c.field_code,c.category,
           c.contact_name,c.phone,c.address_line,c.province,c.district,c.latitude,c.longitude,
           c.location_accuracy_m,c.location_consent,c.location_source,c.location_recorded_by,c.location_recorded_at,
-           c.note,c.status,c.version,c.created_at,c.updated_at
+           c.note,c.status,c.version,c.created_at,c.updated_at,
+           public.sales_customer_plannable(${actor.sub},c.id) AS can_plan
         FROM customers c WHERE public.sales_customer_allowed(${actor.sub},c.id,'view')
           AND (${!url.searchParams.get('province')} OR c.province=${url.searchParams.get('province')??''})
         ORDER BY c.updated_at DESC,c.id DESC LIMIT ${limit} OFFSET ${offset}`;

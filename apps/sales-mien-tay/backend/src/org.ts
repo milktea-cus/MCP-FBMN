@@ -1,5 +1,7 @@
 import {neon} from '@neondatabase/serverless';
 import type {AuthEnv} from './auth';
+import districts from './districts_old.json';
+const knownDistricts=districts as Record<string,string[]>;
 
 // Every scope mutation is authorized a second time by the database function.
 const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}});
@@ -18,6 +20,7 @@ async function body(req:Request){
 }
 function errorFromDb(e:unknown):Response{
  const msg=(e as {message?:string;code?:string})?.message??'';
+ if(msg.includes('stale revision'))return fail('Địa bàn nhân viên vừa được thay đổi. Tải lại rồi lưu.',409);
  if(msg.includes('admin required'))return fail('Quyền quản trị đã bị thu hồi',403);
  if(msg.includes('invalid')||msg.includes('customer not found'))return fail('Phạm vi hoặc đối tượng không hợp lệ',400);
  if((e as {code?:string})?.code==='23505')return fail('Dữ liệu đã tồn tại',409);
@@ -72,6 +75,35 @@ export async function orgRoutes(req:Request,env:AuthEnv,actor:{sub:string;admin:
  if(req.method!=='POST')return fail('Method not allowed',405);
  let data:Record<string,unknown>;try{data=await body(req);}catch{return fail('JSON không hợp lệ');}
  try{
+  if(suffix==='/territory-assignments'){
+   if(!validString(data.user_sub,150)||typeof data.scope_revision!=='string'||
+      !/^\d{1,18}$/.test(data.scope_revision)||!Array.isArray(data.scopes)||data.scopes.length>1000)
+      return fail('Danh sách địa bàn hoặc phiên bản nhân viên không hợp lệ');
+   const configured=await db`SELECT t.name,t.level,p.name AS province FROM public.territory_catalog t
+     LEFT JOIN public.territory_catalog p ON p.code=t.parent_code WHERE t.active`;
+   const provinces=new Map<string,Set<string>>();
+   for(const [province,ds] of Object.entries(knownDistricts))provinces.set(province,new Set(ds));
+   for(const row of configured)if(row.level==='province')provinces.set(String(row.name),provinces.get(String(row.name))??new Set());
+   for(const row of configured)if(row.level==='district'&&row.province)
+     provinces.get(String(row.province))?.add(String(row.name));
+   const all=new Map<string,{province:string;district:string}>();
+   for(const e of data.scopes){
+     if(!e||typeof e!=='object'||Array.isArray(e))return fail('Địa bàn không hợp lệ');
+     const scope=e as Record<string,unknown>;
+     if(typeof scope.province!=='string'||typeof scope.district!=='string'||
+        !provinces.has(scope.province)||
+        (scope.district!==''&&!provinces.get(scope.province)?.has(scope.district)))
+       return fail('Tỉnh/huyện không có trong danh mục',400);
+     all.set(scope.province+'|'+scope.district,
+       {province:scope.province,district:scope.district});
+   }
+   const canonical=[...all.values()].filter(e=>e.district===''||!all.has(e.province+'|'));
+   const rows=await db`SELECT public.sales_set_staff_territories(
+     ${actor.sub},${data.user_sub as string},
+     ${JSON.stringify(canonical)}::jsonb,
+     ${data.scope_revision as string}::bigint) AS item`;
+   return json({item:rows[0].item});
+  }
   if(suffix==='/territories'){
    if(!['province','district'].includes(String(data.level))||
       !validString(data.name,100)||typeof data.name!=='string'||data.name.includes('|')||

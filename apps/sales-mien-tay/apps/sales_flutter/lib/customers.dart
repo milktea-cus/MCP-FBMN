@@ -78,7 +78,8 @@ class FieldCustomer {
   final String? locationSource, locationRecordedBy;
   final DateTime? locationRecordedAt;
   final int version;
-  Map<String,dynamic> toJson()=>{'id':id,'owner_sub':owner,'name':name,'code':code,'field_code':fieldCode,'address_line':address,'province':province,'district':district,'category':category,'status':status,'phone':phone,'contact_name':contact,'note':note,'latitude':latitude,'longitude':longitude,'location_accuracy_m':locationAccuracy,'location_source':locationSource,'location_recorded_by':locationRecordedBy,'location_recorded_at':locationRecordedAt?.toIso8601String(),'version':version};
+  final bool? canPlan;
+  Map<String,dynamic> toJson()=>{'id':id,'owner_sub':owner,'name':name,'code':code,'field_code':fieldCode,'address_line':address,'province':province,'district':district,'category':category,'status':status,'phone':phone,'contact_name':contact,'note':note,'latitude':latitude,'longitude':longitude,'location_accuracy_m':locationAccuracy,'location_source':locationSource,'location_recorded_by':locationRecordedBy,'location_recorded_at':locationRecordedAt?.toIso8601String(),'version':version,'can_plan':canPlan};
   FieldCustomer.fromJson(Map<String, dynamic> j)
       : id = j['id'].toString(), name = j['name'].toString(),
         owner = j['owner_sub'] as String?, code = j['code'] as String?,fieldCode=j['field_code'] as String?, address = j['address_line'].toString(), province = j['province'].toString(),
@@ -91,7 +92,8 @@ class FieldCustomer {
         locationSource=j['location_source'] as String?,
         locationRecordedBy=j['location_recorded_by'] as String?,
         locationRecordedAt=DateTime.tryParse(j['location_recorded_at']?.toString()??''),
-        version = (j['version'] as num?)?.toInt() ?? 1;
+        version = (j['version'] as num?)?.toInt() ?? 1,
+        canPlan = j['can_plan'] is bool?j['can_plan'] as bool:null;
 }
 
 class CustomerService {

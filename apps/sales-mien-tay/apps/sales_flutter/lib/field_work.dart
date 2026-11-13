@@ -92,7 +92,7 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
      customers=(await widget.queue.cached('customers:${widget.service.province}'))
        .map(FieldCustomer.fromJson).toList();
     }
-    return customers.where((c)=>c.owner==widget.queue.identity&&
+    return customers.where((c)=>(c.canPlan??(c.owner==widget.queue.identity))&&
       (district.isEmpty||c.district==district)).toList();
    }();
    if(!mounted)return;
@@ -154,7 +154,7 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
      customers=(await widget.queue.cached('customers:${widget.service.province}'))
        .map(FieldCustomer.fromJson).toList();
     }
-    return customers.where((c)=>c.owner==widget.queue.identity).toList();
+    return customers.where((c)=>c.canPlan??(c.owner==widget.queue.identity)).toList();
    }();
    if(!mounted)return;
    final selected=await showDialog<FieldCustomer>(
