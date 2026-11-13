@@ -40,7 +40,7 @@ class _TargetPageState extends State<TargetPage>{
  int year=DateTime.now().year,month=DateTime.now().month,_generation=0;
  String period='month',owner='';
  late final TargetClient client=widget.client??TargetClient(widget.queue);
- List<Map<String,dynamic>> staff=[],rows=[],allocations=[],actuals=[];
+ List<Map<String,dynamic>> staff=[],rows=[],allocations=[],actuals=[],actualBreakdown=[];
  bool busy=true,cached=false,canEdit=false;
  String? error;
  List<int> get months=>targetMonths(period,month);
@@ -49,7 +49,7 @@ class _TargetPageState extends State<TargetPage>{
  @override void initState(){super.initState();owner=widget.queue.identity;load();}
  Future<void> load()async{
   final generation=++_generation,key=cacheKey,request=path;
-  setState((){busy=true;error=null;cached=false;canEdit=false;rows=[];allocations=[];actuals=[];});
+  setState((){busy=true;error=null;cached=false;canEdit=false;rows=[];allocations=[];actuals=[];actualBreakdown=[];});
   Map<String,dynamic>? data;bool offline=false;String? failure;
   try{data=await client.get(request);
    try{await widget.queue.cache(key,[data]);}catch(_){}
@@ -60,7 +60,7 @@ class _TargetPageState extends State<TargetPage>{
   if(!mounted||generation!=_generation)return;
   setState((){
    busy=false;cached=offline;error=data==null?failure:null;
-   if(data!=null){staff=targetRows(data['staff']);owner=data['owner'].toString();rows=targetRows(data['items']);allocations=targetRows(data['allocations']);actuals=targetRows(data['actuals']);canEdit=!offline&&data['can_edit']==true;}
+   if(data!=null){staff=targetRows(data['staff']);owner=data['owner'].toString();rows=targetRows(data['items']);allocations=targetRows(data['allocations']);actuals=targetRows(data['actuals']);actualBreakdown=targetRows(data['actual_breakdown']);canEdit=!offline&&data['can_edit']==true;}
   });
  }
  Future<void> choose(String dimension)async{
@@ -84,10 +84,10 @@ class _TargetPageState extends State<TargetPage>{
   return Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
    Row(children:[Expanded(child:Text(label,style:Theme.of(context).textTheme.titleMedium)),if(canEdit)IconButton(tooltip:'Thêm $label',onPressed:()=>choose(dimension),icon:const Icon(Icons.add))]),
    Text('Đã phân bổ: ${targetMoney(allocated)}'),
-   Text('Chưa phân bổ: ${targetMoney(total-allocated)}'),
+   Text('Còn lại chung: ${targetMoney((total-targetTotal(allocations,months,'territory')-targetTotal(allocations,months,'chain')).clamp(0,total).toInt())}'),
    if(groups.isEmpty)const Padding(padding:EdgeInsets.symmetric(vertical:8),child:Text('Chưa có phân bổ trong kỳ.')),
    for(final entry in groups.entries)ListTile(contentPadding:EdgeInsets.zero,title:Text('${entry.value.first['code']??''} · ${entry.value.first['name']??'Không còn trong danh mục'}'),
-    subtitle:Text(targetMoney(targetTotal(entry.value,months,dimension))),
+    subtitle:Text('Chỉ tiêu: ${targetMoney(targetTotal(entry.value,months,dimension))} · Doanh số: ${targetTotal(actualBreakdown,months,dimension,entry.key)>0?targetMoney(targetTotal(actualBreakdown,months,dimension,entry.key)):'chưa có'}'),
     trailing:canEdit?IconButton(tooltip:'Sửa phân bổ',icon:const Icon(Icons.edit_outlined),onPressed:()=>edit(dimension,entry.key,entry.value.first['name']?.toString()??entry.key)):null),
   ])));
  }
@@ -131,10 +131,17 @@ class _TargetPageState extends State<TargetPage>{
      const SizedBox(height:8),
      Text(hasActual?'Thực hiện: ${targetMoney(actual)}':'Thực hiện: Chưa có dữ liệu doanh số thực tế'),
      Text(hasActual?'Hoàn thành: ${total>0?(100*actual/total).toStringAsFixed(1)+'%':'— (Target = 0)'}   Còn thiếu: ${total>0?targetMoney((total-actual).clamp(0,total).toInt()):'—'}':'Hoàn thành: —     Còn thiếu: —'),
-     const Text('Target khách và SKU là hai nhóm phân bổ riêng; không cộng vào Target nhân viên.'),
+     const Text('Địa bàn và chuỗi cùng nằm trong một tổng chỉ tiêu nhân viên. Doanh số thực tế không cộng hai lần.'),
     ]))),
-    allocationCard('customer','Khách hàng',total),allocationCard('product','Sản phẩm / SKU',total),
-    const Padding(padding:EdgeInsets.all(8),child:Text('Chỉ tiêu quý/năm cộng từ các tháng. Mỗi nhân viên có Target cá nhân riêng, kể cả Admin/Manager trực tiếp bán hàng. Admin/Manager giao hoặc sửa trong phạm vi quyền; Sales chỉ xem của mình.')),
+    allocationCard('territory','Địa bàn',total),allocationCard('chain','Chuỗi / hệ thống',total),
+    if(rows.any((r)=>r['dimension']=='product'||r['dimension']=='customer'))
+     ExpansionTile(title:const Text('Chỉ tiêu khách / SKU lịch sử (chỉ xem)'),children:[
+      for(final r in rows.where((r)=>['customer','product'].contains(r['dimension'])&&months.contains(targetAmount(r['month']))))
+       ListTile(title:Text(r['name']?.toString()??r['entity_id'].toString()),
+        subtitle:Text('${r['dimension']=='product'?'SKU cũ':'Khách cũ'} · Tháng ${r['month']}'),
+        trailing:Text(targetMoney(targetAmount(r['amount'])))),
+     ]),
+    const Padding(padding:EdgeInsets.all(8),child:Text('Tổng nhân viên là chỉ tiêu gốc, phân bổ địa bàn + chuỗi không được vượt tổng này. SKU cũ chỉ đọc, không tự đổi dữ liệu. Quý/năm cộng từ các tháng; Sales chỉ xem chỉ tiêu của mình.')), 
    ],
   ]);
  }
@@ -156,7 +163,7 @@ class _TargetPickerState extends State<_TargetPicker>{
   }catch(e){if(mounted&&g==generation)setState(()=>error=e.toString());}
   finally{if(mounted&&g==generation)setState(()=>busy=false);}
  }
- @override Widget build(BuildContext context)=>AlertDialog(title:Text(widget.dimension=='customer'?'Chọn khách hàng':'Chọn sản phẩm'),
+ @override Widget build(BuildContext context)=>AlertDialog(title:Text(widget.dimension=='territory'?'Chọn địa bàn':'Chọn chuỗi / hệ thống'),
   content:SizedBox(width:480,height:400,child:Column(children:[
    TextField(controller:search,decoration:InputDecoration(labelText:'Tìm mã hoặc tên',suffixIcon:IconButton(onPressed:load,icon:const Icon(Icons.search))),onSubmitted:(_)=>load()),
    if(busy)const LinearProgressIndicator(),if(error!=null)Text(error!),
