@@ -49,6 +49,25 @@ function questions(value:unknown):Question[]|null{
  }
  return out;
 }
+/** Old offline clients only provide a comma-separated 'brands' checklist answer.
+ * Preserve compatibility, while explicit market_brands:null means skip updates. */
+export function marketBrandsFromLegacyAnswers(value:unknown):string[]|null{
+ if(!value||typeof value!=='object'||Array.isArray(value))return null;
+ const entry=(value as Body).brands;
+ if(typeof entry!=='string'&&!Array.isArray(entry))return null;
+ const text=typeof entry==='string'?entry:entry.join(',');
+ if(!text.trim())return null;
+ const excluded=new Set(['khác','không có','không','chưa có','chưa rõ','không rõ','không xác định','none']);
+ const names:string[]=[];const known=new Set<string>();
+ for(const item of text.split(/[,;\\n/]+|\\s+hoặc\\s+/i)){
+  const brand=item.trim().replace(/\\s+/g,' ');
+  if(!brand||brand.length>100||excluded.has(brand.toLowerCase()))continue;
+  const key=brand.toLocaleLowerCase('vi');
+  if(!known.has(key)){known.add(key);names.push(brand);}
+  if(names.length===50)break;
+ }
+ return names;
+}
 export function validateSurveyAnswers(template:Question[],value:unknown):string|null{
  if(!value||typeof value!=='object'||Array.isArray(value))return 'Checklist không hợp lệ';
  const answers=value as Body, ids=new Set(template.map(q=>q.id));
@@ -245,7 +264,8 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   if(s.last_mutation_ref===v.client_ref)return json({item:s,idempotent:true});
   if(s.status!=='in_progress'||Number(s.version)!==v.version)return bad('Phiên đã thay đổi hoặc đã hoàn thành',409);
   const err=validateSurveyAnswers(s.questions as Question[],v.answers);if(err)return bad(err);
-  const marketBrands=v.market_brands??null;
+  const marketBrands=v.market_brands===undefined?
+   marketBrandsFromLegacyAnswers(v.answers):v.market_brands;
   if(marketBrands!==null&&(
      !Array.isArray(marketBrands)||marketBrands.length>50||
      marketBrands.some(name=>typeof name!=='string'||name.trim().length<1||
