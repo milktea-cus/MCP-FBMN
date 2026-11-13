@@ -35,8 +35,8 @@ String? checklistError(List<Map<String,dynamic>> qs,Map<String,dynamic> answers)
 Future<Map<String,dynamic>> surveyGet(CustomerService service,String path,[Map<String,String>? params])async=>decodeApi(await http.get(service.uri(path,params),headers:service.headers).timeout(const Duration(seconds:20)));
 
 class SurveyPage extends StatefulWidget{
- final OfflineQueue queue;final CustomerService service;final RegionCatalog regions;final bool admin;final String? initialCustomer;final WidgetBuilder? legacy;
- const SurveyPage({super.key,required this.queue,required this.service,required this.regions,this.admin=false,this.initialCustomer,this.legacy});
+ final OfflineQueue queue;final CustomerService service;final RegionCatalog regions;final bool admin;final String? initialCustomer;final Map<String,dynamic>? initialStop;final WidgetBuilder? legacy;
+ const SurveyPage({super.key,required this.queue,required this.service,required this.regions,this.admin=false,this.initialCustomer,this.initialStop,this.legacy});
  @override State<SurveyPage> createState()=>_SurveyPageState();
 }
 class _SurveyPageState extends State<SurveyPage>{
@@ -86,6 +86,8 @@ class _SurveyPageState extends State<SurveyPage>{
       'name':stop['customer_name'],'province':stop['customer_province'],
       'district':stop['customer_district'],
       'data':{'plannedDate':work,'sequence':stop['sequence'],'purpose':stop['purpose']},
+      if(widget.initialStop!=null&&widget.initialStop!['id']==stop['id'])
+       'last_checkin':widget.initialStop!['last_checkin'],
      });
     }
    }
@@ -134,21 +136,28 @@ class _SurveyPageState extends State<SurveyPage>{
   setState(()=>busy=true);
   try{
    final t=await template(row['province'].toString());if(!mounted)return;
-   var pos=await captureGps(context);
-   while(!pos.accuracy.isFinite||pos.accuracy>100||pos.accuracy<0){
+   final saved=row['last_checkin'];
+   final verified=saved is Map&&saved['client_ref']!=null&&
+    saved['latitude'] is num&&saved['longitude'] is num&&saved['accuracy_m'] is num&&
+    row['day_route_stop_id']!=null?Map<String,dynamic>.from(saved):null;
+   var pos=verified==null?await captureGps(context):null;
+   while(pos!=null&&(!pos.accuracy.isFinite||pos.accuracy>100||pos.accuracy<0)){
     if(!mounted)return;
     final retry=await showDialog<bool>(context:context,builder:(c)=>AlertDialog(title:const Text('Vị trí thiết bị chưa đủ chính xác'),content:Text('Sai số hiện tại: ${pos.accuracy.isFinite?pos.accuracy.toStringAsFixed(0):"không xác định"} m. Cần tối đa 100 m. Nếu dùng máy tính, hãy thử trên điện thoại có GPS; bật Vị trí chính xác và đứng nơi thoáng. Tọa độ khách hàng chưa được kiểm tra ở bước này.'),actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Hủy')),FilledButton(onPressed:()=>Navigator.pop(c,true),child:const Text('Lấy lại GPS'))]));
     if(retry!=true||!mounted)return;
     pos=await captureGps(context);
    }
    final first=row['latitude']==null&&row['longitude']==null;
-   if(first){
+   if(first&&verified==null){
     if(!mounted)return;
     final consent=await showDialog<bool>(context:context,builder:(c)=>AlertDialog(title:const Text('Điểm bán chưa có tọa độ'),content:Text('Bạn đang ở đúng địa chỉ của ${row['name']}? ${row['address_line']??""}\n\nChỉ xác nhận khi đang có mặt và được phép ghi nhận tọa độ điểm bán. Vị trí GPS này sẽ làm mốc cho các lần ghé sau. Lần đầu là ghi nhận mốc, không phải đối chiếu với vị trí có sẵn.'),actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Hủy')),FilledButton(onPressed:()=>Navigator.pop(c,true),child:const Text('Xác nhận vị trí lần đầu'))]));
     if(consent!=true||!mounted)return;
    }else if(row['location_consent']==false){notify('Điểm bán chưa được phép sử dụng tọa độ. Kiểm tra hồ sơ khách hàng.');return;}
-   final id=const Uuid().v4(),started=pos.timestamp.toUtc().toIso8601String();
-   final payload=<String,dynamic>{'client_ref':id,'customer_id':row['customer_id'],'route_stop_id':row['planned']==true&&row['day_route_stop_id']==null?row['id']:null,'day_route_stop_id':row['day_route_stop_id'],'template_id':t['id'],'started_at':started,'latitude':pos.latitude,'longitude':pos.longitude,'accuracy_m':pos.accuracy,if(first)'initialize_location':true};
+   final id=const Uuid().v4(),started=(pos?.timestamp??DateTime.now()).toUtc().toIso8601String();
+   final latitude=verified==null?pos!.latitude:(verified['latitude'] as num).toDouble();
+   final longitude=verified==null?pos!.longitude:(verified['longitude'] as num).toDouble();
+   final accuracy=verified==null?pos!.accuracy:(verified['accuracy_m'] as num).toDouble();
+   final payload=<String,dynamic>{'client_ref':id,'customer_id':row['customer_id'],'route_stop_id':row['planned']==true&&row['day_route_stop_id']==null?row['id']:null,'day_route_stop_id':row['day_route_stop_id'],'template_id':t['id'],'started_at':started,'latitude':latitude,'longitude':longitude,'accuracy_m':accuracy,if(first)'initialize_location':true,if(verified!=null)'visit_ref':verified['client_ref']};
    final draft=<String,dynamic>{...payload,'id':id,'owner_sub':widget.queue.identity,'province':row['province'],'district':row['district'],'customer_name':row['name'],'template_version':t['version'],'questions':t['questions'],'status':'in_progress','location_initialized':first,'start_op':id,'version':1,'answers':<String,dynamic>{},'note':'','photos':<Map<String,dynamic>>[]};
    await widget.queue.saveSurveyDraft(draft,path:'/api/v1/sessions',payload:payload);
    if(mounted)await open(draft);
