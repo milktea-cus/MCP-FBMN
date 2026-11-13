@@ -12,7 +12,12 @@ import 'session.dart';
 Future<Database>? _sharedDatabase;
 Future<Database> openOfflineDatabase([IdbFactory? factory]){
  Future<Database> open()=> (factory??offlineFactory()).open('filed_work_offline_v1',version:1,onUpgradeNeeded:(e){final store=e.database.createObjectStore('outbox',keyPath:'key');store.createIndex('account','account');e.database.createObjectStore('cache',keyPath:'key');});
- return factory==null?(_sharedDatabase??=open()):open();
+ if(factory!=null)return open();
+ // An Android SQLite open error is not permanent; retry on next attempt.
+ return _sharedDatabase??=open().catchError((Object error,StackTrace stack){
+  _sharedDatabase=null;
+  Error.throwWithStackTrace(error,stack);
+ });
 }
 class OfflineQueue extends ChangeNotifier {
  final SalesSession session;
