@@ -37,12 +37,69 @@ Map<String,dynamic> decodeApi(http.Response r) {
     throw const ApiFailure(502,'Máy chủ trả dữ liệu không hợp lệ. Hãy thử lại.');
   }
 }
+/// Authentication secrets only: never use SQLite, SharedPreferences or logs for
+/// the session cookie. A distinct encrypted Android store is used for new logins.
+abstract class SessionSecretStore {
+  Future<String?> read();
+  Future<void> write(String value);
+  Future<void> delete();
+}
+
+class EncryptedSessionSecretStore implements SessionSecretStore {
+  static const key='sales.neon.session.v2';
+  static const legacyKey='sales.neon.session.v1';
+  final FlutterSecureStorage _current;
+  final FlutterSecureStorage _legacy;
+  const EncryptedSessionSecretStore({
+    FlutterSecureStorage current=const FlutterSecureStorage(
+      aOptions:AndroidOptions(encryptedSharedPreferences:true)),
+    FlutterSecureStorage legacy=const FlutterSecureStorage(),
+  }):_current=current,_legacy=legacy;
+
+  @override Future<String?> read() async {
+    final saved=await _current.read(key:key);
+    if(saved!=null&&saved.isNotEmpty)return saved;
+    // Read the original v9 storage only when the new store has no credential.
+    // The old value is never erased until a new encrypted copy is verified.
+    String? old;
+    try { old=await _legacy.read(key:legacyKey); }
+    catch (_) {
+      // A restored Android Keystore may be unable to unwrap the old key.
+      // Keep the unreadable legacy storage intact; a fresh login writes v2.
+      return null;
+    }
+    if(old==null||old.isEmpty)return null;
+    await write(old);
+    return old;
+  }
+  @override Future<void> write(String value) async {
+    if(value.isEmpty)throw ArgumentError('Empty authentication session');
+    await _current.write(key:key,value:value);
+    if(await _current.read(key:key)!=value){
+      throw StateError('Secure session write verification failed');
+    }
+  }
+  @override Future<void> delete() async {
+    await _current.delete(key:key);
+    // A corrupt old keystore must not prevent deleting the current session.
+    try { await _legacy.delete(key:legacyKey); }catch(_){}
+  }
+}
+
 class SalesSession {
-  final _storage=const FlutterSecureStorage();
+  final SessionSecretStore _store;
+  SalesSession({SessionSecretStore? store}):_store=store??const EncryptedSessionSecretStore();
   String cookie='';
   Uri uri(String path)=>Uri.parse('$salesOrigin$path');
   Future<void> restore() async {
-    if(!kIsWeb) cookie=await _storage.read(key:'sales.neon.session.v1')??'';
+    if(kIsWeb)return;
+    try {
+      cookie=await _store.read()??'';
+    } catch (_) {
+      // Allow one transient Android Keystore / first-unlock failure to settle.
+      await Future<void>.delayed(const Duration(milliseconds:350));
+      cookie=await _store.read()??'';
+    }
   }
   Future<Map<String,dynamic>> get(String path) async {
     try {
@@ -75,8 +132,9 @@ class SalesSession {
     if(!kIsWeb){
       final value=RegExp(r'__Host-sales-session=([^;\s,]+)').firstMatch(r.headers['set-cookie']??'')?.group(1);
       if(value==null)throw const ApiFailure(502,'Không nhận được phiên đăng nhập');
+      // Do not enter SalesHome until the credential is durably readable.
+      await _store.write(value);
       cookie=value;
-      await _storage.write(key:'sales.neon.session.v1',value:value);
     }
   }
   Future<void> logout() async {
@@ -85,6 +143,6 @@ class SalesSession {
   }
   Future<void> clear() async {
     cookie='';
-    if(!kIsWeb)await _storage.delete(key:'sales.neon.session.v1');
+    if(!kIsWeb)await _store.delete();
   }
 }
