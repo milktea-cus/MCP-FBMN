@@ -96,7 +96,13 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
     ((SELECT count(*) FROM public.field_visits v WHERE v.day_route_stop_id=s.id)
      +(SELECT count(*) FROM public.field_area_visits a WHERE a.day_route_stop_id=s.id))::integer AS visit_count,
     (SELECT count(*) FROM public.field_survey_sessions se WHERE se.day_route_stop_id=s.id)::integer AS session_count,
-    (SELECT count(*) FROM public.field_survey_sessions se WHERE se.day_route_stop_id=s.id AND se.status='completed')::integer AS completed_sessions
+    (SELECT count(*) FROM public.field_survey_sessions se WHERE se.day_route_stop_id=s.id AND se.status='completed')::integer AS completed_sessions,
+    (SELECT json_build_object(
+      'client_ref',v.client_ref,'latitude',v.latitude,'longitude',v.longitude,
+      'accuracy_m',v.accuracy_m,'checkin_at',v.checkin_at)
+     FROM public.field_visits v WHERE v.day_route_stop_id=s.id
+       AND v.owner_sub=${actor.sub} AND s.stop_kind='customer'
+     ORDER BY v.checkin_at DESC,v.id DESC LIMIT 1) AS last_checkin
     FROM public.field_route_stops s LEFT JOIN public.customers c ON c.id=s.customer_id
     LEFT JOIN public.customer_chains ch ON ch.id=s.chain_id
     WHERE s.day_route_id=${routeId}::uuid ORDER BY s.sequence,s.created_at,s.id LIMIT 1000`;
