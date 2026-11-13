@@ -164,8 +164,6 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
  }
 
  @override Widget build(BuildContext context){
-  final days=monthEnd(month).day;
-  final periods=[for(var p=1;p<=5;p++)if(periodDays(month,p).isNotEmpty)p];
   final visible=items.where((r){
    final date=DateTime.tryParse(r['work_date']?.toString()??'');
    return period==0||date!=null&&planningPeriod(date)==period;
@@ -190,21 +188,12 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
      IconButton(tooltip:'Tháng sau',onPressed:busy?null:()=>_changeMonth(1),icon:const Icon(Icons.chevron_right)),
     ]),
     const SizedBox(height:8),
-    Text('Kỳ kế hoạch theo ngày trong tháng (01–07, 08–14, 15–21, 22–28${days>28?', 29–cuối':''}). Không phải tuần Thứ Hai–Chủ nhật.',
-      style:Theme.of(context).textTheme.bodySmall),
+    MonthlyPeriodActions(
+     month:month,period:period,
+     onPeriodChanged:(value)=>setState(()=>period=value),
+     onAdd:()=>_edit(),canAdd:canCreate,
+    ),
     const SizedBox(height:10),
-    Wrap(spacing:6,runSpacing:6,children:[
-     ChoiceChip(label:const Text('Tất cả'),selected:period==0,onSelected:(_)=>setState(()=>period=0)),
-     for(final p in periods)ChoiceChip(
-      label:Text('Kỳ ${p} (${((p-1)*7+1).toString().padLeft(2,'0')}–${(p*7>days?days:p*7).toString().padLeft(2,'0')}/${month.month.toString().padLeft(2,'0')})'),
-      selected:period==p,onSelected:(_)=>setState(()=>period=p)),
-    ]),
-    const SizedBox(height:12),
-    FilledButton.icon(onPressed:canCreate?()=>_edit():null,
-     icon:const Icon(Icons.add_location_alt_outlined),
-     label:const Text('Thêm công tác địa bàn / chuỗi')),
-    const SizedBox(height:6),
-    const Text('Có thể lập chuyến đi phát triển thị trường ngay cả khi địa bàn chưa có khách hàng.'),
     if(busy)const LinearProgressIndicator(),
     if(error!=null)Padding(padding:const EdgeInsets.symmetric(vertical:8),child:
       Text(cached?'Dữ liệu đã lưu trên máy · chưa tải mới: ${error!}':error!,
@@ -263,6 +252,35 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
       padding:EdgeInsets.all(24),child:Text('Chưa có công tác trong kỳ này. Hãy lập chuyến đi, không cần có khách sẵn.',textAlign:TextAlign.center)),
    ]),
   );
+ }
+}
+
+/// Compact, one-row planning toolbar; period five is absent in February 28-day.
+class MonthlyPeriodActions extends StatelessWidget {
+ final DateTime month;
+ final int period;
+ final ValueChanged<int> onPeriodChanged;
+ final VoidCallback onAdd;
+ final bool canAdd;
+ const MonthlyPeriodActions({super.key,required this.month,required this.period,
+  required this.onPeriodChanged,required this.onAdd,required this.canAdd});
+ @override Widget build(BuildContext context){
+  final periods=[for(var p=1;p<=5;p++)if(periodDays(month,p).isNotEmpty)p];
+  return Row(children:[
+   Expanded(child:DropdownButtonFormField<int>(
+    key:ValueKey('period-${monthKey(month)}-$period'),
+    initialValue:period,isExpanded:true,
+    decoration:const InputDecoration(labelText:'Lọc kỳ',isDense:true),
+    items:[
+     const DropdownMenuItem(value:0,child:Text('Tất cả')),
+     for(final p in periods)DropdownMenuItem(value:p,child:Text('Kỳ $p')),
+    ],
+    onChanged:(value){if(value!=null)onPeriodChanged(value);},
+   )),
+   const SizedBox(width:8),
+   FilledButton.icon(onPressed:canAdd?onAdd:null,
+    icon:const Icon(Icons.add),label:const Text('Thêm công tác')),
+  ]);
  }
 }
 
