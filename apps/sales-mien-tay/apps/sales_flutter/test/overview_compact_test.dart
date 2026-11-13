@@ -29,21 +29,25 @@ void main() {
       expect(targetTaps,1);
     });
   }
-  testWidgets('brand coverage takes canonical verified SKU assortment, not survey brand names',(tester)async{
+  testWidgets('market footprint counts customer-brand pairs, never SKU or survey volume',(tester)async{
     const legacy=<SalesRecord>[SalesRecord(id:'1',kind:'survey',province:'Sóc Trăng',
       data:{'brands':['MGP'],'distributors':['NPP']})];
-    await tester.pumpWidget(const MaterialApp(home:Scaffold(body:
+    await tester.pumpWidget(const MaterialApp(home:Scaffold(body:SingleChildScrollView(child:
       SalesBrandCoverageTable(surveys:legacy,provinces:['Sóc Trăng'],
-       verifiedData:true,brandNames:['Hoa Sen','MGP'],
-       customerCounts:[{'province':'Sóc Trăng','customers':5}],
-       verifiedRows:[{'province':'Sóc Trăng','brand':'Hoa Sen','customers':2}]))));
+       verifiedData:true,brandNames:['MGP','Thành Đạt'],
+       customerCounts:[{'province':'Sóc Trăng','district':'Mỹ Xuyên','customers':5}],
+       verifiedRows:[
+        {'province':'Sóc Trăng','district':'Mỹ Xuyên','brand':'MGP','customers':1},
+        {'province':'Sóc Trăng','district':'Mỹ Xuyên','brand':'Thành Đạt','customers':1},
+       ]))))));
     expect(tester.takeException(),isNull);
     final table=tester.widget<DataTable>(find.byType(DataTable));
     expect(table.columns.map((c)=>(c.label as Text).data).toList(),
-      ['Tỉnh/TP','KH','Hoa Sen','MGP']);
+      ['Tỉnh / Huyện','Khách','MGP','Thành Đạt']);
     expect((table.rows.single.cells[1].child as Text).data,'5');
-    expect((table.rows.single.cells[2].child as Text).data,'2');
-    expect((table.rows.single.cells[3].child as Text).data,'0');
-    expect(find.textContaining('distributor'),findsNothing);
+    expect((table.rows.single.cells[2].child as Text).data,'1');
+    expect((table.rows.single.cells[3].child as Text).data,'1');
+    expect(find.textContaining('không cộng dồn lượt'),findsOneWidget);
+    expect(find.textContaining('Đã đặt'),findsNothing);
   });
 }
