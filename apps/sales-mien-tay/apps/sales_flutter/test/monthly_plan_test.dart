@@ -22,6 +22,44 @@ void main() {
    }
   }
  });
+
+ testWidgets('P0-2A keeps period dropdown beside Add on 320dp mobile', (tester) async {
+  tester.view.physicalSize=const Size(320,700);
+  tester.view.devicePixelRatio=1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  var selected=0,added=false;
+  await tester.pumpWidget(MaterialApp(home:Scaffold(body:Padding(
+   padding:const EdgeInsets.all(12),
+   child:StatefulBuilder(builder:(context,update)=>MonthlyPeriodActions(
+    month:DateTime(2026,11),period:selected,canAdd:true,
+    onPeriodChanged:(p)=>update(()=>selected=p),
+    onAdd:()=>added=true,
+   )),
+  ))));
+  expect(find.text('Thêm công tác'),findsOneWidget);
+  expect(find.byType(DropdownButtonFormField<int>),findsOneWidget);
+  expect(tester.takeException(),isNull);
+  await tester.tap(find.text('Tất cả'));await tester.pumpAndSettle();
+  await tester.tap(find.text('Kỳ 3').last);await tester.pumpAndSettle();
+  expect(selected,3);
+  await tester.tap(find.text('Thêm công tác'));
+  expect(added,isTrue);
+  final menu=tester.getTopLeft(find.byType(DropdownButtonFormField<int>));
+  final action=tester.getTopLeft(find.text('Thêm công tác'));
+  expect(menu.dx,lessThan(action.dx));
+  expect((menu.dy-action.dy).abs(),lessThan(36));
+ });
+ testWidgets('P0-2A omits empty fifth period in February', (tester) async {
+  await tester.pumpWidget(MaterialApp(home:Scaffold(body:MonthlyPeriodActions(
+   month:DateTime(2025,2),period:0,canAdd:false,
+   onPeriodChanged:(_){},onAdd:(){},
+  ))));
+  await tester.tap(find.text('Tất cả'));await tester.pumpAndSettle();
+  expect(find.text('Kỳ 4'),findsOneWidget);
+  expect(find.text('Kỳ 5'),findsNothing);
+ });
+
  testWidgets('editor selects multiple business scopes without existing customers', (tester) async {
   tester.view.physicalSize=const Size(1000,1600);tester.view.devicePixelRatio=1;
   addTearDown(tester.view.resetPhysicalSize);addTearDown(tester.view.resetDevicePixelRatio);
