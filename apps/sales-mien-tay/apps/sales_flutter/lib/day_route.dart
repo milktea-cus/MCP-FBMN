@@ -90,7 +90,8 @@ class _DayRoutePageState extends State<DayRoutePage>{
  }
  List<Map<String,dynamic>> get pendingStops=>widget.queue.pending.where((op){
   final path=op['path']?.toString()??'';
-  return path.startsWith('/api/v1/day-routes/${widget.routeId}/stops')||
+  return (path.startsWith('/api/v1/day-routes/${widget.routeId}/stops')&&
+    !path.endsWith('/missed'))||
    path=='/api/v1/day-routes/${widget.routeId}/unplanned-stops';
  }).toList();
  bool get isTodayRoute{
@@ -105,6 +106,11 @@ class _DayRoutePageState extends State<DayRoutePage>{
  bool get canEditPlannedStops=>canModify&&!hasRecordedActivity;
  bool missedPending(String id)=>widget.queue.pending.any((op)=>
   op['path']=='/api/v1/day-routes/${widget.routeId}/stops/$id/missed');
+ bool activityPending(String id)=>widget.queue.pending.any((op){
+  final payload=op['payload'];
+  if(payload is! Map)return false;
+  return (payload['route_stop_id']??payload['day_route_stop_id'])?.toString()==id;
+ });
  int get nextOrder{
   var maxSeq=0;
   for(final r in stops){
@@ -274,7 +280,8 @@ class _DayRoutePageState extends State<DayRoutePage>{
   if(!isOwner||!isTodayRoute||
     ((stop['visit_count'] as num?)?.toInt()??0)>0||
     ((stop['session_count'] as num?)?.toInt()??0)>0||
-    stop['missed_code']!=null||missedPending(stop['id'].toString()))return;
+    stop['missed_code']!=null||missedPending(stop['id'].toString())||
+    activityPending(stop['id'].toString()))return;
   var reason='closed';
   final note=TextEditingController();
   final accepted=await showDialog<bool>(context:context,builder:(dialog)=>StatefulBuilder(
@@ -452,7 +459,9 @@ class _DayRoutePageState extends State<DayRoutePage>{
       isThreeLine:true,
       onTap:sorted[i]['stop_kind']=='customer'
         ?()=>openCustomerSurvey(sorted[i]):()=>openEvidence(sorted[i]),
-      trailing:!isOwner?const Icon(Icons.chevron_right):PopupMenuButton<String>(
+      trailing:(!isOwner||(!isTodayRoute&&!canEditPlannedStops)||
+        sorted[i]['missed_code']!=null)
+       ?const Icon(Icons.chevron_right):PopupMenuButton<String>(
        tooltip:'Thao tác điểm ghé',
        icon:const Icon(Icons.more_vert),
        onSelected:(action){
@@ -464,6 +473,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
        itemBuilder:(ctx)=>[
         if(isTodayRoute&&sorted[i]['missed_code']==null&&
           !missedPending(sorted[i]['id'].toString())&&
+          !activityPending(sorted[i]['id'].toString())&&
           ((sorted[i]['visit_count'] as num?)?.toInt()??0)==0)...[
          const PopupMenuItem(value:'gps',child:Text('Check-in GPS')),
          if(((sorted[i]['session_count'] as num?)?.toInt()??0)==0)
