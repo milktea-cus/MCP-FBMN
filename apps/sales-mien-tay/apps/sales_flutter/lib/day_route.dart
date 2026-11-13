@@ -91,8 +91,8 @@ class _DayRoutePageState extends State<DayRoutePage>{
   }
   return maxSeq+1;
  }
- bool get isOwner=route!=null&&route!['owner_sub']==widget.queue.identity;
- bool get canModify=isOwner&&route!['status']=='ready'
+ bool get isOwner=>route!=null&&route!['owner_sub']==widget.queue.identity;
+ bool get canModify=>isOwner&&route!['status']=='ready'
    &&route!['plan_status']!='cancelled'&&!busy;
  Future<void> addAreaOrChain()async{
   if(!canModify)return;
