@@ -11,7 +11,6 @@ import 'auth_gate.dart';
 import 'staff_page.dart';
 import 'offline_queue.dart';
 import 'notifications.dart';
-import 'field_work.dart';
 import 'work_hub.dart';
 import 'package:http/http.dart' as http;
 import 'performance.dart';
