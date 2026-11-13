@@ -28,9 +28,9 @@ export async function targetRoutes(req:Request,env:{
      SELECT sc.province,sc.district FROM public.staff_scopes sc
      JOIN public.staff_members s ON s.user_sub=sc.user_sub
      WHERE sc.user_sub=${chosen} AND s.role<>'admin'
-      AND NOT EXISTS(SELECT 1 FROM public.staff_scopes full
-        WHERE full.user_sub=sc.user_sub AND full.province=sc.province
-          AND full.district='' AND sc.district<>'')
+      AND NOT EXISTS(SELECT 1 FROM public.staff_scopes full_scope
+        WHERE full_scope.user_sub=sc.user_sub AND full_scope.province=sc.province
+          AND full_scope.district='' AND sc.district<>'')
      UNION ALL
      SELECT tc.name,'' FROM public.territory_catalog tc
       WHERE tc.level='province' AND tc.active
