@@ -245,17 +245,30 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   if(s.last_mutation_ref===v.client_ref)return json({item:s,idempotent:true});
   if(s.status!=='in_progress'||Number(s.version)!==v.version)return bad('Phiên đã thay đổi hoặc đã hoàn thành',409);
   const err=validateSurveyAnswers(s.questions as Question[],v.answers);if(err)return bad(err);
-  const [,rows]=await db.transaction([
-   db`SELECT id FROM field_survey_sessions WHERE id=${id}::uuid FOR UPDATE`,
-   db`UPDATE field_survey_sessions s SET answers=${JSON.stringify(v.answers)}::jsonb,note=${v.note},ended_at=${end}::timestamptz,status='completed',version=version+1,last_mutation_ref=${v.client_ref}::uuid
-    WHERE s.id=${id}::uuid AND s.owner_sub=${actor.sub} AND s.version=${v.version as number} AND s.status='in_progress'
-    AND public.sales_customer_fieldwork_allowed(${actor.sub},s.customer_id)
-    AND EXISTS(SELECT 1 FROM customers c WHERE c.id=s.customer_id AND public.sales_customer_allowed(${actor.sub},c.id,'view'))
-    AND NOT EXISTS(SELECT 1 FROM field_survey_photos p WHERE p.session_id=s.id AND p.status<>'ready')
-    AND (SELECT count(DISTINCT p.kind) FROM field_survey_photos p WHERE p.session_id=s.id AND p.status='ready' AND p.kind IN ('front','shelf','goods'))=3 RETURNING *`
-  ]);
-  if(!rows.length)return bad('Chưa đủ ảnh mặt tiền/quầy kệ/hàng hóa, hoặc phiên/quyền đã thay đổi',409);
-  return json({item:rows[0]});
+  const marketBrands=v.market_brands??null;
+  if(marketBrands!==null&&(
+     !Array.isArray(marketBrands)||marketBrands.length>50||
+     marketBrands.some(name=>typeof name!=='string'||name.trim().length<1||
+        name.trim().length>100||/[\x00-\x1f\x7f]/.test(name))))
+   return bad('Danh sách nhãn hàng thị trường không hợp lệ');
+  try{
+   // Atomic DB function: complete session and replace this customer's market
+   // snapshot, but never add repeat observations to an aggregate count.
+   const rows=await db`SELECT public.sales_complete_survey_market(
+    ${actor.sub},${id}::uuid,${v.client_ref}::uuid,${Number(v.version)},
+    ${end}::timestamptz,${v.note},${JSON.stringify(v.answers)}::jsonb,
+    ${marketBrands===null?null:JSON.stringify(marketBrands)}::jsonb) AS item`;
+   return json({item:rows[0].item});
+  }catch(e){
+   const reason=String((e as Error).message??'');
+   if(reason.includes('market_survey_forbidden'))return bad('Không có quyền khảo sát điểm bán',403);
+   if(reason.includes('market_survey_invalid')||reason.includes('market_brand_invalid'))
+    return bad('Dữ liệu khảo sát hoặc nhãn hàng không hợp lệ',400);
+   if(reason.includes('market_survey_stale')||reason.includes('market_survey_photos')||
+      reason.includes('market_survey_not_found'))
+    return bad('Ảnh chưa đủ hoặc phiên/quyền đã thay đổi; tải lại',409);
+   throw e;
+  }
  }
  if(m[2]==='photos'){
   if(req.method==='GET'&&!m[3])return json({items:await sessionPhotos(db,id,actor)});
