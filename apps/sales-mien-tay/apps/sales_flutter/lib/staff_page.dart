@@ -21,8 +21,20 @@ class _StaffPageState extends State<StaffPage>{
  }
  Future<void> edit([Map<String,dynamic>? row]) async{
   final catalog=await RegionCatalog.load();
+  final territories=await widget.session.get('/api/v1/admin/org/territories');
+  final combined=<String,List<String>>{for(final e in catalog.districts.entries)e.key:[...e.value]};
+  for(final item in (territories['items'] as List)){
+    if(item['level']=='province')combined.putIfAbsent(item['name'].toString(),()=>[]);
+  }
+  for(final item in (territories['items'] as List)){
+    if(item['level']=='district'){
+      final p=item['province']?.toString()??'',d=item['name'].toString();
+      if(combined.containsKey(p)&&!combined[p]!.contains(d))combined[p]!.add(d);
+    }
+  }
+  final nationwide=RegionCatalog(combined);
   if(!mounted)return;
-  final saved=await showDialog<bool>(context:context,barrierDismissible:false,builder:(_)=>StaffEditor(session:widget.session,catalog:catalog,staff:row,managers:items.where((m)=>m['role']=='manager'&&m['active']==true).toList()));
+  final saved=await showDialog<bool>(context:context,barrierDismissible:false,builder:(_)=>StaffEditor(session:widget.session,catalog:nationwide,staff:row,managers:items.where((m)=>m['role']=='manager'&&m['active']==true).toList()));
   if(saved==true&&mounted){await load();if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Đã lưu nhân viên và địa bàn.')));}
  }
  String description(Map<String,dynamic> m){
