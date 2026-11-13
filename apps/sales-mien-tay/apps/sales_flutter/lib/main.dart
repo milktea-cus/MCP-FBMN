@@ -484,7 +484,7 @@ class _KpiTile extends StatelessWidget {
 
 
 /// Presence comes from canonical SKU brands and verified trading evidence.
-class SalesBrandCoverageTable extends StatelessWidget{
+class SalesBrandCoverageTable extends StatefulWidget{
  final List<SalesRecord> surveys;
  final List<String> provinces,brandNames;
  final List<Map<String,dynamic>> verifiedRows,customerCounts;
@@ -492,30 +492,46 @@ class SalesBrandCoverageTable extends StatelessWidget{
  const SalesBrandCoverageTable({super.key,required this.surveys,
   required this.provinces,this.brandNames=const [],this.verifiedRows=const [],
   this.customerCounts=const [],this.verifiedData=false});
+ @override State<SalesBrandCoverageTable> createState()=>_SalesBrandCoverageTableState();
+}
+class _SalesBrandCoverageTableState extends State<SalesBrandCoverageTable>{
+ String status='trading';
+ String get valueKey=>switch(status){
+  'ordered'=>'ordered_customers',
+  'imported'=>'imported_customers',
+  _=>'customers',
+ };
  @override Widget build(BuildContext context){
-  final brands=(brandNames.isNotEmpty?List<String>.from(brandNames):
-   verifiedRows.map((x)=>x['brand']?.toString()??'')
+  final brands=(widget.brandNames.isNotEmpty?List<String>.from(widget.brandNames):
+   widget.verifiedRows.map((x)=>x['brand']?.toString()??'')
     .where((x)=>x.isNotEmpty).toSet().toList())..sort();
-  final rows=provinces.map((province){
-   final records=verifiedRows.where((r)=>r['province']==province).toList();
-   final total=customerCounts.where((r)=>r['province']==province)
+  final rows=widget.provinces.map((province){
+   final records=widget.verifiedRows.where((r)=>r['province']==province).toList();
+   final total=widget.customerCounts.where((r)=>r['province']==province)
     .fold<int>(0,(s,r)=>s+((r['customers'] as num?)?.toInt()??0));
    return DataRow(cells:[
     DataCell(Text(province)),DataCell(Text('$total')),
     for(final brand in brands)DataCell(Text(
-     '${records.where((r)=>r['brand']==brand).fold<int>(0,(s,r)=>s+((r['customers'] as num?)?.toInt()??0))}')),
+     '${records.where((r)=>r['brand']==brand).fold<int>(0,(s,r)=>s+((r[valueKey] as num?)?.toInt()??0))}')),
    ]);
   }).toList();
   return Card(child:Padding(padding:const EdgeInsets.all(8),child:Column(
    crossAxisAlignment:CrossAxisAlignment.start,children:[
-    Padding(padding:const EdgeInsets.all(10),child:Text(
-     'Nhãn hàng đang kinh doanh theo địa bàn',
-     style:Theme.of(context).textTheme.titleMedium)),
+    Padding(padding:const EdgeInsets.all(10),child:Wrap(
+     spacing:8,runSpacing:8,crossAxisAlignment:WrapCrossAlignment.center,children:[
+      Text('Nhãn hàng đang kinh doanh theo địa bàn',
+       style:Theme.of(context).textTheme.titleMedium),
+      DropdownButton<String>(value:status,items:const [
+       DropdownMenuItem(value:'trading',child:Text('Đang bán')),
+       DropdownMenuItem(value:'imported',child:Text('Đã nhập')),
+       DropdownMenuItem(value:'ordered',child:Text('Đã đặt')),
+      ],onChanged:(v){if(v!=null)setState(()=>status=v);}),
+     ])),
     const Padding(padding:EdgeInsets.symmetric(horizontal:10),
-     child:Text('Nguồn: danh mục SKU và xác minh đang kinh doanh tại khách. '
+     child:Text('Nguồn: nhãn hàng chuẩn, SKU và xác minh tại điểm bán. '
        'Đã đặt/đã nhập không tự tính đang bán; mỗi khách tính một lần cho mỗi nhãn.',
        style:TextStyle(fontSize:12))),
-    if(!verifiedData)const Padding(padding:EdgeInsets.all(8),
+    if(!widget.verifiedData)const Padding(padding:EdgeInsets.all(8),
      child:Text('Chưa có dữ liệu xác minh mới. Không suy đoán từ phiếu khảo sát cũ.')),
     if(brands.isEmpty)const Padding(padding:EdgeInsets.all(8),
      child:Text('Chưa có nhãn trong danh mục SKU.')),
