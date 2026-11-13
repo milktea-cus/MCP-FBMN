@@ -61,19 +61,34 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
   setState((){month=DateTime(month.year,month.month+delta);period=0;items=[];dayRoutes=[];});
   unawaited(_reload());
  }
+ /// Create a plan and its ordered day stops as one dependency graph in the
+ /// account-scoped outbox. Neither offline nor a retry duplicates stop IDs.
  Future<void> _edit({Map<String,dynamic>? original})async{
-  if(scopes.isEmpty){_toast('Chưa tải được phạm vi được giao. Kết nối lại để lấy quyền lập kế hoạch.');return;}
+  if(scopes.isEmpty){_toast('Chưa có phạm vi được giao. Kết nối lại để cập nhật quyền.');return;}
   final selection=await Navigator.push<MonthlyPlanSelection>(context,MaterialPageRoute(
-    builder:(_)=>MonthlyPlanEditor(month:month,scopes:scopes,original:original)));
+    builder:(_)=>MonthlyPlanEditor(month:month,scopes:scopes,original:original,
+      queue:widget.queue,service:widget.service)));
   if(selection==null||!mounted)return;
+  var added=0,skipped=0;
   try{
    for(final scope in selection.scopes){
     final editing=original!=null,ref=const Uuid().v4();
+    final kind=scope['scope_kind'].toString(),key=scope['scope_key'].toString();
+    final date=dayKey(selection.date);
+    // Existing and queued work on that date/scope is not recreated.
+    if(!editing&&(items.any((x)=>x['work_date'].toString().startsWith(date)
+       &&x['scope_kind']==kind&&x['scope_key']==key&&x['status']=='planned') ||
+       widget.queue.pending.any((x)=>x['path']=='/api/v1/monthly-plans'
+        &&(x['payload'] as Map)['work_date']==date
+        &&(x['payload'] as Map)['scope_kind']==kind
+        &&(x['payload'] as Map)['scope_key']==key))){
+     skipped++;continue;
+    }
     final payload=<String,dynamic>{
-     'client_ref':ref,'period_ym':monthKey(month),'work_date':dayKey(selection.date),
-     'scope_kind':scope['scope_kind'],'scope_key':scope['scope_key'],
-     'province':scope['scope_kind']=='territory'?scope['province']:null,
-     'district':scope['scope_kind']=='territory'?scope['district']:null,
+     'client_ref':ref,'period_ym':monthKey(month),'work_date':date,
+     'scope_kind':kind,'scope_key':key,
+     'province':kind=='territory'?scope['province']:null,
+     'district':kind=='territory'?scope['district']:null,
      'purpose':selection.purpose,'target_new_customers':selection.target,
      'note':selection.note,'status':selection.status,
      if(editing)'version':original['version'],
@@ -81,10 +96,36 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
     await widget.queue.enqueue(
      editing?'/api/v1/monthly-plans/${original['id']}':'/api/v1/monthly-plans',
      payload,method:editing?'PATCH':'POST');
+    added++;
+    if(editing)continue;
+    final routeId=const Uuid().v4();
+    await widget.queue.enqueue('/api/v1/day-routes',{
+     'client_ref':routeId,'monthly_plan_id':ref,'route_date':date,
+     'purpose':selection.purpose,'note':selection.note,'status':'ready',
+    },dependsOn:[ref]);
+    final sk='${kind}:${key}';
+    final customers=selection.customersByScope[sk]??<String>[];
+    var sequence=0;
+    for(final cid in customers){
+     await widget.queue.enqueue('/api/v1/day-routes/$routeId/stops',{
+      'client_ref':const Uuid().v4(),'stop_kind':'customer',
+      'customer_id':cid,'sequence':++sequence,'purpose':'Chăm sóc điểm bán',
+     },dependsOn:[routeId]);
+    }
+    if(customers.isEmpty&&kind!='customer'){
+     await widget.queue.enqueue('/api/v1/day-routes/$routeId/stops',{
+      'client_ref':const Uuid().v4(),'stop_kind':kind=='chain'?'chain':'area',
+      if(kind=='chain')'chain_id':key,
+      if(kind=='territory')...{'province':scope['province'],'district':scope['district']},
+      'sequence':1,'purpose':kind=='chain'?'Chăm sóc chuỗi':'Tìm điểm bán mới',
+     },dependsOn:[routeId]);
+    }
+    await widget.queue.cache('day-route-candidates:$routeId',
+      selection.availableByScope[sk]??<Map<String,dynamic>>[]);
    }
-   _toast('Đã lưu ${selection.scopes.length} công việc trên máy · chờ đồng bộ');
+   _toast('Đã lưu $added lịch và tuyến ngày trên máy${skipped>0?' · bỏ qua $skipped lịch trùng':''}.');
    if(mounted)await _reload();
-  }catch(e){_toast('Không lưu được kế hoạch: ${e.toString()}');}
+  }catch(e){_toast('Không lưu được kế hoạch/tuyến: $e');}
  }
  Future<void> createRoute(Map<String,dynamic> plan)async{
   final id=const Uuid().v4();
@@ -172,8 +213,22 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
      leading:const Icon(Icons.cloud_upload_outlined),
      title:Text((p['payload'] as Map)['purpose']?.toString()??'Công tác'),
      subtitle:Text("${(p['payload'] as Map)['work_date']} · ${(p['payload'] as Map)['scope_key']}\n${p['error']??'Đã lưu máy · chờ đồng bộ'}"),
-     trailing:p['status']=='blocked'?IconButton(icon:const Icon(Icons.refresh),
-      tooltip:'Thử đồng bộ lại',onPressed:()=>widget.queue.retryBlocked(p['key'].toString())):null,
+     trailing:Builder(builder:(_){
+      final plan=Map<String,dynamic>.from(p['payload'] as Map);
+      final routeOp=widget.queue.pending.where((op)=>
+       op['path']=='/api/v1/day-routes' &&
+       (op['payload'] as Map)['monthly_plan_id']==plan['client_ref']).firstOrNull;
+      if(routeOp!=null){
+       final route=Map<String,dynamic>.from(routeOp['payload'] as Map);
+       return IconButton(icon:const Icon(Icons.route),tooltip:'Mở tuyến đang chờ đồng bộ',
+        onPressed:()=>openRoute({...route,'id':route['client_ref'],
+          'owner_sub':widget.queue.identity,'scope_kind':plan['scope_kind'],
+          'scope_key':plan['scope_key'],'province':plan['province'],
+          'district':plan['district'],'plan_status':'planned'}));
+      }
+      return p['status']=='blocked'?IconButton(icon:const Icon(Icons.refresh),
+       tooltip:'Thử đồng bộ lại',onPressed:()=>widget.queue.retryBlocked(p['key'].toString())):const SizedBox.shrink();
+     }),
     )),
     for(final r in visible)Card(child:ListTile(
      leading:CircleAvatar(child:Text(DateTime.tryParse(r['work_date'].toString())?.day.toString()??'–')),
@@ -216,19 +271,31 @@ class MonthlyPlanSelection {
  final DateTime date;
  final String purpose,note,status;
  final int target;
- const MonthlyPlanSelection(this.scopes,this.date,this.purpose,this.note,this.status,this.target);
+ final Map<String,List<String>> customersByScope;
+ final Map<String,List<Map<String,dynamic>>> availableByScope;
+ const MonthlyPlanSelection(this.scopes,this.date,this.purpose,this.note,
+   this.status,this.target,this.customersByScope,this.availableByScope);
 }
 class MonthlyPlanEditor extends StatefulWidget {
  final DateTime month;
  final List<Map<String,dynamic>> scopes;
  final Map<String,dynamic>? original;
- const MonthlyPlanEditor({super.key,required this.month,required this.scopes,this.original});
+ final OfflineQueue queue;
+ final CustomerService service;
+ const MonthlyPlanEditor({super.key,required this.month,required this.scopes,
+  required this.queue,required this.service,this.original});
  @override State<MonthlyPlanEditor> createState()=>_MonthlyPlanEditorState();
 }
 class _MonthlyPlanEditorState extends State<MonthlyPlanEditor>{
  late DateTime date;
  late final TextEditingController purpose,note,target,search;
  final selected=<String>{};
+ final selectedCustomers=<String,Set<String>>{};
+ final available=<String,List<Map<String,dynamic>>>{};
+ final loadingCandidates=<String>{};
+ final candidateErrors=<String,String>{};
+ String mode='territory';
+ late final TextEditingController customerSearch;
  String status='planned';
  @override void initState(){
   super.initState();
@@ -237,11 +304,51 @@ class _MonthlyPlanEditorState extends State<MonthlyPlanEditor>{
   purpose=TextEditingController(text:row?['purpose']?.toString()??'');
   note=TextEditingController(text:row?['note']?.toString()??'');
   target=TextEditingController(text:row?['target_new_customers']?.toString()??'0');
-  search=TextEditingController();
+  search=TextEditingController();customerSearch=TextEditingController();
   status=row?['status']?.toString()??'planned';
-  if(row!=null)selected.add("${row['scope_kind']}:${row['scope_key']}");
+  if(row!=null){
+   final key="${row['scope_kind']}:${row['scope_key']}";
+   selected.add(key);mode=row['scope_kind'].toString();
+   final scope=widget.scopes.where((s)=>"${s['scope_kind']}:${s['scope_key']}"==key).firstOrNull;
+   if(scope!=null)unawaited(loadCustomers(scope));
+  }
  }
- @override void dispose(){purpose.dispose();note.dispose();target.dispose();search.dispose();super.dispose();}
+ @override void dispose(){purpose.dispose();note.dispose();target.dispose();search.dispose();customerSearch.dispose();super.dispose();}
+ String scopeId(Map<String,dynamic> scope)=>"${scope['scope_kind']}:${scope['scope_key']}";
+ Future<void> loadCustomers(Map<String,dynamic> scope)async{
+  final id=scopeId(scope);
+  if(loadingCandidates.contains(id))return;
+  setState(()=>loadingCandidates.add(id));
+  final cacheKey='monthly-plan-candidates:$id';
+  try{
+   final cached=await widget.queue.cached(cacheKey);
+   if(cached.isNotEmpty&&mounted)setState(()=>available[id]=cached);
+   final response=await http.get(widget.service.uri('/api/v1/monthly-plans/candidates',{
+    'scope_kind':scope['scope_kind'].toString(),
+    'scope_key':scope['scope_key'].toString(),
+   }),headers:widget.service.headers).timeout(const Duration(seconds:20));
+   final data=decodeApi(response);
+   final rows=(data['items'] as List).map((x)=>Map<String,dynamic>.from(x as Map)).toList();
+   await widget.queue.cache(cacheKey,rows);
+   if(mounted)setState((){
+    available[id]=rows;candidateErrors.remove(id);
+    final allowed=rows.map((r)=>r['id'].toString()).toSet();
+    selectedCustomers[id]?.removeWhere((cid)=>!allowed.contains(cid));
+    if(scope['scope_kind']=='customer')selectedCustomers[id]={scope['scope_key'].toString()};
+   });
+  }catch(e){
+   if(mounted)setState((){
+    candidateErrors[id]=e is ApiFailure&&(e.status==401||e.status==403)
+      ?'Không còn quyền chọn khách trong phạm vi này.': 'Dùng dữ liệu khách đã lưu trên máy (nếu có).';
+    if(e is ApiFailure&&(e.status==401||e.status==403)){
+     available.remove(id);selectedCustomers.remove(id);selected.remove(id);
+    }
+    if(scope['scope_kind']=='customer'&&selected.contains(id)){
+     selectedCustomers[id]={scope['scope_key'].toString()};
+    }
+   });
+  }finally{if(mounted)setState(()=>loadingCandidates.remove(id));}
+ }
  void submit(){
   final scopes=widget.scopes.where((o)=>selected.contains("${o['scope_kind']}:${o['scope_key']}")).toList();
   final number=int.tryParse(target.text.trim());
@@ -249,7 +356,11 @@ class _MonthlyPlanEditorState extends State<MonthlyPlanEditor>{
    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Chọn phạm vi; nhập mục đích (từ 2 ký tự) và số khách mới hợp lệ.')));
    return;
   }
-  Navigator.pop(context,MonthlyPlanSelection(scopes,date,purpose.text.trim(),note.text.trim(),status,number));
+  Navigator.pop(context,MonthlyPlanSelection(scopes,date,purpose.text.trim(),note.text.trim(),status,number,
+   {for(final scope in scopes)scopeId(scope):(
+    scope['scope_kind']=='customer'?[scope['scope_key'].toString()]:
+    (selectedCustomers[scopeId(scope)]??<String>{}).toList())},
+   {for(final scope in scopes)scopeId(scope):available[scopeId(scope)]??<Map<String,dynamic>>[]}));
  }
  Future<void> pickDate()async{
   final d=await showDatePicker(context:context,initialDate:date,firstDate:DateTime(widget.month.year,widget.month.month,1),lastDate:monthEnd(widget.month));
@@ -257,7 +368,8 @@ class _MonthlyPlanEditorState extends State<MonthlyPlanEditor>{
  }
  @override Widget build(BuildContext context){
   final q=search.text.trim().toLowerCase();
-  final filtered=widget.scopes.where((o)=>(o['label']?.toString()??'').toLowerCase().contains(q)).toList();
+  final filtered=widget.scopes.where((o)=>o['scope_kind']==mode &&
+    (o['label']?.toString()??'').toLowerCase().contains(q)).toList();
   return Scaffold(
    appBar:AppBar(title:Text(widget.original==null?'Thêm công tác':'Sửa công tác'),actions:[
     TextButton(onPressed:submit,child:const Text('Lưu')),
@@ -273,10 +385,16 @@ class _MonthlyPlanEditorState extends State<MonthlyPlanEditor>{
       items:const [DropdownMenuItem(value:'planned',child:Text('Đã lập kế hoạch')),DropdownMenuItem(value:'cancelled',child:Text('Hủy kế hoạch'))],
       onChanged:(v)=>setState(()=>status=v??'planned')),
     const SizedBox(height:16),
-    Text(widget.original==null?'Chọn nhiều địa bàn hoặc chuỗi *':'Phạm vi công tác',style:Theme.of(context).textTheme.titleMedium),
-    const Text('Chỉ hiện những nơi/chuỗi được giao. Không cần có sẵn điểm bán.'),
+    Text(widget.original==null?'Chọn địa bàn, chuỗi hoặc khách cụ thể *':'Phạm vi công tác',style:Theme.of(context).textTheme.titleMedium),
+    const Text('Chỉ hiển thị phạm vi/khách được giao trực tiếp; không cần có sẵn điểm bán.'),
     const SizedBox(height:8),
-    TextField(controller:search,onChanged:(_)=>setState((){}),decoration:const InputDecoration(prefixIcon:Icon(Icons.search),hintText:'Tìm tỉnh, huyện, chuỗi')),
+    Wrap(spacing:6,runSpacing:4,children:[
+     for(final entry in [('territory','Địa bàn'),('customer','Khách cụ thể'),('chain','Chuỗi')])
+      ChoiceChip(label:Text(entry.$2),selected:mode==entry.$1,
+       onSelected:(_)=>setState(()=>mode=entry.$1)),
+    ]),
+    const SizedBox(height:8),
+    TextField(controller:search,onChanged:(_)=>setState((){}),decoration:const InputDecoration(prefixIcon:Icon(Icons.search),hintText:'Tìm địa bàn, tên khách hoặc chuỗi')),
     const SizedBox(height:8),
     Text('Đã chọn ${selected.length} · ${filtered.length} phạm vi'),
     SizedBox(height:300,child:ListView.builder(
@@ -285,10 +403,64 @@ class _MonthlyPlanEditorState extends State<MonthlyPlanEditor>{
       return CheckboxListTile(
        dense:true,controlAffinity:ListTileControlAffinity.leading,
        title:Text(item['label'].toString()),value:selected.contains(key),
-       onChanged:widget.original!=null?null:(checked)=>setState((){if(checked==true){selected.add(key);}else{selected.remove(key);}}));
+       onChanged:widget.original!=null?null:(checked){
+        setState((){
+         if(checked==true){
+          selected.add(key);
+          if(item['scope_kind']=='customer')selectedCustomers[key]={item['scope_key'].toString()};
+         }else{selected.remove(key);selectedCustomers.remove(key);}
+        });
+        if(checked==true)unawaited(loadCustomers(item));
+       });
      })),
+    const SizedBox(height:14),
+    if(selected.isNotEmpty)...[
+     Text('Khách dự kiến ghé',style:Theme.of(context).textTheme.titleMedium),
+     const Text('Chọn khách cần ghé. Không chọn khách vẫn lập được tuyến đi tìm điểm bán mới.'),
+     const SizedBox(height:6),
+     TextField(controller:customerSearch,onChanged:(_)=>setState((){}),
+      decoration:const InputDecoration(prefixIcon:Icon(Icons.search),labelText:'Tìm khách/mã khách trong phạm vi đã chọn')),
+     const SizedBox(height:8),
+     for(final scope in widget.scopes.where((o)=>selected.contains(scopeId(o))))Builder(builder:(_){
+      final id=scopeId(scope),rows=available[id]??<Map<String,dynamic>>[];
+      final searchText=customerSearch.text.trim().toLowerCase();
+      final filteredCustomers=rows.where((c)=>searchText.isEmpty ||
+       ('${c['name']} ${c['code']??''} ${c['district']??''}').toLowerCase().contains(searchText)).toList();
+      final picked=selectedCustomers[id]??<String>{};
+      return Card(child:Padding(padding:const EdgeInsets.all(8),child:Column(
+       crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+        Text(scope['label'].toString(),style:Theme.of(context).textTheme.titleSmall),
+        Text('${rows.length} khách được phép lập lịch · Đã chọn ${picked.length}'),
+        if(loadingCandidates.contains(id))const LinearProgressIndicator(minHeight:2),
+        if(candidateErrors.containsKey(id))
+         Text(candidateErrors[id]!,style:Theme.of(context).textTheme.bodySmall),
+        if(!loadingCandidates.contains(id)&&rows.isEmpty)
+         const Text('Chưa có khách. Vẫn có thể tạo điểm công tác phát triển thị trường.'),
+        if(scope['scope_kind']!='customer'&&filteredCustomers.isNotEmpty)...[
+         TextButton(onPressed:()=>setState((){
+          selectedCustomers.putIfAbsent(id,()=><String>{})
+           .addAll(filteredCustomers.map((c)=>c['id'].toString()));
+         }),child:Text('Chọn tất cả ${filteredCustomers.length} khách hiển thị')),
+         SizedBox(height:190,child:ListView.builder(
+          itemCount:filteredCustomers.length,
+          itemBuilder:(ctx,i){
+           final c=filteredCustomers[i],cid=c['id'].toString();
+           return CheckboxListTile(dense:true,
+            controlAffinity:ListTileControlAffinity.leading,
+            title:Text(c['name'].toString(),maxLines:1,overflow:TextOverflow.ellipsis),
+            subtitle:Text('${c['code']??''} · ${c['district']}, ${c['province']}'),
+            value:picked.contains(cid),onChanged:(v)=>setState((){
+             final set=selectedCustomers.putIfAbsent(id,()=><String>{});
+             if(v==true){set.add(cid);}else{set.remove(cid);}
+            }));
+          },
+         )),
+        ],
+       ]))));
+     }),
+    ],
     const SizedBox(height:16),
-    FilledButton(onPressed:submit,child:Text(widget.original==null?'Lưu ${selected.length} công việc':'Lưu thay đổi')),
+    FilledButton(onPressed:submit,child:Text(widget.original==null?'Lưu lịch + tuyến (${selected.length})':'Lưu thay đổi')),
     const SizedBox(height:24),
    ]),
   );
