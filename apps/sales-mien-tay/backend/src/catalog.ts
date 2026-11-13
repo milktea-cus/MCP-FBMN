@@ -43,6 +43,33 @@ export async function catalogRoutes(req:Request,env:{DATABASE_URL:string},actor:
  const path=url.pathname;
  if(!path.startsWith('/api/v1/catalog'))return null;
  const db=neon(env.DATABASE_URL);
+ // The product catalog defines canonical brand names. Real presence is derived
+ // only from independently verified customer assortment, not survey free-text.
+ if(path==='/api/v1/catalog/brands'&&req.method==='GET'){
+  const names=await db`SELECT DISTINCT btrim(brand) AS name
+    FROM public.catalog_products WHERE brand IS NOT NULL
+      AND btrim(brand)<>'' AND active
+    ORDER BY name LIMIT 500`;
+  return json({items:names});
+ }
+ if(path==='/api/v1/catalog/brand-coverage'&&req.method==='GET'){
+  const [byProvince,customers]=await Promise.all([
+   db`SELECT c.province,btrim(a.brand) AS brand,
+      count(DISTINCT c.id)::integer AS customers
+    FROM public.customer_product_assortment a
+    JOIN public.customers c ON c.id=a.customer_id
+    WHERE a.is_trading AND a.brand IS NOT NULL AND btrim(a.brand)<>''
+      AND public.sales_customer_allowed(${actor.sub},c.id,'view')
+    GROUP BY c.province,btrim(a.brand)
+    ORDER BY c.province,btrim(a.brand) LIMIT 4000`,
+   db`SELECT c.province,count(*)::integer AS customers
+    FROM public.customers c
+    WHERE public.sales_customer_allowed(${actor.sub},c.id,'view')
+    GROUP BY c.province ORDER BY c.province LIMIT 500`
+  ]);
+  return json({items:byProvince,customers,
+    semantics:'Khách có SKU được xác minh đang kinh doanh; không suy ra từ đơn hàng hoặc phiếu khảo sát.'});
+ }
  if(path==='/api/v1/catalog/products'&&req.method==='GET'){
   const q=(url.searchParams.get('q')??'').trim().slice(0,120),after=url.searchParams.get('after')??'';
   const limit=Number(url.searchParams.get('limit')??'50');
