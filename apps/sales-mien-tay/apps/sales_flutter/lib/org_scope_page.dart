@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'session.dart';
+import 'models.dart';
 
 // P0-K: administrator grants are explicit per action, never inferred from role or province.
 class OrgScopePage extends StatefulWidget {
@@ -86,7 +87,7 @@ class _OrgScopePageState extends State<OrgScopePage> {
       onChanged:busy?null:changed,
     );
   }
-  Widget personSelect() => dropdown('Cấp quyền cho',selectedStaff,{
+  Widget personSelect({String title='Nhân viên phụ trách'}) => dropdown(title,selectedStaff,{
     for(final s in recipients)s['user_sub'].toString():
         label(s)+' ('+s['employee_code'].toString()+')'
   },(v)=>setState(()=>selectedStaff=v));
@@ -224,6 +225,116 @@ class _OrgScopePageState extends State<OrgScopePage> {
     },(v)=>setState(()=>assignmentKey=v));
   }
 
+
+  Future<void> chooseTerritories() async {
+    final staffId=selectedStaff;
+    if(staffId==null||busy)return;
+    final person=staff.where((m)=>m['user_sub']==staffId).firstOrNull;
+    if(person==null)return;
+    setState(()=>error=null);
+    try{
+      final catalog=await RegionCatalog.load();
+      final territoryData=await widget.session.get('/api/v1/admin/org/territories');
+      final all=<String,List<String>>{
+        for(final entry in catalog.districts.entries)entry.key:[...entry.value]
+      };
+      for(final t in maps(territoryData['items'])){
+        if(t['level']=='province')all.putIfAbsent(t['name'].toString(),()=>[]);
+      }
+      for(final t in maps(territoryData['items'])){
+        if(t['level']=='district'){
+          final province=t['province']?.toString()??'';
+          final district=t['name']?.toString()??'';
+          if(all.containsKey(province)&&district.isNotEmpty&&!all[province]!.contains(district)){
+            all[province]!.add(district);
+          }
+        }
+      }
+      final draft=<String,Set<String>>{};
+      for(final row in (person['scopes'] as List? ?? [])){
+        if(row is Map&&row['province'] is String&&row['district'] is String){
+          draft.putIfAbsent(row['province'].toString(),()=>{}).add(row['district'].toString());
+        }
+      }
+      if(!mounted)return;
+      var filter='';
+      final applied=await showModalBottomSheet<bool>(
+        context:context,isScrollControlled:true,useSafeArea:true,
+        builder:(context)=>StatefulBuilder(builder:(context,change){
+          final provinces=all.keys.where((p)=>p.toLowerCase().contains(filter.toLowerCase())).toList()..sort();
+          final chosen=draft.values.where((v)=>v.isNotEmpty).length;
+          return SizedBox(height:MediaQuery.sizeOf(context).height*0.86,
+            child:Column(children:[
+              Padding(padding:const EdgeInsets.fromLTRB(16,16,16,10),
+                child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+                  Text('Giao địa bàn',style:Theme.of(context).textTheme.titleLarge),
+                  const SizedBox(height:4),
+                  Text(label(person)+' · Đã chọn '+chosen.toString()+' tỉnh/khu vực',
+                    style:Theme.of(context).textTheme.bodySmall),
+                  const SizedBox(height:12),
+                  TextField(decoration:const InputDecoration(
+                    prefixIcon:Icon(Icons.search),labelText:'Tìm tỉnh / thành phố'),
+                    onChanged:(v)=>change(()=>filter=v)),
+                ])),
+              Expanded(child:ListView(children:[
+                for(final province in provinces)
+                  ExpansionTile(key:PageStorageKey('territory:'+province),
+                    title:Text(province),
+                    subtitle:Text(draft[province]?.contains('')==true?'Toàn tỉnh':
+                      (draft[province]?.where((x)=>x.isNotEmpty).length??0).toString()+' huyện'),
+                    children:[
+                      CheckboxListTile(dense:true,title:const Text('Toàn tỉnh'),
+                        value:draft[province]?.contains('')==true,
+                        onChanged:(v)=>change((){
+                          if(v==true){draft[province]={''};}
+                          else{draft.remove(province);}
+                        })),
+                      for(final district in all[province]!)
+                        CheckboxListTile(dense:true,title:Text(district),
+                          value:draft[province]?.contains('')==true||
+                            draft[province]?.contains(district)==true,
+                          onChanged:draft[province]?.contains('')==true?null:(v)=>change((){
+                            final set=draft.putIfAbsent(province,()=>{});
+                            if(v==true){set.add(district);}
+                            else{set.remove(district);if(set.isEmpty)draft.remove(province);}
+                          })),
+                    ]),
+              ])),
+              Padding(padding:const EdgeInsets.fromLTRB(16,10,16,16),
+                child:Row(children:[
+                  Expanded(child:OutlinedButton(onPressed:()=>Navigator.pop(context,false),
+                    child:const Text('Hủy'))),
+                  const SizedBox(width:12),
+                  Expanded(child:FilledButton(
+                    onPressed:()=>Navigator.pop(context,true),
+                    child:Text('Lưu '+chosen.toString()+' tỉnh/khu vực'))),
+                ]))
+            ]));
+        }),
+      );
+      if(applied!=true||!mounted)return;
+      setState((){busy=true;error=null;});
+      final result=await widget.session.post('/api/v1/admin/org/territory-assignments',{
+        'user_sub':staffId,
+        'scope_revision':person['scope_revision'].toString(),
+        'scopes':[
+          for(final entry in draft.entries)
+            for(final district in entry.value)
+              {'province':entry.key,'district':district}
+        ],
+      });
+      if(!mounted)return;
+      await refresh();
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content:Text('Đã giao địa bàn. Nhân viên có thể lập lịch khách thuộc phạm vi trực tiếp.')));
+      if(result['item']==null&&mounted)setState(()=>error='Phản hồi lưu địa bàn không hợp lệ.');
+    }catch(e){
+      if(mounted)setState(()=>error=e.toString());
+    }finally{
+      if(mounted)setState(()=>busy=false);
+    }
+  }
+
   Widget section(String title, List<Widget> children)=>Padding(
     padding:const EdgeInsets.only(bottom:22),
     child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
@@ -272,13 +383,24 @@ class _OrgScopePageState extends State<OrgScopePage> {
           personSelect(),
           if(selectedStaff!=null)...[
             const SizedBox(height:12),
-            const Text('Địa bàn trực tiếp',style:TextStyle(fontWeight:FontWeight.w600)),
+            const Text('Địa bàn phụ trách trực tiếp',style:TextStyle(fontWeight:FontWeight.w600)),
             for(final p in staff.where((p)=>p['user_sub']==selectedStaff))
-              Text(((p['scopes'] as List?)??[]).isEmpty?'Chưa giao địa bàn':
-                ((p['scopes'] as List).map((x)=>x['province'].toString()+
-                  (x['district']==''?'':' / '+x['district'].toString())).join(' · '))),
-            TextButton(onPressed:()=>Navigator.pop(context),
-              child:const Text('Sửa địa bàn trong hồ sơ nhân viên')),
+              Padding(padding:const EdgeInsets.symmetric(vertical:8),
+                child:Text(
+                  (p['scopes'] as List? ?? []).isEmpty?'Chưa giao tỉnh/huyện':
+                  (p['scopes'] as List).map((x)=>x['province']).toSet().length.toString()+' tỉnh/khu vực · '+
+                   (p['scopes'] as List).take(3).map((x)=>x['province'].toString()+
+                     (x['district']==''?'':' / '+x['district'].toString())).join(' · ')+
+                   ((p['scopes'] as List).length>3?' · …':''),
+                  maxLines:3,overflow:TextOverflow.ellipsis)),
+            OutlinedButton.icon(
+              onPressed:busy?null:chooseTerritories,
+              icon:const Icon(Icons.edit_location_alt_outlined),
+              label:const Text('Giao / sửa tỉnh, huyện')),
+            const SizedBox(height:8),
+            Text('Địa bàn này được giao riêng cho nhân viên, không thay đổi cây cấp trên. '
+              'Lịch trình dùng khách trong địa bàn/chuỗi đã giao.',
+              style:Theme.of(context).textTheme.bodySmall),
             const SizedBox(height:12),
             const Text('Chuỗi / khách giao trực tiếp',style:TextStyle(fontWeight:FontWeight.w600)),
             for(final a in assignments.where((a)=>a['user_sub']==selectedStaff&&a['active']==true))
@@ -346,7 +468,7 @@ class _OrgScopePageState extends State<OrgScopePage> {
           issueNotice(),
           const Text('Quyền Xem tự tính từ cây cấp trên, phạm vi trực tiếp và vùng giao nhau của hai Manager cùng cấp. Chỉ cấu hình các thao tác được phép thêm.'),
           const SizedBox(height:16),
-          personSelect(),const SizedBox(height:12),
+          personSelect(title:'Cấp quyền cho'),const SizedBox(height:12),
           dropdown('Đối tượng áp dụng',kind,{
             'staff':'Nhân viên / cấp dưới','territory':'Địa bàn',
             'chain':'Chuỗi hệ thống','customer':'Khách hàng riêng'
