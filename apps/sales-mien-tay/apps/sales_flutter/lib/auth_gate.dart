@@ -17,6 +17,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
  bool busy=true,checking=false,obscure=true,otpMode=true,logoutPending=false;
  String? error,notice;
  bool recovering=false, connectionNotice=false;
+ bool _logoutStateChecked=false;
  DateTime? leaseExpires;
  Timer? timer;
  @override void initState(){
@@ -48,6 +49,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
      return;
     }
    }
+   _logoutStateChecked=true;
    if(pending){
     if(mounted)setState(()=>logoutPending=true);
     try{
@@ -69,6 +71,21 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
  Future<void> revalidate() async{
   if(checking||logoutPending)return;checking=true;
   try{
+   // A failed local SQLite read is not permission to bypass a pending logout.
+   if(!_logoutStateChecked){
+    bool pending;
+    try{pending=await OfflineLease.logoutPending();}
+    catch(_){
+     if(mounted)setState(()=>error='Không xác minh được trạng thái đăng xuất '
+       'trên máy. Thử Khôi phục phiên khi dữ liệu offline sẵn sàng.');
+     return;
+    }
+    if(pending){
+     if(mounted)setState(()=>logoutPending=true);
+     return;
+    }
+    _logoutStateChecked=true;
+   }
    final next=await session.get('/api/v1/me');
    if(!mounted||logoutPending)return;
    if(connectionNotice||recovering){if(mounted)setState((){connectionNotice=false;recovering=false;error=null;});}
