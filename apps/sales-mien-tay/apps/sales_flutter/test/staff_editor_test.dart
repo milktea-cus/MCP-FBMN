@@ -22,7 +22,7 @@ void main(){
   await tester.pumpWidget(MaterialApp(home:Scaffold(body:Builder(builder:(context)=>TextButton(onPressed:()=>showDialog<bool>(context:context,builder:(_)=>StaffEditor(session:session,catalog:const RegionCatalog({'Tiền Giang':['Cái Bè'],'Bến Tre':['Ba Tri']}),staff:null,allStaff:const [])),child:const Text('Mở'))))));
   await tester.tap(find.text('Mở'));await tester.pumpAndSettle();
   await tester.tap(find.text('Lưu nhân viên'));await tester.pumpAndSettle();
-  expect(find.text('Vui lòng nhập họ tên, email và mã nhân viên.'),findsOneWidget);
+  expect(find.text('Anh nhập họ tên, email và mã nhân viên trước khi lưu.'),findsOneWidget);
   final fields=find.byType(TextField);
   await tester.enterText(fields.at(0),'Sales Test');
   await tester.enterText(fields.at(1),'sales@example.invalid');
