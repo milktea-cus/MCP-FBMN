@@ -320,4 +320,34 @@ BEGIN
  RETURN after_rows;
 END $fn$;
 
+
+-- Expandable nationwide territory catalog, independent of legacy 13-province JSON.
+CREATE OR REPLACE FUNCTION public.sales_add_territory(p_actor text,p_level text,p_name text,p_parent text)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $acl$
+DECLARE code_value text;parent_value text;result_row public.territory_catalog%ROWTYPE;
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM public.staff_members WHERE user_sub=p_actor AND active AND role='admin' AND public.sales_identity_exists(user_sub))
+ THEN RAISE EXCEPTION 'admin required'; END IF;
+ IF p_name IS NULL OR length(btrim(p_name)) NOT BETWEEN 2 AND 100 OR position('|' in p_name)>0
+ OR p_level NOT IN ('province','district') THEN RAISE EXCEPTION 'invalid territory'; END IF;
+ IF p_level='province' THEN
+   IF p_parent IS NOT NULL THEN RAISE EXCEPTION 'invalid territory'; END IF;
+   code_value:='province:'||btrim(p_name);parent_value:=NULL;
+ ELSE
+   IF p_parent IS NULL THEN RAISE EXCEPTION 'invalid territory'; END IF;
+   SELECT t.code INTO parent_value FROM public.territory_catalog t
+   WHERE t.level='province' AND t.active AND t.name=btrim(p_parent);
+   IF parent_value IS NULL THEN RAISE EXCEPTION 'invalid territory parent'; END IF;
+   code_value:='district:'||btrim(p_parent)||'|'||btrim(p_name);
+ END IF;
+ INSERT INTO public.territory_catalog(code,name,level,parent_code) VALUES(code_value,btrim(p_name),p_level,parent_value)
+ ON CONFLICT(code) DO UPDATE SET active=true
+ RETURNING * INTO result_row;
+ INSERT INTO public.scope_change_audit(actor_sub,subject_kind,subject_key,action,after_state)
+ VALUES(p_actor,'territory',code_value,'upsert',to_jsonb(result_row));
+ RETURN to_jsonb(result_row);
+END;$acl$;
+REVOKE ALL ON FUNCTION public.sales_add_territory(text,text,text,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.sales_add_territory(text,text,text,text) TO sales_api;
+
 COMMIT;
