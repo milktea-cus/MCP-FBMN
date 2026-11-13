@@ -1,6 +1,7 @@
 import { neon } from '@neondatabase/serverless';
 import {AuthError, authRoutes, userFromRequest, provisionIdentity} from './auth';
 import {staffRoutes} from './staff';
+import {orgRoutes} from './org';
 import districts from './districts_old.json';
 import {customerRoutes} from './customers';
 import {assortmentRoutes} from './assortment';
@@ -116,6 +117,8 @@ export default {
       if(notifications)return notifications;
       const staffResponse = await staffRoutes(req, env, user, url);
       if (staffResponse) return staffResponse;
+       const orgResponse=await orgRoutes(req,env,user,url);
+       if(orgResponse)return orgResponse;
       if (url.pathname === '/api/v1/meta' && req.method === 'GET') {
         const allowed = user.admin ? locationMap : Object.fromEntries(Object.entries(locationMap).filter(([p])=>user.scopes.some(s=>s.province===p)).map(([p,ds])=>[p,ds.filter(d=>user.scopes.some(s=>s.province===p && (s.district==='' || s.district===d)))]));
         return json({districts: allowed, kinds});
