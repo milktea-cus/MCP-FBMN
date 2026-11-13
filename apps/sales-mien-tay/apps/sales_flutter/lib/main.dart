@@ -409,9 +409,11 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
         return const SizedBox.shrink();
       }
       final blocked=_queue.blockedCount;
-      final detail=_queue.syncing
-       ?'Đang gửi: ${_queue.activePath??'kiểm tra phiên đăng nhập'}'
-       :_queue.error??(blocked>0
+      final detail=_queue.isStalled
+       ?_queue.error??'Đồng bộ quá lâu không phản hồi; đóng và mở lại app.'
+       :_queue.syncing
+        ?'Đang gửi: ${_queue.activePath??'kiểm tra phiên đăng nhập'}'
+        :_queue.error??(blocked>0
          ?'$blocked thao tác bị từ chối · chạm để xem lỗi'
          :_queue.nextRetryAt!=null
           ?'Tạm nghỉ sau lỗi mạng · chạm để thử lại'
