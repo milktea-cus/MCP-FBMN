@@ -378,6 +378,9 @@ class _DayRoutePageState extends State<DayRoutePage>{
  /// For scheduled customer stops, open the existing survey linked by
  /// day_route_stop_id. SurveyPage handles its own GPS first verification.
  Future<void> openCustomerSurvey(Map<String,dynamic> stop)async{
+  if(stop['missed_code']!=null||missedPending(stop['id'].toString())){
+   notice('Điểm đã ghi nhận không ghé. Không thể bắt đầu khảo sát.');return;
+  }
   final customerId=stop['customer_id']?.toString();
   if(customerId==null||customerId.isEmpty)return;
   if(pendingStops.any((p)=>(p['payload'] as Map)['customer_id']?.toString()==customerId)){
