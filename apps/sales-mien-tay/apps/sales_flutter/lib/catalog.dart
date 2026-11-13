@@ -73,11 +73,21 @@ class ProductEditor extends StatefulWidget{
  @override State<ProductEditor> createState()=>_ProductEditorState();
 }
 class _ProductEditorState extends State<ProductEditor>{
- final fields=<String,TextEditingController>{};bool active=true,busy=false;String? error;String op=const Uuid().v4();
+ final fields=<String,TextEditingController>{};bool active=true,busy=false;String? error;String op=const Uuid().v4();List<String> brandNames=[];
  static const labels={'company_code':'Mã CTY','name':'Tên hàng','sku':'SKU','brand':'Nhãn hàng','category':'Nhóm hàng','unit':'Đơn vị tính','pieceUnit':'ĐVT lẻ','packUnit':'Tên gói/lốc/hộp','unitsPerCarton':'SP/thùng','unitsPerPack':'SP/gói','packsPerCarton':'Gói/thùng','paperSize':'Khổ giấy','pages':'Số trang','ruling':'Dòng kẻ','gsm':'Định lượng giấy','coverType':'Loại bìa','packagingNote':'Ghi chú quy cách'};
  static const numbers=['unitsPerCarton','unitsPerPack','packsPerCarton','pages','gsm'];
- @override void initState(){super.initState();final p=widget.product??{},spec=map(p['product_spec']??{});active=p['active']!=false;for(final k in labels.keys){fields[k]=TextEditingController(text:(p[k]??spec[k]??(k=='unit'&&widget.product==null?'Thùng':'')).toString());}}
+ @override void initState(){super.initState();final p=widget.product??{},spec=map(p['product_spec']??{});active=p['active']!=false;for(final k in labels.keys){fields[k]=TextEditingController(text:(p[k]??spec[k]??(k=='unit'&&widget.product==null?'Thùng':'')).toString());}unawaited(loadBrands());}
  @override void dispose(){for(final c in fields.values){c.dispose();}super.dispose();}
+ Future<void> loadBrands()async{
+  try{
+   final res=decodeApi(await http.get(widget.service.uri('/api/v1/catalog/brands'),
+     headers:widget.service.headers).timeout(const Duration(seconds:15)));
+   final names=(res['items'] as List).map(map)
+    .where((b)=>b['active']==true).map((b)=>b['name'].toString()).toSet().toList()..sort();
+   if(mounted)setState(()=>brandNames=names);
+  }catch(_){}
+ }
+
  Future<void> save()async{
   if(busy)return;
   final data=<String,dynamic>{'client_ref':op,'active':active,if(widget.product!=null)'version':widget.product!['version']},spec=<String,dynamic>{};
@@ -95,7 +105,18 @@ class _ProductEditorState extends State<ProductEditor>{
  }
  @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:Text(widget.product==null?'Tạo sản phẩm':'Sửa sản phẩm')),body:ListView(padding:const EdgeInsets.all(16),children:[
   const Text('Mã CTY giữ nguyên sau khi tạo. Chỉ nhập thông tin đã xác minh.'),
-  for(final k in labels.keys)...[const SizedBox(height:12),if(k=='pieceUnit')Text('Quy cách bán sỉ',style:Theme.of(context).textTheme.titleMedium),TextField(controller:fields[k],enabled:!busy&&(k!='company_code'||widget.product==null),keyboardType:numbers.contains(k)?TextInputType.number:TextInputType.text,decoration:InputDecoration(labelText:labels[k]))],
+  for(final k in labels.keys)...[const SizedBox(height:12),if(k=='pieceUnit')Text('Quy cách bán sỉ',style:Theme.of(context).textTheme.titleMedium),if(k=='brand'&&brandNames.isNotEmpty)
+    DropdownButtonFormField<String>(
+     initialValue:fields[k]!.text.isEmpty?null:fields[k]!.text,
+     isExpanded:true,decoration:InputDecoration(labelText:labels[k]),
+     items:[
+      const DropdownMenuItem<String>(value:'',child:Text('Chưa chọn nhãn hàng')),
+      for(final brand in { ...brandNames,if(fields[k]!.text.isNotEmpty)fields[k]!.text })
+       DropdownMenuItem(value:brand,child:Text(brand,overflow:TextOverflow.ellipsis)),
+     ],
+     onChanged:busy?null:(brand)=>setState(()=>fields[k]!.text=brand??''),
+    )
+   else TextField(controller:fields[k],enabled:!busy&&(k!='company_code'||widget.product==null),keyboardType:numbers.contains(k)?TextInputType.number:TextInputType.text,decoration:InputDecoration(labelText:labels[k]))],
   SwitchListTile(value:active,title:const Text('Đang sử dụng'),onChanged:busy?null:(v)=>setState(()=>active=v)),
   if(error!=null)Text(error!),FilledButton(onPressed:busy?null:save,child:Text(busy?'Đang lưu…':'Lưu sản phẩm')),
  ]));
