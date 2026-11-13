@@ -280,10 +280,10 @@ class MonthlyPlanEditor extends StatefulWidget {
  final DateTime month;
  final List<Map<String,dynamic>> scopes;
  final Map<String,dynamic>? original;
- final OfflineQueue queue;
- final CustomerService service;
+ final OfflineQueue? queue;
+ final CustomerService? service;
  const MonthlyPlanEditor({super.key,required this.month,required this.scopes,
-  required this.queue,required this.service,this.original});
+  this.queue,this.service,this.original});
  @override State<MonthlyPlanEditor> createState()=>_MonthlyPlanEditorState();
 }
 class _MonthlyPlanEditorState extends State<MonthlyPlanEditor>{
@@ -316,20 +316,21 @@ class _MonthlyPlanEditorState extends State<MonthlyPlanEditor>{
  @override void dispose(){purpose.dispose();note.dispose();target.dispose();search.dispose();customerSearch.dispose();super.dispose();}
  String scopeId(Map<String,dynamic> scope)=>"${scope['scope_kind']}:${scope['scope_key']}";
  Future<void> loadCustomers(Map<String,dynamic> scope)async{
+  if(widget.queue==null||widget.service==null)return;
   final id=scopeId(scope);
   if(loadingCandidates.contains(id))return;
   setState(()=>loadingCandidates.add(id));
   final cacheKey='monthly-plan-candidates:$id';
   try{
-   final cached=await widget.queue.cached(cacheKey);
+   final cached=await widget.queue!.cached(cacheKey);
    if(cached.isNotEmpty&&mounted)setState(()=>available[id]=cached);
-   final response=await http.get(widget.service.uri('/api/v1/monthly-plans/candidates',{
+   final response=await http.get(widget.service!.uri('/api/v1/monthly-plans/candidates',{
     'scope_kind':scope['scope_kind'].toString(),
     'scope_key':scope['scope_key'].toString(),
-   }),headers:widget.service.headers).timeout(const Duration(seconds:20));
+   }),headers:widget.service!.headers).timeout(const Duration(seconds:20));
    final data=decodeApi(response);
    final rows=(data['items'] as List).map((x)=>Map<String,dynamic>.from(x as Map)).toList();
-   await widget.queue.cache(cacheKey,rows);
+   await widget.queue!.cache(cacheKey,rows);
    if(mounted)setState((){
     available[id]=rows;candidateErrors.remove(id);
     final allowed=rows.map((r)=>r['id'].toString()).toSet();
@@ -456,7 +457,7 @@ class _MonthlyPlanEditorState extends State<MonthlyPlanEditor>{
           },
          )),
         ],
-       ]))));
+       ])));
      }),
     ],
     const SizedBox(height:16),
