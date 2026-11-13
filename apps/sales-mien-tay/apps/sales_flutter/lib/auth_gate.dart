@@ -29,6 +29,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
  /// A failed offline SQLite read must not be mistaken for an expired login.
  /// A valid server session remains usable even when the optional lease fails.
  Future<void> start() async{
+  if(mounted&&!busy)setState(()=>busy=true);
   try{
    try{
     await session.restore();
@@ -188,7 +189,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     const Text('Phiên đăng xuất cũ đang chờ xác nhận từ máy chủ. Chọn Hoàn tất đăng xuất để thử lại.')],
    if(error!=null)...[const SizedBox(height:12),Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error))],
    const SizedBox(height:20),FilledButton(onPressed:busy||logoutPending?null:login,child:busy?const SizedBox(width:20,height:20,child:CircularProgressIndicator(strokeWidth:2)):const Text('Đăng nhập')),
-   TextButton(onPressed:busy||logoutPending?null:()=>unawaited(revalidate()),child:const Text('Khôi phục phiên')),
+   TextButton(onPressed:busy||logoutPending?null:()=>unawaited(start()),child:const Text('Khôi phục phiên')),
    TextButton(onPressed:busy?null:logout,child:Text(logoutPending?'Hoàn tất đăng xuất':'Xóa phiên / Đăng xuất')),
   ]))))))));
  }
