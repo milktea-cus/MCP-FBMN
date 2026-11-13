@@ -82,14 +82,19 @@ void main(){
   expect(revoked.quarantined,1);
   seller.dispose();restarted.dispose();other.dispose();revoked.dispose();
  });
- testWidgets('P0-3 brand evidence is visible on mobile without treating orders as sales', (tester)async{
+ testWidgets('market survey sightings appear in customer profile at 360px',(tester)async{
   tester.view.devicePixelRatio=1;
   tester.view.physicalSize=const Size(360,844);
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
   final client=MockClient((req)async{
-   if(req.url.path.endsWith('/brands'))
-    return reply({'items':[brand('ordered'),{...brand('trading'),'brand_id':'44444444-4444-4444-8444-444444444444','name':'Nhà sách'}]});
+   if(req.url.path=='/api/v1/market/customers'){
+    expect(req.url.queryParameters['customer_id'],cid);
+    return reply({'items':[
+     {'customer_id':cid,'brand':'MGP','last_seen_at':'2026-11-11T10:00:00Z'},
+     {'customer_id':cid,'brand':'Thành Đạt','last_seen_at':'2026-11-12T10:00:00Z'},
+    ]});
+   }
    return reply({'items':[],'next_cursor':null});
   });
   final api=CustomerAssortmentApi('https://example.test','',client:client);
@@ -98,11 +103,11 @@ void main(){
     api:api,editable:true),
   ))));
   await tester.pump();
-  await tester.tap(find.text('Nhãn hàng tại điểm bán'));
+  await tester.tap(find.text('Nhãn hàng thị trường tại điểm bán'));
   await tester.pump();
   await tester.pump();
-  expect(find.textContaining('Đã đặt'),findsWidgets);
-  expect(find.textContaining('Đang bán'),findsWidgets);
+  expect(find.text('MGP'),findsOneWidget);
+  expect(find.text('Thành Đạt'),findsOneWidget);
   expect(find.text('Sản phẩm của điểm bán'),findsOneWidget);
   expect(tester.takeException(),isNull);
   await tester.pumpWidget(const SizedBox.shrink());
