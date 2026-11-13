@@ -92,7 +92,10 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
    'route_date':plan['work_date'].toString().substring(0,10),
    'purpose':plan['purpose'],'note':plan['note']??'','status':'ready'};
   try{
-   await widget.queue.enqueue('/api/v1/day-routes',payload);
+   await widget.queue.enqueue('/api/v1/day-routes',payload,dependsOn:[
+    for(final op in widget.queue.pending)if(op['path']=='/api/v1/monthly-plans'&&
+      (op['payload'] as Map)['client_ref']==plan['id'])plan['id'].toString(),
+   ]);
    _toast('Đã lưu tuyến trên máy · chờ đồng bộ');
    if(mounted)await openRoute({...payload,'id':id,'owner_sub':widget.queue.identity,
     'scope_kind':plan['scope_kind'],'scope_key':plan['scope_key'],
