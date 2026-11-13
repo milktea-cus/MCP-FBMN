@@ -29,28 +29,21 @@ void main() {
       expect(targetTaps,1);
     });
   }
-  testWidgets('brand coverage excludes every distributor column and retains brand counts',(tester)async{
-    final surveys=<SalesRecord>[
-      const SalesRecord(id:'1',kind:'survey',province:'Sóc Trăng',data:{
-        'brands':['MGP','Thành Đạt (đối thủ)'],
-        'distributors':['Thanh Đạt','Liên Hiệp'],
-      }),
-      const SalesRecord(id:'2',kind:'survey',province:'Sóc Trăng',data:{
-        'brands':['MGP'],'otherBrand':'Nhãn khác',
-        'distributors':['Hồng Ân'],'otherDistributor':'NPP X',
-      }),
-    ];
-    await tester.pumpWidget(MaterialApp(home:Scaffold(body:
-      SalesBrandCoverageTable(surveys:surveys,provinces:const ['Sóc Trăng']))));
+  testWidgets('brand coverage takes canonical verified SKU assortment, not survey brand names',(tester)async{
+    const legacy=<SalesRecord>[SalesRecord(id:'1',kind:'survey',province:'Sóc Trăng',
+      data:{'brands':['MGP'],'distributors':['NPP']})];
+    await tester.pumpWidget(const MaterialApp(home:Scaffold(body:
+      SalesBrandCoverageTable(surveys:legacy,provinces:['Sóc Trăng'],
+       verifiedData:true,brandNames:['Hoa Sen','MGP'],
+       customerCounts:[{'province':'Sóc Trăng','customers':5}],
+       verifiedRows:[{'province':'Sóc Trăng','brand':'Hoa Sen','customers':2}]))));
     expect(tester.takeException(),isNull);
     final table=tester.widget<DataTable>(find.byType(DataTable));
-    expect(table.columns.map((c)=>(c.label as Text).data).toList(),[
-      'Tỉnh/TP','KH','MGP','HH','Hoa Sen','Thành Đạt (đối thủ)',
-      'Bút Cầu','Bến Nghé','≥1 nhãn','Nhãn khác','% Thành Đạt',
-    ]);
-    expect(table.rows.single.cells.length,11);
+    expect(table.columns.map((c)=>(c.label as Text).data).toList(),
+      ['Tỉnh/TP','KH','Hoa Sen','MGP']);
+    expect((table.rows.single.cells[1].child as Text).data,'5');
     expect((table.rows.single.cells[2].child as Text).data,'2');
-    expect((table.rows.single.cells[9].child as Text).data,'1');
-    expect((table.rows.single.cells[10].child as Text).data,'50.0%');
+    expect((table.rows.single.cells[3].child as Text).data,'0');
+    expect(find.textContaining('distributor'),findsNothing);
   });
 }
