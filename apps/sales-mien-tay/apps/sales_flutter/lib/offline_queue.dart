@@ -40,8 +40,8 @@ class OfflineQueue extends ChangeNotifier {
  int get blockedCount=>pending.where((r)=>r['status']=='blocked').length;
  int get readyCount=>pending.length-blockedCount;
  Duration get retryDelay{
-  final power=transientFailures.clamp(1,5);
-  return Duration(seconds:(15*(1<<power)).clamp(30,300));
+  final power=transientFailures.clamp(1,5).toInt();
+  return Duration(seconds:(15*(1<<power)).clamp(30,300).toInt());
  }
  String describe(Map<String,dynamic> row){
   final path=row['path']?.toString()??'';
