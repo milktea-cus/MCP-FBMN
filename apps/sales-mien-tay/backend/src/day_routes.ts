@@ -79,7 +79,8 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
        AND (${route.district}='' OR c.district=${route.district}))
        OR (${route.scope_kind==='chain'} AND EXISTS(
          SELECT 1 FROM public.customer_scope_bindings b WHERE b.customer_id=c.id
-         AND b.active AND b.scope_kind='chain' AND b.scope_key=${route.scope_key})))
+         AND b.active AND b.scope_kind='chain' AND b.scope_key=${route.scope_key}))
+        OR (${route.scope_kind==='customer'} AND c.id::text=${route.scope_key}))
     ORDER BY c.name,c.id LIMIT 1000`;
    return reply({items:customers,truncated:customers.length===1000});
   }
