@@ -85,7 +85,8 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
   }
   const stops=await db`SELECT s.*,c.name AS customer_name,c.code AS customer_code,c.province AS customer_province,
     c.district AS customer_district, ch.name AS chain_name,
-    (SELECT count(*) FROM public.field_visits v WHERE v.day_route_stop_id=s.id)::integer AS visit_count,
+    ((SELECT count(*) FROM public.field_visits v WHERE v.day_route_stop_id=s.id)
+     +(SELECT count(*) FROM public.field_area_visits a WHERE a.day_route_stop_id=s.id))::integer AS visit_count,
     (SELECT count(*) FROM public.field_survey_sessions se WHERE se.day_route_stop_id=s.id)::integer AS session_count,
     (SELECT count(*) FROM public.field_survey_sessions se WHERE se.day_route_stop_id=s.id AND se.status='completed')::integer AS completed_sessions
     FROM public.field_route_stops s LEFT JOIN public.customers c ON c.id=s.customer_id
