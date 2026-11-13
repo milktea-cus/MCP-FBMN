@@ -161,12 +161,12 @@ export default {
         const province=url.searchParams.get('province')??'';
         const items=await sql`WITH eligible AS (
           SELECT c.*,s.full_name FROM customers c JOIN staff_members s ON s.user_sub=c.owner_sub
-          WHERE public.sales_can_access(${user.sub},c.owner_sub,c.province,c.district)
+          WHERE public.sales_customer_allowed(${user.sub},c.id,'view')
           AND (${!province} OR c.province=${province})
         ), planned AS (
           SELECT r.id,r.version,r.owner_sub,r.data,r.province,r.district
           FROM sales_records r WHERE r.kind='visit' AND r.data->>'plannedDate' BETWEEN ${start} AND ${end}
-          AND public.sales_can_access(${user.sub},r.owner_sub,r.province,r.district)
+          AND public.sales_record_allowed(${user.sub},r.id,'view')
         )
         SELECT r.id,r.version,c.owner_sub,c.full_name,c.province,c.district,
           coalesce(r.data,'{}'::jsonb) AS data,c.id AS customer_id,c.name,c.category,c.address_line,c.latitude,c.longitude,c.location_consent,
@@ -183,7 +183,7 @@ export default {
         LEFT JOIN LATERAL (
           SELECT count(*) AS completed_sessions FROM field_survey_sessions fs WHERE fs.customer_id=c.id AND fs.owner_sub=c.owner_sub AND fs.status='completed'
           AND (fs.started_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN ${start}::date AND ${end}::date
-          AND public.sales_can_access(${user.sub},fs.owner_sub,fs.province,fs.district)
+          AND public.sales_customer_allowed(${user.sub},c.id,'view')
         ) s ON true
         ORDER BY r.data->>'plannedDate' NULLS LAST,CASE WHEN r.data->>'sequence' ~ '^[0-9]{1,4}$' THEN (r.data->>'sequence')::int ELSE 9999 END,c.name,c.id`;
         return json({items,week_start:weekStart,week_end:weekEnd,period_start:start,period_end:end});
@@ -195,10 +195,10 @@ export default {
         const items=await sql`WITH r AS (
           SELECT owner_sub,province,kind,data FROM sales_records
           WHERE period_ym=${month} AND kind='forecast'
-            AND public.sales_can_access(${user.sub},owner_sub,province,district)
+            AND public.sales_record_allowed(${user.sub},id,'report')
             AND (${!province} OR province=${province})
           UNION ALL SELECT owner_sub,NULL::text,'target',jsonb_build_object('monthlyTarget',amount) FROM sales_targets
-          WHERE dimension='employee' AND month=to_date(${month}||'-01','YYYY-MM-DD') AND ${!province} AND public.sales_can_access(${user.sub},owner_sub,NULL,NULL)
+          WHERE dimension='employee' AND month=to_date(${month}||'-01','YYYY-MM-DD') AND ${!province} AND public.sales_staff_action_allowed(${user.sub},owner_sub,'report')
         ), totals AS (
           SELECT owner_sub,province,
             sum(CASE WHEN kind='target' AND jsonb_typeof(data->'monthlyTarget')='number' THEN (data->>'monthlyTarget')::numeric ELSE 0 END) AS target,
@@ -209,8 +209,8 @@ export default {
           SELECT v.owner_sub,c.province,count(*) AS checkins
           FROM field_visits v JOIN customers c ON c.id=v.customer_id
           WHERE to_char(v.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh','YYYY-MM')=${month}
-            AND public.sales_can_access(${user.sub},c.owner_sub,c.province,c.district)
-            AND public.sales_can_access(${user.sub},v.owner_sub,c.province,c.district)
+            AND public.sales_customer_allowed(${user.sub},c.id,'view')
+            AND public.sales_customer_allowed(${user.sub},c.id,'report')
             AND (${!province} OR c.province=${province})
           GROUP BY v.owner_sub,c.province
         )
@@ -231,7 +231,7 @@ export default {
           SELECT id, kind, owner_sub, province, district, customer_name, period_ym,
                  data, version, created_at, updated_at
           FROM sales_records
-          WHERE kind = ${kind} AND public.sales_can_access(${user.sub},owner_sub,province,district)
+          WHERE kind = ${kind} AND public.sales_record_allowed(${user.sub},id,'view')
             AND (${!province} OR province = ${province})
             AND (${!period} OR period_ym = ${period})
           ORDER BY updated_at DESC LIMIT 200`;
@@ -244,7 +244,7 @@ export default {
         if(body.kind&&['visit','forecast','survey'].includes(body.kind)&&body.data?.customerId!==undefined){
           const id=body.data.customerId,day=body.data.plannedDate,sequence=body.data.sequence;
           if(typeof id!=='string'||!/^[0-9a-f-]{36}$/i.test(id)||(body.kind==='visit'&&(typeof day!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day))||new Date(day).toISOString().slice(0,10)!==day||typeof sequence!=='number'||!Number.isInteger(sequence)||sequence<1||sequence>9999)))return bad('Điểm ghé, ngày hoặc thứ tự không hợp lệ');
-          const customer=await sql`SELECT name,province,district,owner_sub FROM customers WHERE id::text=${id} AND public.sales_can_access(${user.sub},owner_sub,province,district)`;
+          const customer=await sql`SELECT name,province,district,owner_sub FROM customers WHERE id::text=${id} AND public.sales_record_allowed(${user.sub},id,'view')`;
           if(!customer.length)return bad('Không có quyền điểm bán',403);
           if(customer[0].owner_sub!==user.sub)return bad('Chỉ lập tuyến/biểu mẫu cho khách hàng của mình',403);
           if(body.province!==customer[0].province||body.district!==customer[0].district)return bad('Địa bàn tuyến không khớp điểm bán');
@@ -262,9 +262,9 @@ export default {
           SELECT ${body.kind!}, ${user.sub}, ${body.province ?? null}, ${body.district ?? null},
                   ${body.customer_name ?? null}, ${body.period_ym ?? null}, ${JSON.stringify(body.data ?? {})}::jsonb, ${body.client_ref??null}::uuid
           WHERE public.sales_can_access(${user.sub},${user.sub},${body.province ?? null},${body.district ?? null})
-          AND (${body.data?.customerId==null} OR EXISTS(SELECT 1 FROM customers c WHERE c.id::text=${String(body.data?.customerId??'')} AND public.sales_can_access(${user.sub},c.owner_sub,c.province,c.district) AND c.province=${body.province??null} AND c.district=${body.district??null})) ON CONFLICT DO NOTHING RETURNING *`;
+          AND (${body.data?.customerId==null} OR EXISTS(SELECT 1 FROM customers c WHERE c.id::text=${String(body.data?.customerId??'')} AND public.sales_customer_allowed(${user.sub},c.id,'create') AND c.province=${body.province??null} AND c.district=${body.district??null})) ON CONFLICT DO NOTHING RETURNING *`;
         if(rows.length)return json({item:rows[0]},201);
-        if(body.client_ref){const existing=await sql`SELECT * FROM sales_records WHERE owner_sub=${user.sub} AND client_ref=${body.client_ref}::uuid AND public.sales_can_access(${user.sub},owner_sub,province,district)`;if(existing.length)return json({item:existing[0],idempotent:true});}
+        if(body.client_ref){const existing=await sql`SELECT * FROM sales_records WHERE owner_sub=${user.sub} AND client_ref=${body.client_ref}::uuid AND public.sales_record_allowed(${user.sub},id,'view')`;if(existing.length)return json({item:existing[0],idempotent:true});}
         return bad('Bản ghi đã tồn tại hoặc không có quyền địa bàn',409);
       }
       const match = /^\/api\/v1\/records\/([0-9a-f-]{36})$/i.exec(url.pathname);
@@ -273,10 +273,11 @@ export default {
         try { body = await readBody(req); } catch { return bad('JSON không hợp lệ'); }
         if (body.kind || !body.data) return bad('PATCH chỉ hỗ trợ data cùng trường địa bàn');
         const current = await sql`SELECT * FROM sales_records WHERE id=${match[1]}::uuid
-          AND public.sales_can_access(${user.sub},owner_sub,province,district) LIMIT 1`;
+          AND public.sales_record_allowed(${user.sub},id,'edit') LIMIT 1`;
         if (!current.length) return bad('Không tìm thấy hoặc không có quyền', 404);
         const old=current[0];
-        if(old.owner_sub!==user.sub&&!user.admin)return bad('Chỉ xem dữ liệu cấp dưới, không sửa thay',403);
+        const canEdit=await sql`SELECT public.sales_record_allowed(${user.sub},${match[1]}::uuid,'edit') AS allowed`;
+        if(canEdit[0]?.allowed!==true)return bad('Không có quyền sửa bản ghi',403);
         if(old.kind==='visit'&&old.data?.customerId){
           if(typeof body.client_ref!=='string'||!/^[0-9a-f-]{36}$/i.test(body.client_ref)||!Number.isInteger(body.version))return bad('Thiếu phiên bản hoặc mã thao tác');
           if(old.last_mutation_ref===body.client_ref)return json({item:old,idempotent:true});
@@ -284,7 +285,7 @@ export default {
           const day=body.data.plannedDate,sequence=body.data.sequence;
           if(typeof day!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day))||new Date(day).toISOString().slice(0,10)!==day||typeof sequence!=='number'||!Number.isInteger(sequence)||sequence<1||sequence>9999)return bad('Ngày hoặc thứ tự không hợp lệ');
           const data={...old.data,plannedDate:day,sequence,purpose:String(body.data.purpose??'').slice(0,1000)};
-          try{const rows=await sql`UPDATE sales_records SET data=${JSON.stringify(data)}::jsonb,version=version+1,last_mutation_ref=${body.client_ref}::uuid,updated_at=now() WHERE id=${match[1]}::uuid AND version=${body.version!} AND public.sales_can_access(${user.sub},owner_sub,province,district) AND EXISTS(SELECT 1 FROM customers c WHERE c.id::text=${String(old.data.customerId)} AND public.sales_can_access(${user.sub},c.owner_sub,c.province,c.district))
+          try{const rows=await sql`UPDATE sales_records SET data=${JSON.stringify(data)}::jsonb,version=version+1,last_mutation_ref=${body.client_ref}::uuid,updated_at=now() WHERE id=${match[1]}::uuid AND version=${body.version!} AND public.sales_record_allowed(${user.sub},id,'view') AND EXISTS(SELECT 1 FROM customers c WHERE c.id::text=${String(old.data.customerId)} AND public.sales_customer_allowed(${user.sub},c.id,'view'))
           AND NOT EXISTS(SELECT 1 FROM field_visits v WHERE v.customer_id::text=${String(old.data.customerId)} AND v.owner_sub=sales_records.owner_sub AND (v.checkin_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date=(sales_records.data->>'plannedDate')::date) RETURNING *`;return rows.length?json({item:rows[0]}):bad('Tuyến đã ghé, xung đột phiên bản hoặc quyền',409);}
           catch(e){if((e as {code?:string}).code==='23505')return bad('Khách đã có lịch ngày này',409);throw e;}
         }
@@ -296,7 +297,7 @@ export default {
           const error=validate({kind:old.kind,province:old.province,district:old.district,customer_name:old.customer_name,period_ym:old.period_ym,data},true);
           if(error)return bad(error);
           if(old.kind==='target'&&(typeof data.monthlyTarget!=='number'||!Number.isFinite(data.monthlyTarget)||data.monthlyTarget<0))return bad('Chỉ tiêu không hợp lệ');
-          const rows=await sql`UPDATE sales_records SET data=${JSON.stringify(data)}::jsonb,version=version+1,last_mutation_ref=${body.client_ref}::uuid,updated_at=now() WHERE id=${match[1]}::uuid AND version=${body.version!} AND public.sales_can_access(${user.sub},owner_sub,province,district) RETURNING *`;
+          const rows=await sql`UPDATE sales_records SET data=${JSON.stringify(data)}::jsonb,version=version+1,last_mutation_ref=${body.client_ref}::uuid,updated_at=now() WHERE id=${match[1]}::uuid AND version=${body.version!} AND public.sales_record_allowed(${user.sub},id,'view') RETURNING *`;
           return rows.length?json({item:rows[0]}):bad('Xung đột phiên bản hoặc quyền',409);
         }
         const province = body.province ?? current[0].province;
@@ -312,7 +313,7 @@ export default {
         const rows = await sql`
           UPDATE sales_records SET province=${province}, district=${district},
             data=${JSON.stringify(body.data)}::jsonb, updated_at=now()
-          WHERE id=${match[1]}::uuid AND public.sales_can_access(${user.sub},owner_sub,province,district) AND public.sales_can_access(${user.sub},owner_sub,${province},${district}) RETURNING *`;
+          WHERE id=${match[1]}::uuid AND public.sales_record_allowed(${user.sub},id,'view') AND public.sales_can_access(${user.sub},owner_sub,${province},${district}) RETURNING *`;
         return rows.length ? json({item: rows[0]}) : bad('Không tìm thấy hoặc không có quyền', 404);
       }
       if (match && req.method === 'DELETE') {
