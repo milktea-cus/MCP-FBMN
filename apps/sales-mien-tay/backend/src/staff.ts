@@ -13,6 +13,7 @@ export async function staffRoutes(req:Request,env:AuthEnv,actor:{sub:string;admi
  }
  if(req.method!=='POST')return json({error:'Method not allowed'},405);
  let data:Record<string,unknown>;try{const raw=await req.text();if(raw.length>64000)throw Error();data=JSON.parse(raw);}catch{return json({error:'JSON không hợp lệ'},400);}
+ if(typeof data?.job_title!=='string'||data.job_title.trim().length>120)return json({error:'Chức danh không hợp lệ (tối đa 120 ký tự).'},400);
  if(!data || typeof data.user_sub!=='string'|| !/^[0-9a-f-]{36}$/i.test(data.user_sub)||typeof data.employee_code!=='string'||!data.employee_code.trim()||data.employee_code.length>80||typeof data.full_name!=='string'||!data.full_name.trim()||data.full_name.length>240||!['admin','manager','sales'].includes(String(data.role))||typeof data.active!=='boolean'||!Array.isArray(data.scopes)||data.scopes.length>1000)return json({error:'Thông tin nhân viên không hợp lệ'},400);
  const configured=await db`SELECT t.name,t.level,p.name AS province FROM public.territory_catalog t
    LEFT JOIN public.territory_catalog p ON p.code=t.parent_code WHERE t.active`;
@@ -41,7 +42,7 @@ export async function staffRoutes(req:Request,env:AuthEnv,actor:{sub:string;admi
    if(old.role==='admin'&&old.active&&(!data.active||data.role!=='admin')&&!(await db`SELECT 1 FROM staff_members WHERE role='admin' AND active AND user_sub<>${data.user_sub}`).length)return json({error:'Không được khóa hoặc hạ quyền Admin cuối cùng.'},409);
    await changeStaffEmail(req,data.user_sub,email);
   }
-  const result=await db`SELECT public.sales_save_staff(${actor.sub},${data.user_sub},${data.employee_code.trim()},${data.full_name.trim()},${String(data.phone??'')},${String(data.role)},${data.active},${manager as string|null},${JSON.stringify(canonical)}::jsonb,${String(data.scope_revision??'0')}::bigint) AS item`;
+  const result=await db`SELECT public.sales_save_staff(${actor.sub},${data.user_sub},${data.employee_code.trim()},${data.full_name.trim()},${String(data.phone??'')},${String(data.role)},${data.active},${manager as string|null},${JSON.stringify(canonical)}::jsonb,${String(data.scope_revision??'0')}::bigint,${(data.job_title as string).trim()}) AS item`;
   if(email&&String(result[0].item?.staff?.email??'').toLowerCase()!==email)return json({error:'Email xác thực chưa đồng bộ. Mở lại hồ sơ và thử lại.'},409);
   return json({item:result[0].item});
  }catch(e){
