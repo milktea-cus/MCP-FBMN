@@ -78,8 +78,17 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     // sent to the login page solely because an offline database is unavailable.
     try{await OfflineLease.clear();}catch(_){}
     if(me!=null){if(!mounted)return;Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;});}
-    final meta=await session.get('/api/v1/meta');
-    final regions=RegionCatalog((meta['districts'] as Map<String,dynamic>).map((k,v)=>MapEntry(k,(v as List).cast<String>())));
+    // /me already authenticated the actor. A temporary metadata outage must
+    // not force logout; public province labels are bundled with the app.
+    RegionCatalog regions;
+    try{
+     final meta=await session.get('/api/v1/meta');
+     regions=RegionCatalog((meta['districts'] as Map<String,dynamic>)
+       .map((k,v)=>MapEntry(k,(v as List).cast<String>())));
+    }catch(e){
+     if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;
+     regions=await RegionCatalog.load();
+    }
     if(!mounted||logoutPending)return;
     Navigator.of(context).popUntil((r)=>r.isFirst);
     setState((){me=next;catalog=regions;error=null;});
