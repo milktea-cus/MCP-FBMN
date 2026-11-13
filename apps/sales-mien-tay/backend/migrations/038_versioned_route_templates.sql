@@ -73,7 +73,7 @@ BEGIN
   END IF;
   identifier:=CASE kind WHEN 'customer' THEN stop->>'customer_id'
    WHEN 'chain' THEN stop->>'chain_id'
-   ELSE stop->>'province'||'/'||stop->>'district' END;
+   ELSE (stop->>'province')||'/'||(stop->>'district') END;
   IF (kind||':'||identifier)=ANY(identities) THEN RAISE EXCEPTION 'route template duplicate stop'; END IF;
   identities:=array_append(identities,kind||':'||identifier);
  END LOOP;
