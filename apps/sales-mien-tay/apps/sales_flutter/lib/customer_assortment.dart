@@ -83,6 +83,10 @@ class CustomerAssortmentApi{
   return (data['items'] as List)
     .map((v)=>Map<String,dynamic>.from(v as Map)).toList();
  }
+ Future<List<Map<String,dynamic>>> marketBrands(String customerId)async{
+  final data=await get('/api/v1/market/customers',{'customer_id':customerId,'limit':'200'});
+  return (data['items'] as List).map((v)=>Map<String,dynamic>.from(v as Map)).toList();
+ }
  Future<List<Map<String,dynamic>>> brands(String customerId)async{
   final data=await get('/api/v1/customers/$customerId/brands');
   return (data['items'] as List).map((v)=>Map<String,dynamic>.from(v as Map)).toList();
@@ -340,6 +344,7 @@ class _CustomerAssortmentSectionState extends State<CustomerAssortmentSection>{
 }
 
 
+/// Competitor/market sightings are written by verified survey completion.
 class _CustomerBrandsPanel extends StatefulWidget{
  final String customerId;
  final CustomerAssortmentApi api;
@@ -350,122 +355,61 @@ class _CustomerBrandsPanel extends StatefulWidget{
  @override State<_CustomerBrandsPanel> createState()=>_CustomerBrandsPanelState();
 }
 class _CustomerBrandsPanelState extends State<_CustomerBrandsPanel>{
- List<Map<String,dynamic>> rows=[];
- bool expanded=false,loading=false,busy=false,offline=false;
+ List<Map<String,dynamic>> sightings=[];
+ bool opened=false,loading=false,offline=false;
  String? error;
- int pendingBefore=0;
- String get cacheKey=>'customer-brands:${widget.customerId}';
- @override void initState(){
-  super.initState();
-  pendingBefore=widget.queue?.pending.length??0;
-  widget.queue?.addListener(_queueChanged);
- }
- @override void dispose(){
-  widget.queue?.removeListener(_queueChanged);
-  super.dispose();
- }
- void _queueChanged(){
-  if(!mounted||!expanded||widget.queue==null)return;
-  final count=widget.queue!.pending.length;
-  if(count<pendingBefore)unawaited(refresh());
-  pendingBefore=count;
- }
- Future<void> open()async{
-  if(widget.queue!=null){
-   try{final cached=await widget.queue!.cached(cacheKey);
-    if(mounted)setState(()=>rows=cached);}catch(_){}
-  }
-  if(mounted)await refresh();
- }
+ String get cacheKey=>'market-customer-brands:${widget.customerId}';
+ @override void initState(){super.initState();}
  Future<void> refresh()async{
   if(loading)return;
   setState((){loading=true;error=null;});
   try{
-   final data=await widget.api.brands(widget.customerId);
-   if(widget.queue!=null)await widget.queue!.cache(cacheKey,data);
-   if(mounted)setState((){rows=data;offline=false;});
+   final items=await widget.api.marketBrands(widget.customerId);
+   if(widget.queue!=null)await widget.queue!.cache(cacheKey,items);
+   if(mounted)setState((){sightings=items;offline=false;});
   }catch(e){
    if(!mounted)return;
    final denied=e is ApiFailure&&(e.status==401||e.status==403||e.status==404);
    setState((){
     offline=true;
-    if(denied){rows=[];error='Quyền xem nhãn hàng đã thay đổi.';}
-    else error='Đang xem dữ liệu đã lưu trên máy; chưa cập nhật.';
+    if(denied){sightings=[];error='Không còn quyền xem nhãn hàng thị trường.';}
+    else error='Chưa cập nhật, đang hiển thị ghi nhận đã lưu trên máy.';
    });
   }finally{if(mounted)setState(()=>loading=false);}
  }
- Future<void> change(Map<String,dynamic> row,String action)async{
-  if(busy||!widget.editable||offline)return;
-  final reason=await showDialog<String>(
-   context:context,builder:(_)=>_AssortmentReasonDialog(
-    action:action,label:'nhãn hàng'));
-  if(reason==null||!mounted)return;
-  final brandId=row['brand_id']?.toString()??'';
-  final path='/api/v1/customers/${widget.customerId}/brands';
-  if(widget.queue?.pending.any((job)=>
-     job['path']==path&&(job['payload'] as Map?)?['brand_id']==brandId)==true){
-   ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(content:Text('Nhãn này đang chờ đồng bộ.')));
-   return;
+ Future<void> open()async{
+  if(widget.queue!=null){
+   try{
+    final items=await widget.queue!.cached(cacheKey);
+    if(mounted)setState(()=>sightings=items);
+   }catch(_){}
   }
-  final payload=<String,dynamic>{
-    'client_ref':const Uuid().v4(),
-    'brand_id':brandId,
-    'expected_version':(row['manual_version'] as num?)?.toInt()??0,
-    'action':action,'reason':reason,
-  };
-  setState(()=>busy=true);
-  try{
-   if(widget.queue!=null){
-    await widget.queue!.enqueue(path,payload);
-    if(mounted)ScaffoldMessenger.of(context).showSnackBar(
-     const SnackBar(content:Text('Đã lưu xác minh nhãn trên máy · chờ đồng bộ.')));
-   }else{
-    await widget.api.updateBrand(widget.customerId,payload);
-    if(mounted)await refresh();
-   }
-  }catch(e){
-   if(mounted)ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content:Text('Chưa lưu xác minh nhãn: $e')));
-  }finally{if(mounted)setState(()=>busy=false);}
+  if(mounted)unawaited(refresh());
  }
  @override Widget build(BuildContext context){
-  final selling=rows.where((r)=>r['is_trading']==true).length;
-  final pending=widget.queue?.pending.where((x)=>
-    x['path']=='/api/v1/customers/${widget.customerId}/brands').length??0;
   return Card(child:ExpansionTile(
+   title:const Text('Nhãn hàng thị trường tại điểm bán'),
+   subtitle:Text('${sightings.length} nhãn đang ghi nhận'),
    initiallyExpanded:false,
    onExpansionChanged:(value){
-    setState(()=>expanded=value);
-    if(value&&rows.isEmpty)unawaited(open());
+    setState(()=>opened=value);
+    if(value)unawaited(open());
    },
-   title:const Text('Nhãn hàng tại điểm bán'),
-   subtitle:Text('$selling đang bán · $pending thay đổi chờ đồng bộ'),
-   childrenPadding:const EdgeInsets.symmetric(horizontal:10,vertical:6),
+   childrenPadding:const EdgeInsets.symmetric(horizontal:12,vertical:6),
    children:[
-    const Text('Đã đặt, đã nhập và đang bán là ba bằng chứng riêng. '
-     'Khảo sát không tự biến thành xác minh bán hàng.'),
+    const Text('Dữ liệu lấy từ các phiên khảo sát công tác đã hoàn thành. '
+     'Mỗi nhãn chỉ tính một lần tại khách; không lấy theo SKU Futurebook.'),
     if(loading)const LinearProgressIndicator(minHeight:2),
     if(error!=null)Text(error!,style:Theme.of(context).textTheme.bodySmall),
-    if(rows.isEmpty&&!loading)const Padding(padding:EdgeInsets.all(8),
-     child:Text('Chưa có nhãn hàng chuẩn. Admin tạo nhãn trong Danh mục SKU.')),
-    for(final brand in rows)ListTile(
-     dense:true,
-     leading:Icon(assortmentIcon(brand['status']?.toString())),
-     title:Text(brand['name']?.toString()??''),
-     subtitle:Text('${brandStatusLabel(brand['status']?.toString())}'
-      '${brand['manual_trading']==true?' · Xác minh nhãn':''}'
-      '${brand['sku_trading']==true?' · Xác minh SKU':''}',
-      maxLines:2,overflow:TextOverflow.ellipsis),
-     trailing:widget.editable&&!offline?IconButton(
-      tooltip:brand['manual_trading']==true?'Bỏ xác minh nhãn':'Xác minh nhãn đang bán',
-      onPressed:busy?null:()=>change(brand,
-       brand['manual_trading']==true?'unverify':'verify'),
-      icon:Icon(brand['manual_trading']==true?
-       Icons.remove_circle_outline:Icons.verified_outlined)):null),
-    if(rows.isNotEmpty)Align(alignment:Alignment.centerRight,child:TextButton.icon(
-      onPressed:loading?null:refresh,icon:const Icon(Icons.refresh),
-      label:const Text('Cập nhật nhãn hàng'))),
+    if(sightings.isEmpty&&!loading)const Padding(
+     padding:EdgeInsets.all(8),child:Text('Chưa ghi nhận nhãn tại điểm bán.')),
+    for(final item in sightings)ListTile(
+     dense:true,leading:const Icon(Icons.label_outline),
+     title:Text(item['brand']?.toString()??''),
+     subtitle:Text('Lần gần nhất: ${assortmentDate(item['last_seen_at'])}')),
+    if(opened)Align(alignment:Alignment.centerRight,child:TextButton.icon(
+     onPressed:loading?null:refresh,
+     icon:const Icon(Icons.refresh),label:const Text('Cập nhật'))),
    ],
   ));
  }
