@@ -48,7 +48,7 @@ void main() {
   expect(find.text('Đã chọn 2 · 2 phạm vi'),findsOneWidget);
   await tester.enterText(find.byType(TextField).first,'Đi tìm điểm bán mới');
   await tester.ensureVisible(find.text('Lưu lịch + tuyến (2)'));
-  await tester.tap(find.text('Lưu 2 công việc'));
+  await tester.tap(find.text('Lưu lịch + tuyến (2)'));
   await tester.pumpAndSettle();
   expect(selection,isNotNull);
   expect(selection!.scopes.length,2);
