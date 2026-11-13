@@ -420,7 +420,11 @@ class CustomerEditor extends StatefulWidget {
   final RegionCatalog regions;
   final FieldCustomer? customer;
   final OfflineQueue? queue;
-  const CustomerEditor({super.key, required this.service, required this.regions,this.customer,this.queue});
+  /// Optional fieldwork lead draft. Only a confirmed customer is linked afterwards.
+  final Map<String,dynamic>? prospect;
+  final Future<void> Function(String customerId)? onCreated;
+  const CustomerEditor({super.key, required this.service, required this.regions,
+    this.customer,this.queue,this.prospect,this.onCreated});
   @override State<CustomerEditor> createState() => _CustomerEditorState();
 }
 class _CustomerEditorState extends State<CustomerEditor> {
@@ -450,6 +454,20 @@ class _CustomerEditorState extends State<CustomerEditor> {
   @override void initState(){
     super.initState();
     final c=widget.customer;
+    final lead=widget.prospect;
+    if(c==null&&lead!=null){
+      name.text=lead['name']?.toString()??'';
+      address.text=lead['address_line']?.toString()??'';
+      final givenProvince=lead['province']?.toString()??'';
+      final givenDistrict=lead['district']?.toString()??'';
+      if(widget.regions.provinces.contains(givenProvince)){
+       province=givenProvince;
+       if(widget.regions.districts[givenProvince]?.contains(givenDistrict)==true){
+        district=givenDistrict;
+       }
+      }
+      note.text='Lead: ${lead['id']} · khảo sát địa bàn';
+    }
     if(c!=null){
       name.text=c.name;companyCode.text=c.code??'';address.text=c.address;
       contact.text=c.contact??'';phone.text=c.phone??'';note.text=c.note??'';
@@ -641,6 +659,7 @@ class _CustomerEditorState extends State<CustomerEditor> {
       }
       final created=widget.customer==null?await widget.service.add(data):await widget.service.update(widget.customer!,data);
       if (photo != null) {try{await widget.service.uploadPhoto(created.id, photo!);}catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Đã lưu điểm bán, nhưng chưa tải được ảnh: $e')));}}
+      if(widget.customer==null&&widget.onCreated!=null)await widget.onCreated!(created.id);
       if (mounted) Navigator.pop(context, true);
     } catch(e){if(mounted)setState(()=>error='$e');}
     finally {if(mounted)setState(()=>saving=false);}
