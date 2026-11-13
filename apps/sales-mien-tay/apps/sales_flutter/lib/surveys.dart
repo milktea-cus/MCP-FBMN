@@ -51,6 +51,47 @@ class _SurveyPageState extends State<SurveyPage>{
   try{final data=await surveyGet(widget.service,path,params);final rows=asRows(data['items']);await widget.queue.cache(key,rows);if(data['truncated']==true)error='Có hơn 500 phiên; hãy chọn ngày hoặc địa bàn hẹp hơn.';return rows;}
   catch(e){if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;error='Dữ liệu lưu máy · chưa cập nhật';return widget.queue.cached(key);}
  }
+
+ /// Load real dated route stops in addition to the legacy visit schedule.
+ /// Cached route data remains account/scope-revision isolated by OfflineQueue.
+ Future<List<Map<String,dynamic>>> scheduledDayRouteStops()async{
+  final start=dayKey(weekly?weekMonday(day):day);
+  final end=dayKey(weekly?weekMonday(day).add(const Duration(days:6)):day);
+  final ym=start.substring(0,7);
+  final monthKeys={ym,end.substring(0,7)};
+  final result=<Map<String,dynamic>>[];
+  for(final month in monthKeys){
+   final dated=await list('/api/v1/day-routes',{'month':month},'day-routes:$month');
+   for(final r in dated){
+    final work=r['route_date']?.toString().substring(0,10)??'';
+    if(work.compareTo(start)<0||work.compareTo(end)>0||r['status']!='ready')continue;
+    final id=r['id'].toString();
+    List<Map<String,dynamic>> rows=[];
+    try{
+     final data=await surveyGet(widget.service,'/api/v1/day-routes/$id');
+     rows=asRows(data['stops']);
+     await widget.queue.cache('day-route:$id',[{
+      'route':Map<String,dynamic>.from(data['item'] as Map),'stops':rows}]);
+    }catch(e){
+     if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;
+     final cached=await widget.queue.cached('day-route:$id');
+     if(cached.isNotEmpty)rows=asRows(cached.first['stops']);
+    }
+    for(final stop in rows){
+     if(stop['stop_kind']!='customer')continue;
+     if(widget.service.province.isNotEmpty&&stop['customer_province']!=widget.service.province)continue;
+     result.add({
+      ...stop,'planned':true,'day_route_stop_id':stop['id'],
+      'customer_id':stop['customer_id'],'owner_sub':r['owner_sub'],
+      'name':stop['customer_name'],'province':stop['customer_province'],
+      'district':stop['customer_district'],
+      'data':{'plannedDate':work,'sequence':stop['sequence'],'purpose':stop['purpose']},
+     });
+    }
+   }
+  }
+  return result;
+ }
  Future<void> load()async{
   if(busy)return;setState((){busy=true;error=null;});
   final period=weekly?'week':'day',key='${widget.service.province}:$period:${dayKey(day)}';
@@ -58,7 +99,8 @@ class _SurveyPageState extends State<SurveyPage>{
    final params={'day':dayKey(day),'period':period,'province':widget.service.province};
    final values=await Future.wait([list('/api/v1/routes',params,'routes-v2:$period:${dayKey(day)}:${widget.service.province}'),list('/api/v1/sessions',params,'surveys:$key'),widget.queue.cached('survey-drafts')]);
    try{final t=asRows((await surveyGet(widget.service,'/api/v1/survey-templates'))['items']);for(final item in t){await widget.queue.cache('survey-template:${item['province']}',[item]);}}catch(e){if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;}
-   if(mounted)setState((){routes=values[0];sessions=values[1];drafts=values[2];if(!routes.any((r)=>r['district']==district))district='';if(!routes.any((r)=>r['owner_sub']==employee))employee='';});
+   final newStops=await scheduledDayRouteStops();
+    if(mounted)setState((){routes=[...values[0],...newStops];sessions=values[1];drafts=values[2];if(!routes.any((r)=>r['district']==district))district='';if(!routes.any((r)=>r['owner_sub']==employee))employee='';});
   }catch(e){if(mounted)setState((){error=e.toString();if(e is ApiFailure&&(e.status==401||e.status==403)){routes=[];sessions=[];drafts=[];}});}
   finally{if(mounted)setState(()=>busy=false);}
  }
@@ -74,7 +116,7 @@ class _SurveyPageState extends State<SurveyPage>{
   return mergeSessions(sessions,drafts).where((s){
    final started=DateTime.tryParse(s['started_at'].toString());if(started==null)return false;
    final d=dayKey(started.toUtc().add(const Duration(hours:7)));
-   return s['customer_id']==row['customer_id']&&s['owner_sub']==row['owner_sub']&&d.compareTo(start)>=0&&d.compareTo(end)<=0&&(row['planned']!=true?s['route_stop_id']==null:s['route_stop_id']==row['id']);
+   return s['customer_id']==row['customer_id']&&s['owner_sub']==row['owner_sub']&&d.compareTo(start)>=0&&d.compareTo(end)<=0&&(row['planned']!=true?(s['route_stop_id']==null&&s['day_route_stop_id']==null):row['day_route_stop_id']!=null?s['day_route_stop_id']==row['id']:s['route_stop_id']==row['id']);
   }).toList();
  }
  Future<void> pickDay()async{
@@ -105,7 +147,7 @@ class _SurveyPageState extends State<SurveyPage>{
     if(consent!=true||!mounted)return;
    }else if(row['location_consent']==false){notify('Điểm bán chưa được phép sử dụng tọa độ. Kiểm tra hồ sơ khách hàng.');return;}
    final id=const Uuid().v4(),started=pos.timestamp.toUtc().toIso8601String();
-   final payload=<String,dynamic>{'client_ref':id,'customer_id':row['customer_id'],'route_stop_id':row['planned']==true?row['id']:null,'template_id':t['id'],'started_at':started,'latitude':pos.latitude,'longitude':pos.longitude,'accuracy_m':pos.accuracy,if(first)'initialize_location':true};
+   final payload=<String,dynamic>{'client_ref':id,'customer_id':row['customer_id'],'route_stop_id':row['planned']==true&&row['day_route_stop_id']==null?row['id']:null,'day_route_stop_id':row['day_route_stop_id'],'template_id':t['id'],'started_at':started,'latitude':pos.latitude,'longitude':pos.longitude,'accuracy_m':pos.accuracy,if(first)'initialize_location':true};
    final draft=<String,dynamic>{...payload,'id':id,'owner_sub':widget.queue.identity,'province':row['province'],'district':row['district'],'customer_name':row['name'],'template_version':t['version'],'questions':t['questions'],'status':'in_progress','location_initialized':first,'start_op':id,'version':1,'answers':<String,dynamic>{},'note':'','photos':<Map<String,dynamic>>[]};
    await widget.queue.saveSurveyDraft(draft,path:'/api/v1/sessions',payload:payload);
    if(mounted)await open(draft);
