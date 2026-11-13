@@ -45,7 +45,9 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
    final plans=decodeApi(results[0]),options=decodeApi(results[1]),routesData=decodeApi(results[2]);
    final fresh=(plans['items'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
    final allowed=(options['scopes'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
+   final freshRoutes=(routesData['items'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
    await widget.queue.cache(monthCache,fresh);
+   await widget.queue.cache(routeCache,freshRoutes);
    await widget.queue.cache(optionsCache,allowed);
    if(mounted)setState((){items=fresh;scopes=allowed;dayRoutes=freshRoutes;cached=false;});
   }catch(e){
