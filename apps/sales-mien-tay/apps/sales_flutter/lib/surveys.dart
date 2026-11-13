@@ -24,6 +24,24 @@ String surveyStatus(Map<String,dynamic> s){
  if(s['server_status']=='in_progress'||s['status']=='in_progress'&&s['start_op']==null)return s['location_initialized']==true?'Đang khảo sát · tọa độ lần đầu đã ghi nhận':'Đang khảo sát · GPS đã xác minh';
  return 'Đang khảo sát · GPS chờ đồng bộ';
 }
+/// Reads the legacy "Nhãn hàng / đối thủ" answer without deriving anything
+/// from SKU. Both chips and comma-separated observations share one snapshot.
+List<String> marketBrandNamesFromAnswer(Object? input){
+ final values=input is List
+   ?input.map((v)=>v.toString()).toList()
+   :input is String?input.split(RegExp(r'[,;\\n/]|\\s+hoặc\\s+',caseSensitive:false))
+   :<String>[];
+ final result=<String>[],seen=<String>{};
+ for(final raw in values){
+  final name=raw.trim().replaceAll(RegExp(r'\\s+'),' ');
+  if(name.isEmpty||name.length>100||
+    ['khác','không có','không','chưa có','không rõ','chưa xác định','none']
+     .contains(name.toLowerCase()))continue;
+  if(seen.add(name.toLowerCase()))result.add(name);
+  if(result.length>=50)break;
+ }
+ return result;
+}
 String? checklistError(List<Map<String,dynamic>> qs,Map<String,dynamic> answers){
  for(final q in qs){
   final v=answers[q['id']];
@@ -284,6 +302,7 @@ class _SurveyDetailState extends State<SurveyDetail>{
  void marketCheckedChanged(bool checked){
   if(locked||busy)return;
   setState((){
+   draft['market_brand_source']='manual';
    draft['market_brand_checked']=checked;
    if(!checked)draft['market_brands']=null;
    else draft['market_brands']=marketSelection;
@@ -300,7 +319,8 @@ class _SurveyDetailState extends State<SurveyDetail>{
   }else{
    all.removeWhere((s)=>s.toLowerCase()==value.toLowerCase());
   }
-  setState((){draft['market_brands']=all;draft['market_brand_checked']=true;});
+  setState((){draft['market_brands']=all;draft['market_brand_checked']=true;
+   draft['market_brand_source']='manual';});
   unawaited(persist());
  }
  void addMarketBrand(){
@@ -341,7 +361,22 @@ class _SurveyDetailState extends State<SurveyDetail>{
  }
  Map<String,dynamic> snapshot()=>{...draft,'answers':answers,'photos':photos};
  Future<bool> persist()async{try{await widget.queue.saveSurveyDraft(snapshot());return true;}catch(e){if(mounted)setState(()=>message='Không lưu được nháp: $e');return false;}}
- void answer(String key,dynamic value){if(locked||busy)return;setState(()=>draft['answers']={...answers,key:value});unawaited(persist());}
+ void answer(String key,dynamic value){
+  if(locked||busy)return;
+  setState((){
+   draft['answers']={...answers,key:value};
+   // Existing province templates have a "brands" text question. Typing
+   // "MGP, Thành Đạt" immediately feeds the same customer market snapshot.
+   if(key=='brands'&&draft['market_brand_source']!='manual'){
+    final observed=marketBrandNamesFromAnswer(value);
+    draft['market_brands']=observed;
+    draft['market_brand_checked']=observed.isNotEmpty||
+      value is String&&['không có','chưa có','không'].contains(value.trim().toLowerCase());
+    draft['market_brand_source']='legacy_answer';
+   }
+  });
+  unawaited(persist());
+}
  Future<void> photo(String kind,ImageSource source)async{
   if(locked||busy)return;if(photos.length>=12){setState(()=>message='Tối đa 12 ảnh mỗi phiên');return;}
   setState(()=>busy=true);
