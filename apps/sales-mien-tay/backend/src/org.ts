@@ -38,6 +38,12 @@ export async function orgRoutes(req:Request,env:AuthEnv,actor:{sub:string;admin:
   ]);
   return json({staff,grants,teams,chains,team_members:teamMembers});
  }
+ if(req.method==='GET'&&suffix==='/territories'){
+  const items=await db`SELECT t.name,t.level,p.name AS province FROM public.territory_catalog t
+   LEFT JOIN public.territory_catalog p ON p.code=t.parent_code
+   WHERE t.active ORDER BY t.level DESC,t.name LIMIT 6000`;
+  return json({items});
+ }
  if(req.method==='GET'&&suffix==='/customers'){
   const query=(url.searchParams.get('q')??'').trim();if(query.length>80)return fail('Từ khóa quá dài');
   const limit=50;
@@ -65,6 +71,17 @@ export async function orgRoutes(req:Request,env:AuthEnv,actor:{sub:string;admin:
  if(req.method!=='POST')return fail('Method not allowed',405);
  let data:Record<string,unknown>;try{data=await body(req);}catch{return fail('JSON không hợp lệ');}
  try{
+  if(suffix==='/territories'){
+   if(!['province','district'].includes(String(data.level))||
+      !validString(data.name,100)||typeof data.name!=='string'||data.name.includes('|')||
+      (data.level==='province'&&data.province!==undefined)||
+      (data.level==='district'&&!validString(data.province,100)))
+      return fail('Tỉnh/huyện không hợp lệ');
+   const result=await db`SELECT public.sales_add_territory(${actor.sub},
+     ${data.level as string},${(data.name as string).trim()},
+     ${data.level==='province'?null:(data.province as string).trim()}) AS item`;
+   return json({item:result[0].item},201);
+  }
   if(suffix==='/units'){
    if(!['team','chain'].includes(String(data.kind))||!validString(data.name,160))return fail('Tên nhóm/chuỗi không hợp lệ');
    const result=await db`SELECT public.sales_create_org_unit(${actor.sub},${data.kind as string},${(data.name as string).trim()}) AS item`;
