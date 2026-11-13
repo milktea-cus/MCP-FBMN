@@ -2,6 +2,16 @@
 
 **Nguồn sự thật cho việc tiếp theo:** tài liệu này + checklist đầu [Issue #3](https://github.com/milktea-cus/MCP-FBMN/issues/3). [Issue #4](https://github.com/milktea-cus/MCP-FBMN/issues/4) là lịch sử audit UI/ra đơn và bằng chứng P1-H/P0-I. **Không lấy checkbox chưa được cập nhật của Issue cũ làm bằng chứng đã/ chưa có code.** GitHub `main` lúc audit `557b49f2529132805e540fcd691efb3ba040bfe3`, CI [43154778431](https://github.com/milktea-cus/MCP-FBMN/actions/runs/43154778431) **4/4 PASS** (Flutter 158 unit/widget, 3 Chrome IndexedDB, Android debug build; không phải Android release). Production Cloudflare Worker APK API đã smoke health/DB OK, unauthorized 401, unknown origin 403. Web production gần nhất P1-H; chưa xác minh web đã nhận mọi cập nhật Dart P0-I. Không gọi v1.0 nghiệm thu khi chưa có UAT thật.
 
+## Quy định triển khai Vercel — cập nhật 13/11/2026 (Owner xác nhận)
+
+**Vercel production PHẢI deploy thủ công, trực tiếp vào project hiện hữu `sales-mien-tay` qua Vercel plugin/API hoặc công cụ triển khai do trợ lý điều khiển.** Repo đã hết quota GitHub Actions theo thông báo của Owner: **không dùng GitHub Actions để build/deploy, không kích hoạt lệnh `/deploy production` trong Issue #2, và không yêu cầu Owner chạy CMD.** Workflow `.github/workflows/sales-production-comment.yml` chỉ là cơ chế cũ, không phải đường deploy đang áp dụng.
+
+- Build Flutter Web từ đúng SHA trên `main` trong môi trường không tiêu hao GitHub Actions, kiểm tra `flutter analyze`, `flutter test`, build release/offline IndexedDB/service worker và file đầu ra trước khi phát hành; không dùng lại artifact cũ giả làm build commit mới.
+- Sau khi kiểm tra tương thích Neon/Worker, triển khai **trực tiếp Vercel production** vào đúng project/domain `https://sales-mien-tay.vercel.app`. Giữ nguyên cấu hình, environment và domain hiện hành; không tạo app/project/preview thay thế.
+- Kiểm tra production URL thực tế, app-shell, API/Auth, phân quyền, cache/offline, phiên bản/chính xác SHA. Ghi bằng chứng deployment ID, thời gian, HTTP smoke và các lỗi tồn đọng vào Issue #3.
+- **Deploy thủ công không được hiểu là bỏ cổng nghiệm thu.** Nếu chưa đủ test, thiếu công cụ build hoặc không có quyền triển khai, báo rõ blocker và giữ nguyên phiên bản production; không tự ý bật `SALES_PRODUCTION_READY` để vượt workflow cũ.
+- CI GitHub Actions chỉ dùng lại sau khi Owner xác nhận quota được khôi phục. Với commit tài liệu đơn thuần, đặt `[skip ci]` để không lãng phí quota. Công việc code chưa có CI phải được kiểm thử theo quy trình thay thế và báo trung thực, không tuyên bố CI xanh khi chưa chạy.
+
 ## 0. Phân loại tiến độ (không gộp code với nghiệm thu)
 
 | Hạng mục | Code/DB hiện có | Cổng còn mở |
