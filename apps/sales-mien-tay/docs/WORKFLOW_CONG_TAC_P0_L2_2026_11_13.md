@@ -12,6 +12,20 @@
 6. **Một luồng điều hướng:** Sales thấy "Công tác" với **Kế hoạch / Hôm nay / Kết quả**. Ẩn tab "Khảo sát" độc lập **chỉ sau khi** nút khảo sát tại từng điểm hoạt động và lịch sử còn xem được. Luồng legacy `/api/v1/routes` giữ đọc lịch sử/khả năng tương thích, không tiếp tục tạo lịch song song sau chuyển đổi.
 7. **Nhãn hàng nguồn dữ liệu chung (pha riêng nối tiếp):** chuẩn hóa catalog nhãn hàng/các biến thể tên, liên kết SKU, tình trạng bán tại khách, khảo sát và báo cáo tổng. Bỏ mảng `_surveyBrands` viết cứng; không lấy số nhãn cũ làm số thực tế. Khách có thể kinh doanh nhiều nhãn, trạng thái *đã đặt/đã nhập/đang bán* không được đánh đồng. Không nhầm danh mục SKU với nhãn được xác minh ở điểm bán.
 
+
+## Cập nhật P0-2 sau thi công code (13/11/2026)
+
+**Phân loại chính xác:** Đã đưa mã lên GitHub `main`; CHƯA hoàn thành nghiệm thu, CHƯA chạy migration `042_work_stop_outcomes_unplanned.sql` trên Neon production và CHƯA deploy Cloudflare Worker/Vercel production. Không sử dụng GitHub Actions do quota dự án hết; chưa có log `flutter analyze`, `flutter test` hoặc Worker typecheck tại phiên làm việc này. Không đánh dấu các checkbox L2-A/B/C/E bên dưới là nghiệm thu.
+
+- **P0-2A — code:** màn Kế hoạch tháng đổi chip lọc sang một dropdown duy nhất, cùng hàng nút **Thêm công tác**, bỏ text thừa; test widget dropdown/mobile 320dp được viết.
+- **P0-2B — code nền kiểm tra lại:** `monthly_plan.dart`, `monthly_plans.ts` và migration 040 đã hỗ trợ ba loại `territory/customer/chain`, gợi ý khách theo quyền, tick nhiều, tuyến rỗng khách tạo area/chain stop không tạo khách giả. Cần test quyền, offline và dữ liệu thực.
+- **P0-2C — code mới:** kết quả `missed_code/missed_note` cho khách đóng cửa/không gặp/không đi được; `is_unplanned` cho điểm ngoài kế hoạch; migration 042 và hai API POST kiểm tra owner/scope/idempotency. Flutter có ghi lý do, thêm điểm phát sinh, outbox offline và ngăn sửa kế hoạch sau thực tế.
+- **P0-2D — code:** khảo sát mở từ điểm ghé `day_route_stop_id`, hạn chế sang đúng điểm/ngày, chặn mở khảo sát khi đã ghi không ghé; bỏ nút `Khảo sát hôm nay` độc lập trong tuyến; Sales vẫn vào `Công tác`, Admin giữ màn khảo sát lịch sử/template/media.
+- **P0-2E — code:** `/day-routes` trả riêng `stop_count/visited_count/missed_count/unplanned_count/unplanned_visited_count/survey_count/lead_count`; `WorkHub` đối chiếu ngày theo kế hoạch, GPS, khảo sát, lead và điểm ngoài kế hoạch.
+- **Kiểm thử mới chỉ được viết, chưa chạy:** `monthly_plan_test.dart`, `work_hub_test.dart`, `offline_queue_test.dart`. Flutter/Dart SDK không có trong môi trường thực thi; không chạy workflow tính quota.
+
+**Điều kiện tiếp:** kiểm thử cú pháp/DB migration 042 trên nhánh an toàn và quyền DB thật; áp dụng schema theo quy trình phê duyệt Neon; kiểm tra Worker typecheck/API/Auth 401/403/409; chạy Flutter analyze/test, PWA IndexedDB/Android SQLite; triển khai đúng Cloudflare và Vercel production và smoke bằng tài khoản có quyền. Chưa qua các cổng này thì giữ nguyên production, không gọi P0-2 hoàn thành.
+
 ## Thứ tự thực hiện và tiêu chí nghiệm thu
 
 - [ ] **L2-A — Kế hoạch/điểm chọn thống nhất:** lọc theo địa bàn/chuỗi/khách cụ thể; khi chọn phạm vi hiển thị khách trong quyền ngay, tích nhiều, tìm tên/mã, xem số khách, thêm tuyến rỗng. Plan API+DB+Flutter thống nhất; offline cache user/scope revision, chống trùng điểm, idempotent.
