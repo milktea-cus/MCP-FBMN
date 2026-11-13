@@ -62,11 +62,11 @@ export function validateSurveyAnswers(template:Question[],value:unknown):string|
 async function getSession(db:Db,actor:Actor,id:string){
  const rows=await db`SELECT s.*,c.name AS customer_name,t.version AS template_version,t.questions
  FROM field_survey_sessions s JOIN customers c ON c.id=s.customer_id JOIN field_survey_templates t ON t.id=s.template_id
- WHERE s.id=${id}::uuid AND public.sales_can_access(${actor.sub},s.owner_sub,s.province,s.district) AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)`;
+ WHERE s.id=${id}::uuid AND public.sales_customer_allowed(${actor.sub},c.id,'view')`;
  return rows[0]??null;
 }
 async function sessionPhotos(db:Db,id:string,actor:Actor){
- return db`SELECT p.id,p.kind,p.mime_type,p.bytes,p.sha256,p.thumbnail_bytes,p.thumbnail_sha256,p.captured_at,p.created_by,p.status FROM field_survey_photos p JOIN field_survey_sessions s ON s.id=p.session_id JOIN customers c ON c.id=s.customer_id WHERE p.session_id=${id}::uuid AND public.sales_can_access(${actor.sub},s.owner_sub,s.province,s.district) AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district) ORDER BY p.captured_at,p.id`;
+ return db`SELECT p.id,p.kind,p.mime_type,p.bytes,p.sha256,p.thumbnail_bytes,p.thumbnail_sha256,p.captured_at,p.created_by,p.status FROM field_survey_photos p JOIN field_survey_sessions s ON s.id=p.session_id JOIN customers c ON c.id=s.customer_id WHERE p.session_id=${id}::uuid AND public.sales_customer_allowed(${actor.sub},c.id,'media') ORDER BY p.captured_at,p.id`;
 }
 // Inspect JPEG marker segments before SOS; reject metadata and oversized dimensions.
 export function cleanJpeg(b:Uint8Array,max:number):boolean{
@@ -137,7 +137,7 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   if(day&&period==='month'){const d=new Date(day+'T00:00:00Z');start=day.slice(0,7)+'-01';end=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,0)).toISOString().slice(0,10);}
   const rows=await db`SELECT s.*,c.name AS customer_name,t.version AS template_version,t.questions FROM field_survey_sessions s
    JOIN customers c ON c.id=s.customer_id JOIN field_survey_templates t ON t.id=s.template_id
-   WHERE public.sales_can_access(${actor.sub},s.owner_sub,s.province,s.district) AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)
+   WHERE public.sales_customer_allowed(${actor.sub},c.id,'view')
    AND (${!province} OR s.province=${province}) AND (${!customer} OR s.customer_id::text=${customer})
    AND (${!day} OR (s.started_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN ${start||'2000-01-01'}::date AND ${end||'2100-01-01'}::date)
    ORDER BY s.started_at DESC,s.id LIMIT 501`;
@@ -149,7 +149,7 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   if(!isUuid(id)||!isUuid(cid)||!isUuid(tid)||(rid!==null&&!isUuid(rid))||!started||!point(v.latitude,v.longitude,v.accuracy_m))return bad('Phiên hoặc GPS không hợp lệ (độ chính xác tối đa 100m)');
   const prior=await getSession(db,actor,id);
   if(prior)return prior.owner_sub===actor.sub&&prior.customer_id===cid&&prior.template_id===tid&&(prior.route_stop_id??null)===rid?json({item:prior,idempotent:true}):bad('UUID phiên đã được sử dụng',409);
-  const customers=await db`SELECT c.* FROM customers c WHERE c.id=${cid}::uuid AND c.owner_sub=${actor.sub} AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)`;
+  const customers=await db`SELECT c.* FROM customers c WHERE c.id=${cid}::uuid AND c.owner_sub=${actor.sub} AND public.sales_customer_allowed(${actor.sub},c.id,'view')`;
   const c=customers[0];if(!c)return bad('Không có quyền điểm bán',403);
   const first=c.latitude===null&&c.longitude===null;
   if(first&&v.initialize_location!==true)return bad('Điểm bán chưa có tọa độ. Cần xác nhận ghi nhận vị trí lần đầu tại điểm bán.',409);
@@ -162,7 +162,7 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   // One transaction: verified GPS history and parent session share the stable client UUID.
   const rows=await db`WITH eligible AS MATERIALIZED (
    SELECT c.* FROM customers c WHERE c.id=${cid}::uuid AND c.owner_sub=${actor.sub} AND c.province=${c.province} AND c.district=${c.district}
-   AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)
+   AND public.sales_customer_allowed(${actor.sub},c.id,'view')
    AND ((${first} AND c.latitude IS NULL AND c.longitude IS NULL) OR (NOT ${first} AND c.location_consent AND c.latitude IS NOT DISTINCT FROM ${c.latitude}::double precision AND c.longitude IS NOT DISTINCT FROM ${c.longitude}::double precision))
    AND (${rid===null} OR EXISTS(SELECT 1 FROM sales_records r WHERE r.id=${rid}::uuid AND r.kind='visit' AND r.owner_sub=${actor.sub} AND r.data->>'customerId'=${cid} AND r.data->>'plannedDate'=${vnDay(started)}))
    FOR UPDATE
@@ -203,7 +203,7 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
    db`UPDATE field_survey_sessions s SET answers=${JSON.stringify(v.answers)}::jsonb,note=${v.note},ended_at=${end}::timestamptz,status='completed',version=version+1,last_mutation_ref=${v.client_ref}::uuid
     WHERE s.id=${id}::uuid AND s.owner_sub=${actor.sub} AND s.version=${v.version as number} AND s.status='in_progress'
     AND public.sales_can_access(${actor.sub},s.owner_sub,s.province,s.district)
-    AND EXISTS(SELECT 1 FROM customers c WHERE c.id=s.customer_id AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district))
+    AND EXISTS(SELECT 1 FROM customers c WHERE c.id=s.customer_id AND public.sales_customer_allowed(${actor.sub},c.id,'view'))
     AND NOT EXISTS(SELECT 1 FROM field_survey_photos p WHERE p.session_id=s.id AND p.status<>'ready')
     AND (SELECT count(DISTINCT p.kind) FROM field_survey_photos p WHERE p.session_id=s.id AND p.status='ready' AND p.kind IN ('front','shelf','goods'))=3 RETURNING *`
   ]);
@@ -214,7 +214,7 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   if(req.method==='GET'&&!m[3])return json({items:await sessionPhotos(db,id,actor)});
   if(req.method==='GET'&&m[3]){
    if(!env.PHOTOS_BUCKET)return bad('Kho ảnh chưa cấu hình',503);
-   const rows=await db`SELECT p.object_key,p.mime_type,p.thumbnail_key FROM field_survey_photos p JOIN field_survey_sessions s ON s.id=p.session_id JOIN customers c ON c.id=s.customer_id WHERE p.id=${m[3]}::uuid AND p.session_id=${id}::uuid AND p.status='ready' AND public.sales_can_access(${actor.sub},s.owner_sub,s.province,s.district) AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)`;
+   const rows=await db`SELECT p.object_key,p.mime_type,p.thumbnail_key FROM field_survey_photos p JOIN field_survey_sessions s ON s.id=p.session_id JOIN customers c ON c.id=s.customer_id WHERE p.id=${m[3]}::uuid AND p.session_id=${id}::uuid AND p.status='ready' AND public.sales_customer_allowed(${actor.sub},c.id,'media')`;
    if(!rows.length)return bad('Không tìm thấy ảnh',404);
    const thumb=url.searchParams.get('thumbnail')==='1'&&rows[0].thumbnail_key;const blob=await env.PHOTOS_BUCKET.get(thumb||rows[0].object_key);if(!blob)return bad('Ảnh không còn trên kho',404);
    return new Response(blob.body,{headers:{'Content-Type':thumb?'image/jpeg':rows[0].mime_type,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
@@ -239,7 +239,7 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
    db`INSERT INTO field_survey_photos(id,session_id,kind,mime_type,bytes,sha256,object_key,captured_at,created_by,thumbnail_key,thumbnail_bytes,thumbnail_sha256)
    SELECT ${photoId}::uuid,s.id,${kind},${mime},${raw.byteLength},${sha},${key},${captured}::timestamptz,${actor.sub},${thumbkey},${thumbnail?.byteLength??null},${thash}
    FROM field_survey_sessions s JOIN customers c ON c.id=s.customer_id WHERE s.id=${id}::uuid AND s.owner_sub=${actor.sub} AND s.status='in_progress'
-   AND public.sales_can_access(${actor.sub},s.owner_sub,s.province,s.district) AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)
+   AND public.sales_customer_allowed(${actor.sub},c.id,'view')
    AND (SELECT count(*) FROM field_survey_photos p WHERE p.session_id=s.id)<12 ON CONFLICT(id) DO NOTHING RETURNING *`,
    db`SELECT * FROM field_survey_photos WHERE id=${photoId}::uuid AND session_id=${id}::uuid AND created_by=${actor.sub}`
   ]);
@@ -254,7 +254,7 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
    const h=await env.PHOTOS_BUCKET.head(thumbkey);if(!h||h.size!==thumbnail.byteLength||h.customMetadata?.sha256!==thash)return bad('Thumbnail chưa xác nhận; thử lại',503);
   }
   const ready=await db`UPDATE field_survey_photos p SET status='ready' WHERE p.id=${photoId}::uuid AND p.session_id=${id}::uuid AND p.sha256=${sha}
-   AND EXISTS(SELECT 1 FROM field_survey_sessions s JOIN customers c ON c.id=s.customer_id WHERE s.id=p.session_id AND s.owner_sub=${actor.sub} AND public.sales_can_access(${actor.sub},s.owner_sub,s.province,s.district) AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)) RETURNING id,kind,sha256`;
+   AND EXISTS(SELECT 1 FROM field_survey_sessions s JOIN customers c ON c.id=s.customer_id WHERE s.id=p.session_id AND s.owner_sub=${actor.sub} AND public.sales_customer_allowed(${actor.sub},c.id,'view')) RETURNING id,kind,sha256`;
   return ready.length?json({item:ready[0]},201):bad('Quyền đã thay đổi',403);
  }
  return bad('Method not allowed',405);
