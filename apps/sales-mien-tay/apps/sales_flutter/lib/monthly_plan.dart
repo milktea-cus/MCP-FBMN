@@ -6,6 +6,7 @@ import 'customers.dart';
 import 'offline_queue.dart';
 import 'planning_periods.dart';
 import 'session.dart';
+import 'day_route.dart';
 
 /// A plan is a dated business assignment, not a customer or a survey session.
 /// Multiple territories/chains can be selected without requiring any customer.
@@ -18,11 +19,12 @@ class MonthlyPlanPage extends StatefulWidget {
 class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
  DateTime month=DateTime(DateTime.now().year,DateTime.now().month);
  int period=0;
- List<Map<String,dynamic>> items=[],scopes=[];
+ List<Map<String,dynamic>> items=[],scopes=[],dayRoutes=[];
  bool busy=false,cached=false;
  String? error;
  String get monthCache=>'monthly-plans:${monthKey(month)}';
  String get optionsCache=>'monthly-plan-scopes';
+ String get routeCache=>'day-routes:${monthKey(month)}';
  @override void initState(){super.initState();widget.queue.addListener(_changed);unawaited(_reload());}
  @override void dispose(){widget.queue.removeListener(_changed);super.dispose();}
  void _changed(){if(mounted)setState((){});}
@@ -33,17 +35,19 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
   try{
    final localItems=await widget.queue.cached(monthCache);
    final localScopes=await widget.queue.cached(optionsCache);
-   if(mounted)setState((){items=localItems;scopes=localScopes;cached=true;});
+    final localRoutes=await widget.queue.cached(routeCache);
+   if(mounted)setState((){items=localItems;scopes=localScopes;dayRoutes=localRoutes;cached=true;});
    final results=await Future.wait([
     http.get(widget.queue.session.uri('/api/v1/monthly-plans').replace(queryParameters:{'month':monthKey(month)}),headers:widget.service.headers).timeout(const Duration(seconds:20)),
     http.get(widget.queue.session.uri('/api/v1/monthly-plans/options'),headers:widget.service.headers).timeout(const Duration(seconds:20)),
+     http.get(widget.queue.session.uri('/api/v1/day-routes').replace(queryParameters:{'month':monthKey(month)}),headers:widget.service.headers).timeout(const Duration(seconds:20)),
    ]);
-   final plans=decodeApi(results[0]),options=decodeApi(results[1]);
+   final plans=decodeApi(results[0]),options=decodeApi(results[1]),routesData=decodeApi(results[2]);
    final fresh=(plans['items'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
    final allowed=(options['scopes'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
    await widget.queue.cache(monthCache,fresh);
    await widget.queue.cache(optionsCache,allowed);
-   if(mounted)setState((){items=fresh;scopes=allowed;cached=false;});
+   if(mounted)setState((){items=fresh;scopes=allowed;dayRoutes=freshRoutes;cached=false;});
   }catch(e){
    if(e is ApiFailure&&(e.status==401||e.status==403)){
     if(mounted)setState((){items=[];scopes=[];cached=false;});
@@ -52,7 +56,7 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
   }finally{if(mounted)setState(()=>busy=false);}
  }
  void _changeMonth(int delta){
-  setState((){month=DateTime(month.year,month.month+delta);period=0;items=[];});
+  setState((){month=DateTime(month.year,month.month+delta);period=0;items=[];dayRoutes=[];});
   unawaited(_reload());
  }
  Future<void> _edit({Map<String,dynamic>? original})async{
@@ -80,6 +84,39 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
    if(mounted)await _reload();
   }catch(e){_toast('Không lưu được kế hoạch: ${e.toString()}');}
  }
+ Future<void> createRoute(Map<String,dynamic> plan)async{
+  final id=const Uuid().v4();
+  final payload=<String,dynamic>{'client_ref':id,'monthly_plan_id':plan['id'],
+   'route_date':plan['work_date'].toString().substring(0,10),
+   'purpose':plan['purpose'],'note':plan['note']??'','status':'ready'};
+  try{
+   await widget.queue.enqueue('/api/v1/day-routes',payload);
+   _toast('Đã lưu tuyến trên máy · chờ đồng bộ');
+   if(mounted)await openRoute({...payload,'id':id,'owner_sub':widget.queue.identity,
+    'scope_kind':plan['scope_kind'],'scope_key':plan['scope_key'],
+    'province':plan['province'],'district':plan['district'],'plan_status':'planned'});
+  }catch(e){_toast('Không tạo được tuyến: $e');}
+ }
+ Future<void> openRoute(Map<String,dynamic> r)async{
+  await Navigator.push(context,MaterialPageRoute(builder:(_)=>DayRoutePage(
+   queue:widget.queue,service:widget.service,routeId:r['id'].toString(),cachedRoute:r)));
+  if(mounted)await _reload();
+ }
+ Future<void> moveRoute(Map<String,dynamic> r)async{
+  final now=DateTime.tryParse(r['route_date'].toString())??month;
+  final date=await showDatePicker(context:context,initialDate:now,
+   firstDate:DateTime(month.year,month.month),lastDate:monthEnd(month));
+  if(date==null)return;
+  try{
+   await widget.queue.enqueue('/api/v1/day-routes/${r['id']}',{
+    'client_ref':const Uuid().v4(),'monthly_plan_id':r['monthly_plan_id'],
+    'route_date':dayKey(date),'purpose':r['purpose'],'note':r['note']??'',
+    'status':r['status'],'version':r['version'],
+   },method:'PATCH');
+   _toast('Đã lưu ngày mới, chờ đồng bộ.');
+  }catch(e){_toast('Không dời được tuyến: $e');}
+ }
+
  @override Widget build(BuildContext context){
   final days=monthEnd(month).day;
   final periods=[for(var p=1;p<=5;p++)if(periodDays(month,p).isNotEmpty)p];
@@ -138,10 +175,29 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
      title:Text(r['purpose']?.toString()??''),
      subtitle:Text("${r['work_date'].toString().substring(0,10)} · ${r['scope_kind']=='chain'?'Chuỗi':r['district']==''?'Toàn tỉnh':'Địa bàn'}: ${r['scope_kind']=='chain'?scopes.where((s)=>s['scope_key']==r['scope_key']).map((s)=>s['label']).firstOrNull??'Chuỗi':r['scope_key']}\nMục tiêu khách mới: ${r['target_new_customers']} · ${r['status']=='cancelled'?'Đã hủy':'Đã lập kế hoạch'} · v${r['version']}"),
      isThreeLine:true,
-     trailing:r['owner_sub']==widget.queue.identity&&
-       scopes.any((s)=>s['scope_key']==r['scope_key']&&s['scope_kind']==r['scope_kind'])
-       ?IconButton(tooltip:'Sửa công tác',icon:const Icon(Icons.edit_outlined),onPressed:()=>_edit(original:r))
-       :null,
+     trailing:Builder(builder:(ctx){
+       final matching=dayRoutes.where((t)=>t['monthly_plan_id']==r['id']).toList();
+       final queued=widget.queue.pending.where((op)=>op['path']=='/api/v1/day-routes'&&
+         (op['payload'] as Map)['monthly_plan_id']==r['id']).toList();
+       final route=matching.firstOrNull;
+       final assigned=r['owner_sub']==widget.queue.identity&&scopes.any(
+         (s)=>s['scope_key']==r['scope_key']&&s['scope_kind']==r['scope_kind']);
+       return Wrap(spacing:0,children:[
+        if(assigned)IconButton(tooltip:'Sửa kế hoạch',icon:const Icon(Icons.edit_outlined),onPressed:()=>_edit(original:r)),
+        if(assigned&&route==null&&queued.isEmpty&&r['status']=='planned')
+         IconButton(tooltip:'Tạo tuyến ngày',icon:const Icon(Icons.add_road),onPressed:()=>createRoute(r)),
+        if(route!=null)...[
+         IconButton(tooltip:'Mở tuyến ngày',icon:const Icon(Icons.route),onPressed:()=>openRoute(route)),
+         if(assigned&&route['status']=='ready')IconButton(tooltip:'Dời ngày tuyến',
+          icon:const Icon(Icons.event_repeat),onPressed:()=>moveRoute(route)),
+        ],
+        for(final op in queued)IconButton(tooltip:'Mở tuyến chờ đồng bộ',icon:const Icon(Icons.cloud_upload_outlined),
+         onPressed:()=>openRoute({...Map<String,dynamic>.from(op['payload'] as Map),
+          'id':(op['payload'] as Map)['client_ref'],'owner_sub':widget.queue.identity,
+          'scope_kind':r['scope_kind'],'scope_key':r['scope_key'],
+          'province':r['province'],'district':r['district'],'plan_status':r['status']})),
+       ]);
+      }),
     )),
     if(!busy&&visible.isEmpty&&pending.isEmpty)const Padding(
       padding:EdgeInsets.all(24),child:Text('Chưa có công tác trong kỳ này. Hãy lập chuyến đi, không cần có khách sẵn.',textAlign:TextAlign.center)),
