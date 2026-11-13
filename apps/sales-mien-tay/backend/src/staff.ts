@@ -14,6 +14,12 @@ export async function staffRoutes(req:Request,env:AuthEnv,actor:{sub:string;admi
  if(req.method!=='POST')return json({error:'Method not allowed'},405);
  let data:Record<string,unknown>;try{const raw=await req.text();if(raw.length>64000)throw Error();data=JSON.parse(raw);}catch{return json({error:'JSON không hợp lệ'},400);}
  if(typeof data?.job_title!=='string'||data.job_title.trim().length>120)return json({error:'Chức danh không hợp lệ (tối đa 120 ký tự).'},400);
+ if(!Array.isArray(data.report_changes)||data.report_changes.length>200)return json({error:'Danh sách cấp dưới không hợp lệ.'},400);
+ for(const change of data.report_changes){
+  if(!change||typeof change.user_sub!=='string'||!/^[-0-9a-f]{36}$/i.test(change.user_sub)||
+    typeof change.assigned!=='boolean'||typeof change.scope_revision!=='string'||!/^\\d{1,18}$/.test(change.scope_revision))
+    return json({error:'Dữ liệu thay đổi cấp dưới không hợp lệ.'},400);
+ }
  if(!data || typeof data.user_sub!=='string'|| !/^[0-9a-f-]{36}$/i.test(data.user_sub)||typeof data.employee_code!=='string'||!data.employee_code.trim()||data.employee_code.length>80||typeof data.full_name!=='string'||!data.full_name.trim()||data.full_name.length>240||!['admin','manager','sales'].includes(String(data.role))||typeof data.active!=='boolean'||!Array.isArray(data.scopes)||data.scopes.length>1000)return json({error:'Thông tin nhân viên không hợp lệ'},400);
  const configured=await db`SELECT t.name,t.level,p.name AS province FROM public.territory_catalog t
    LEFT JOIN public.territory_catalog p ON p.code=t.parent_code WHERE t.active`;
@@ -42,13 +48,17 @@ export async function staffRoutes(req:Request,env:AuthEnv,actor:{sub:string;admi
    if(old.role==='admin'&&old.active&&(!data.active||data.role!=='admin')&&!(await db`SELECT 1 FROM staff_members WHERE role='admin' AND active AND user_sub<>${data.user_sub}`).length)return json({error:'Không được khóa hoặc hạ quyền Admin cuối cùng.'},409);
    await changeStaffEmail(req,data.user_sub,email);
   }
-  const result=await db`SELECT public.sales_save_staff(${actor.sub},${data.user_sub},${data.employee_code.trim()},${data.full_name.trim()},${String(data.phone??'')},${String(data.role)},${data.active},${manager as string|null},${JSON.stringify(canonical)}::jsonb,${String(data.scope_revision??'0')}::bigint,${(data.job_title as string).trim()}) AS item`;
-  if(email&&String(result[0].item?.staff?.email??'').toLowerCase()!==email)return json({error:'Email xác thực chưa đồng bộ. Mở lại hồ sơ và thử lại.'},409);
+  const result=await db`SELECT public.sales_save_staff_with_reports(${actor.sub},${data.user_sub},${data.employee_code.trim()},${data.full_name.trim()},${String(data.phone??'')},${String(data.role)},${data.active},${manager as string|null},${JSON.stringify(canonical)}::jsonb,${String(data.scope_revision??'0')}::bigint,${(data.job_title as string).trim()},${JSON.stringify(data.report_changes)}::jsonb) AS item`;
+  if(email&&String(result[0].item?.profile?.staff?.email??'').toLowerCase()!==email)return json({error:'Email xác thực chưa đồng bộ. Mở lại hồ sơ và thử lại.'},409);
   return json({item:result[0].item});
  }catch(e){
   if(e instanceof AuthError)return json({error:e.message},e.status);
   const err=e as {message?:string;code?:string};
   const msg=err.message??'';
+  if(msg.includes('stale report'))return json({error:'Cấp dưới vừa được thay đổi. Tải lại danh sách nhân viên rồi lưu lại.'},409);
+  if(msg.includes('invalid manager cycle'))return json({error:'Không thể phân cấp tạo vòng lặp cấp trên/cấp dưới.'},409);
+  if(msg.includes('manager has reports'))return json({error:'Cần chuyển hết cấp dưới trước khi đổi vai trò Manager.'},409);
+  if(msg.includes('invalid report'))return json({error:'Cấp dưới không hợp lệ, đã khóa hoặc không thể gán.'},400);
   if(msg.includes('stale revision'))return json({error:'Hồ sơ đã thay đổi. Hủy và mở lại nhân viên để lưu phiên bản mới nhất.'},409);
   if(msg.includes('last admin'))return json({error:'Không được khóa hoặc hạ quyền Admin cuối cùng.'},409);
   if(msg.includes('invalid manager'))return json({error:'Quản lý trực tiếp không hợp lệ hoặc đã bị khóa.'},400);
