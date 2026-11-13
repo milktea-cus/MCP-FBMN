@@ -17,7 +17,7 @@ export async function staffRoutes(req:Request,env:AuthEnv,actor:{sub:string;admi
  if(!Array.isArray(data.report_changes)||data.report_changes.length>200)return json({error:'Danh sách cấp dưới không hợp lệ.'},400);
  for(const change of data.report_changes){
   if(!change||typeof change.user_sub!=='string'||!/^[-0-9a-f]{36}$/i.test(change.user_sub)||
-    typeof change.assigned!=='boolean'||typeof change.scope_revision!=='string'||!/^\\d{1,18}$/.test(change.scope_revision))
+    typeof change.assigned!=='boolean'||typeof change.scope_revision!=='string'||!/^\d{1,18}$/.test(change.scope_revision))
     return json({error:'Dữ liệu thay đổi cấp dưới không hợp lệ.'},400);
  }
  if(!data || typeof data.user_sub!=='string'|| !/^[0-9a-f-]{36}$/i.test(data.user_sub)||typeof data.employee_code!=='string'||!data.employee_code.trim()||data.employee_code.length>80||typeof data.full_name!=='string'||!data.full_name.trim()||data.full_name.length>240||!['admin','manager','sales'].includes(String(data.role))||typeof data.active!=='boolean'||!Array.isArray(data.scopes)||data.scopes.length>1000)return json({error:'Thông tin nhân viên không hợp lệ'},400);
