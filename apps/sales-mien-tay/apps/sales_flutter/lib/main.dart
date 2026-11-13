@@ -99,7 +99,7 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
   bool _loading = false, _fetchingRecords = false;
   int _selectedIndex = 0;
   String? _message;
-  List<Map<String,dynamic>> _brandRows=[],_brandCustomerRows=[];
+  List<Map<String,dynamic>> _brandRows=[],_brandCustomerRows=[],_brandEntries=[];
   List<String> _brandCatalog=[];
   bool _brandLoaded=false;
   List<int> get _visibleMenuIndices=>[for(var i=0;i<_sections.length;i++)if(widget.me['role']=='admin'||i!=2)i];
@@ -126,21 +126,22 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
   }
 
   Future<void> _refreshBrands()async{
-    const catalogKey='canonical-brands-v1',coverageKey='brand-coverage-v1',
-      customersKey='brand-customer-counts-v1';
+    const catalogKey='market-brands-v1',coverageKey='market-brand-coverage-v1',
+      customersKey='market-brand-customer-counts-v1';
     try{
       final cached=await Future.wait([
        _queue.cached(catalogKey),_queue.cached(coverageKey),_queue.cached(customersKey)]);
       if(mounted)setState((){
-       _brandCatalog=cached[0].map((e)=>e['name'].toString()).toList();
+       _brandEntries=cached[0];
+        _brandCatalog=cached[0].map((e)=>e['name'].toString()).toList();
        _brandRows=cached[1];_brandCustomerRows=cached[2];
        _brandLoaded=cached[0].isNotEmpty||cached[1].isNotEmpty;
       });
       final service=_customerService;
       final results=await Future.wait([
-       http.get(service.uri('/api/v1/catalog/brands'),
+       http.get(service.uri('/api/v1/market/brands'),
         headers:service.headers).timeout(const Duration(seconds:18)),
-       http.get(service.uri('/api/v1/catalog/brand-coverage'),
+       http.get(service.uri('/api/v1/market/coverage'),
         headers:service.headers).timeout(const Duration(seconds:18)),
       ]);
       final brands=decodeApi(results[0]),coverage=decodeApi(results[1]);
@@ -154,12 +155,13 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
       await _queue.cache(coverageKey,rows);
       await _queue.cache(customersKey,counts);
       if(mounted)setState((){
-       _brandCatalog=names.map((e)=>e['name'].toString()).toList();
+       _brandEntries=names;
+        _brandCatalog=names.map((e)=>e['name'].toString()).toList();
        _brandRows=rows;_brandCustomerRows=counts;_brandLoaded=true;
       });
     }catch(e){
       if(e is ApiFailure&&(e.status==401||e.status==403)){
-       if(mounted)setState((){_brandRows=[];_brandCatalog=[];
+       if(mounted)setState((){_brandRows=[];_brandCatalog=[];_brandEntries=[];
         _brandCustomerRows=[];_brandLoaded=false;});
       }
     }
@@ -266,7 +268,8 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
   List<SalesRecord> _ofKind(String kind) => _items.where((e) => e.kind == kind && (_province.isEmpty || e.province == _province)).toList();
 
   Widget _coverageTable(List<SalesRecord> surveys) => SalesBrandCoverageTable(
-    surveys: surveys,brandNames:_brandCatalog,verifiedRows:_brandRows,
+    surveys: surveys,brandNames:_brandCatalog,brandEntries:_brandEntries,
+     service:_customerService,verifiedRows:_brandRows,
     customerCounts:_brandCustomerRows,verifiedData:_brandLoaded,
     provinces: _catalog.provinces.where((p) => _province.isEmpty || p == _province).toList(),
   );
@@ -438,7 +441,7 @@ class SalesOverviewKpis extends StatelessWidget {
       _KpiTile(label: 'Quản lý Target', value: 'Xem chỉ tiêu', icon: Icons.flag_outlined,
         onTap: onTarget),
       _KpiTile(label: 'Doanh thu dự kiến', value: planned, icon: Icons.payments_outlined),
-      _KpiTile(label: 'Lượt hiện diện nhãn', value: '$brandPresence', icon: Icons.analytics_outlined),
+      _KpiTile(label: 'Cặp khách–nhãn thị trường', value: '$brandPresence', icon: Icons.analytics_outlined),
     ];
     items[0] = _KpiTile(label: 'Điểm bán đã khảo sát', value: '$surveyed', icon: Icons.store_outlined);
     return GridView.count(
