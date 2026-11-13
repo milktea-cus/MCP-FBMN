@@ -398,8 +398,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
  @override Widget build(BuildContext context){
   final pending=pendingStops;
   final sorted=[...stops]..sort((a,b)=>(a['sequence'] as num).compareTo(b['sequence'] as num));
-  final count=sorted.where((s)=>(s['visit_count'] as num?)?.toInt()!=null&&
-    (s['visit_count'] as num).toInt()>0).length;
+  final count=sorted.where((s)=>((s['visit_count'] as num?)?.toInt()??0)>0).length;
   return Scaffold(
    appBar:AppBar(title:const Text('Tuyến ngày'),actions:[
     IconButton(tooltip:'Làm mới',onPressed:busy?null:load,icon:const Icon(Icons.sync)),
@@ -411,13 +410,14 @@ class _DayRoutePageState extends State<DayRoutePage>{
      Text('${route!['scope_kind']=='chain'?'Chuỗi':route!['scope_kind']=='customer'?'Khách cụ thể':'Địa bàn'}: ${route!['scope_key']} · Đã ghé ${count}/${sorted.length} điểm'),
      const SizedBox(height:8),
      Wrap(spacing:8,runSpacing:6,children:[
-      if(route!['scope_kind']!='customer')OutlinedButton.icon(onPressed:canModify?addAreaOrChain:null,
+      if(route!['scope_kind']!='customer')OutlinedButton.icon(onPressed:canEditPlannedStops?addAreaOrChain:null,
        icon:const Icon(Icons.place_outlined),label:Text(route!['scope_kind']=='chain'?'Điểm công tác chuỗi':'Điểm tìm khách')),
-      OutlinedButton.icon(onPressed:canModify?addCustomers:null,
+      OutlinedButton.icon(onPressed:canEditPlannedStops?addCustomers:null,
        icon:const Icon(Icons.group_add_outlined),label:const Text('Chọn nhiều khách')),
+      if(scopeSupportsExtra(route!))OutlinedButton.icon(
+       onPressed:canModify&&isTodayRoute?addUnplanned:null,
+       icon:const Icon(Icons.add_circle_outline),label:const Text('Điểm phát sinh')),
       OutlinedButton.icon(onPressed:openTemplates,icon:const Icon(Icons.bookmark_outline),label:const Text('Mẫu tuyến')),
-      OutlinedButton.icon(onPressed:openSurveys,icon:const Icon(Icons.fact_check_outlined),
-       label:const Text('Khảo sát hôm nay')),
      ]),
     ],
     if(busy)const LinearProgressIndicator(),
@@ -430,7 +430,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
             .map((c)=>c['name']?.toString()??'Điểm bán').firstOrNull??'Khách đã chọn')
        : (p['payload'] as Map)['stop_kind']=='area'?'Tìm khách mới · địa bàn'
          :'Công tác chuỗi'),
-     subtitle:Text(p['error']?.toString()??'Đã lưu máy · chờ đồng bộ'),
+     subtitle:Text('${p['path'].toString().endsWith('/unplanned-stops')?'Ngoài kế hoạch · ':''}${p['error']?.toString()??'Đã lưu máy · chờ đồng bộ'}'),
      trailing:p['status']=='blocked'?IconButton(tooltip:'Đồng bộ lại',
       icon:const Icon(Icons.refresh),onPressed:()=>widget.queue.retryBlocked(p['key'].toString())):null,
     )),
@@ -442,25 +442,39 @@ class _DayRoutePageState extends State<DayRoutePage>{
        :sorted[i]['stop_kind']=='chain'
         ?sorted[i]['chain_name']?.toString()??'Công tác chuỗi'
         :'Tìm khách mới · ${sorted[i]['district']==''?sorted[i]['province']:sorted[i]['district']}'),
-      subtitle:Text('${sorted[i]['purpose']??''}\n${switch (sorted[i]['activity_status']) {
-       'visited'=>'Đã ghé GPS, chưa kết luận khảo sát',
+      subtitle:Text('${sorted[i]['is_unplanned']==true?'Ngoài kế hoạch · ':''}${sorted[i]['purpose']??''}\n${missedPending(sorted[i]['id'].toString())?'Đã ghi lý do · chờ đồng bộ':switch(sorted[i]['activity_status']){
+       'visited'=>'Đã ghé',
        'survey_started'=>'Đang khảo sát',
        'survey_completed'=>'Hoàn thành khảo sát',
+       'missed'=>'Không ghé · ${missedReasonLabel(sorted[i]['missed_code'])}',
        _=>'Chưa đi',
-      }}${sorted[i]['stop_kind']=='customer'?' · Chạm để khảo sát':' · Chạm xem ảnh/lead'}'),
+      }}${sorted[i]['stop_kind']=='customer'?' · Chạm khảo sát':' · Ảnh/lead'}'),
       isThreeLine:true,
       onTap:sorted[i]['stop_kind']=='customer'
         ?()=>openCustomerSurvey(sorted[i]):()=>openEvidence(sorted[i]),
-      trailing:Row(mainAxisSize:MainAxisSize.min,children:[
-       if(canModify&&pending.isEmpty)...[
-        IconButton(tooltip:'Lên trên',icon:const Icon(Icons.arrow_upward),
-         onPressed:i==0?null:()=>shift(sorted[i],-1)),
-        IconButton(tooltip:'Xuống dưới',icon:const Icon(Icons.arrow_downward),
-         onPressed:i==sorted.length-1?null:()=>shift(sorted[i],1)),
+      trailing:!isOwner?const Icon(Icons.chevron_right):PopupMenuButton<String>(
+       tooltip:'Thao tác điểm ghé',
+       icon:const Icon(Icons.more_vert),
+       onSelected:(action){
+        if(action=='gps')unawaited(visit(sorted[i]));
+        if(action=='missed')unawaited(recordMissed(sorted[i]));
+        if(action=='up')unawaited(shift(sorted[i],-1));
+        if(action=='down')unawaited(shift(sorted[i],1));
+       },
+       itemBuilder:(ctx)=>[
+        if(isTodayRoute&&sorted[i]['missed_code']==null&&
+          !missedPending(sorted[i]['id'].toString())&&
+          ((sorted[i]['visit_count'] as num?)?.toInt()??0)==0)...[
+         const PopupMenuItem(value:'gps',child:Text('Check-in GPS')),
+         if(((sorted[i]['session_count'] as num?)?.toInt()??0)==0)
+          const PopupMenuItem(value:'missed',child:Text('Không ghé · ghi lý do')),
+        ],
+        if(canEditPlannedStops&&pending.isEmpty)...[
+         if(i>0)const PopupMenuItem(value:'up',child:Text('Chuyển lên')),
+         if(i<sorted.length-1)const PopupMenuItem(value:'down',child:Text('Chuyển xuống')),
+        ],
        ],
-       if(isOwner&&((sorted[i]['visit_count'] as num?)?.toInt()??0)==0)IconButton(tooltip:'Check-in GPS (không khảo sát)',icon:const Icon(Icons.my_location),
-        onPressed:()=>visit(sorted[i])),
-      ]),
+      ),
      )),
     if(!busy&&sorted.isEmpty&&pending.isEmpty)
      const Padding(padding:EdgeInsets.all(18),
