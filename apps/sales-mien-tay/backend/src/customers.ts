@@ -44,6 +44,16 @@ function area(province: unknown, district: unknown) {
   return typeof province === 'string' && typeof district === 'string' &&
     !!areas[province]?.includes(district);
 }
+async function validArea(db:Db,province:unknown,district:unknown):Promise<boolean>{
+  if(area(province,district))return true;
+  if(typeof province!=='string'||typeof district!=='string'||!province||!district)return false;
+  const rows=await db`SELECT 1 FROM public.territory_catalog p
+    JOIN public.territory_catalog d ON d.parent_code=p.code
+    WHERE p.level='province' AND d.level='district' AND p.active AND d.active
+      AND p.name=${province} AND d.name=${district} LIMIT 1`;
+  return rows.length>0;
+}
+
 async function input(req: Request): Promise<ObjectBody> {
   if (!req.headers.get('content-type')?.toLowerCase().includes('application/json')) throw Error('JSON required');
   const raw = await req.text();
@@ -63,7 +73,7 @@ async function fetchCustomer(db: Db, actor: Actor, id: string) {
 }
 function dataError(data: ObjectBody) {
   if (!str(data.name) || !str(data.address_line, 500)) return 'Thiếu tên hoặc địa chỉ điểm bán';
-  if (!area(data.province, data.district)) return 'Tỉnh/huyện không hợp lệ';
+  // Territory membership is validated against legacy and nationwide DB catalogs at the write boundary.
   if (data.client_ref !== undefined && !uuid.test(String(data.client_ref))) return 'client_ref không hợp lệ';
   if (data.code !== undefined && data.code !== null && !str(data.code, 80)) return 'Mã điểm bán không hợp lệ';
   if (data.phone !== undefined && data.phone !== null && data.phone !== '' && !/^[0-9+(). -]{8,20}$/.test(String(data.phone)))
@@ -116,6 +126,7 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       const error=dataError(data); if(error)return fail(error);
       if (!uuid.test(String(data.client_ref??'')))return fail('client_ref UUID bắt buộc để chống đồng bộ trùng');
       const province=String(data.province),district=String(data.district);
+      if(!await validArea(db,province,district))return fail('Tỉnh/huyện không hợp lệ');
       if (!await inScope(db,actor,province,district)) return fail('Chưa được phân địa bàn này',403);
       const name=str(data.name)!,address=str(data.address_line,500)!;
       const code=optional(data.code,80),contact=optional(data.contact_name),phone=optional(data.phone,20),note=optional(data.note,2000);
@@ -154,6 +165,7 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
     const merged:ObjectBody={...current,...data};
     const error=dataError(merged);if(error)return fail(error);
     const province=String(merged.province),district=String(merged.district);
+    if(!await validArea(db,province,district))return fail('Tỉnh/huyện không hợp lệ');
     if((province!==current.province||district!==current.district)&&!await inScope(db,actor,province,district))
        return fail('Chuyển địa bàn cần quyền trên địa bàn mới',403);
     const requestedLocation=data.latitude!==undefined||data.longitude!==undefined||
