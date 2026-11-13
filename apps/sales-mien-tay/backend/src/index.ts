@@ -9,6 +9,7 @@ import {surveyRoutes} from './surveys';
 import {monthlyPlanRoutes} from './monthly_plans';
 import {dayRouteRoutes} from './day_routes';
 import {areaVisitRoutes} from './area_visits';
+import {areaVisitMediaRoutes} from './area_visit_media';
 import {catalogRoutes} from './catalog';
 import {catalogImportRoutes} from './catalog_import';
 import {inventoryRoutes} from './inventory';
@@ -181,6 +182,8 @@ export default {
       if(monthlyResponse)return monthlyResponse;
       const dayRouteResponse=await dayRouteRoutes(req,env,user,url);
       if(dayRouteResponse)return dayRouteResponse;
+      const areaPhotoResponse=await areaVisitMediaRoutes(req,env,user,url);
+      if(areaPhotoResponse)return areaPhotoResponse;
       const areaVisitResponse=await areaVisitRoutes(req,env,user,url);
       if(areaVisitResponse)return areaVisitResponse;
       const surveyResponse=await surveyRoutes(req,env,user,url);
