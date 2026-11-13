@@ -56,7 +56,9 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
     (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id AND NOT s.is_unplanned)::integer AS stop_count,
     (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id AND s.is_unplanned)::integer AS unplanned_count,
     (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id AND NOT s.is_unplanned
-      AND s.missed_code IS NOT NULL)::integer AS missed_count,
+      AND s.missed_code IS NOT NULL
+      AND NOT EXISTS(SELECT 1 FROM public.field_visits v WHERE v.day_route_stop_id=s.id)
+      AND NOT EXISTS(SELECT 1 FROM public.field_area_visits a WHERE a.day_route_stop_id=s.id))::integer AS missed_count,
     (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id AND NOT s.is_unplanned
       AND (EXISTS(SELECT 1 FROM public.field_visits v WHERE v.day_route_stop_id=s.id)
         OR EXISTS(SELECT 1 FROM public.field_area_visits a WHERE a.day_route_stop_id=s.id)))::integer AS visited_count,
@@ -180,6 +182,16 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
   let v:Record<string,unknown>;try{v=await parse(req);}catch{return fail('JSON không hợp lệ');}
   const editing=req.method==='PATCH',error=validRouteStop(v,editing);if(error)return fail(error);
   const id=editing?path[3]:String(v.client_ref);
+  // Once the first real activity exists, preserve the original plan. The
+  // dedicated unplanned endpoint is the only way to append execution stops.
+  const started=await db`SELECT EXISTS(
+    SELECT 1 FROM public.field_route_stops s WHERE s.day_route_id=${routeId}::uuid
+     AND (s.missed_code IS NOT NULL OR
+       EXISTS(SELECT 1 FROM public.field_visits v WHERE v.day_route_stop_id=s.id) OR
+       EXISTS(SELECT 1 FROM public.field_area_visits a WHERE a.day_route_stop_id=s.id) OR
+       EXISTS(SELECT 1 FROM public.field_survey_sessions se WHERE se.day_route_stop_id=s.id))
+   ) AS started`;
+  if(started[0]?.started===true)return fail('Tuyến đã thực hiện. Hãy thêm điểm phát sinh thay vì sửa kế hoạch.',409);
   const customer=v.stop_kind==='customer'?String(v.customer_id):null;
   const chain=v.stop_kind==='chain'?String(v.chain_id):null;
   const province=v.stop_kind==='area'?String(v.province):null;
