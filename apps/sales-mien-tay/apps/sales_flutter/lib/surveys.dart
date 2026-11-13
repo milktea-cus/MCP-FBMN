@@ -233,6 +233,15 @@ class SurveyDetail extends StatefulWidget{
 class _SurveyDetailState extends State<SurveyDetail>{
  late Map<String,dynamic> draft;bool busy=false,denied=false;String? message;
  final images=<String,Future<Uint8List>>{};
+ final customMarketBrand=TextEditingController();
+ List<String> marketSuggestions=[];
+ bool marketLoading=false;
+ bool get marketChecked=>draft['market_brand_checked']==true||
+   draft['market_brand_names'] is List;
+ List<String> get marketSelection{
+  final source=draft['market_brands']??draft['market_brand_names'];
+  return (source as List? ?? []).map((e)=>e.toString()).toList();
+ }
  String get id=>draft['id'].toString();
  bool get own=>draft['owner_sub']==widget.queue.identity;
  bool get locked=>!own||draft['status']=='completed'||draft['status']=='completed_pending'||draft['server_status']=='completed';
@@ -240,8 +249,66 @@ class _SurveyDetailState extends State<SurveyDetail>{
  List<Map<String,dynamic>> get photos=>asRows(draft['photos']);
  Map<String,dynamic> get answers=>asMap(draft['answers']??{});
  List<String> get parent=>draft['start_op']==null?[]:[draft['start_op'].toString()];
- @override void initState(){super.initState();draft={...widget.initial,'photos':asRows(widget.initial['photos']),'answers':asMap(widget.initial['answers']??{})};widget.queue.addListener(changed);load();}
- @override void dispose(){widget.queue.removeListener(changed);super.dispose();}
+ @override void initState(){
+  super.initState();
+  draft={...widget.initial,'photos':asRows(widget.initial['photos']),
+   'answers':asMap(widget.initial['answers']??{})};
+  widget.queue.addListener(changed);
+  unawaited(loadMarketBrands());
+  load();
+ }
+ @override void dispose(){
+  widget.queue.removeListener(changed);
+  customMarketBrand.dispose();
+  super.dispose();
+ }
+ Future<void> loadMarketBrands()async{
+  const key='market-brands-v1';
+  try{
+   final cached=await widget.queue.cached(key);
+   if(mounted)setState(()=>marketSuggestions=cached.map((x)=>x['name'].toString()).toList());
+  }catch(_){}
+  if(!mounted)return;
+  setState(()=>marketLoading=true);
+  try{
+   final data=await surveyGet(widget.service,'/api/v1/market/brands');
+   final rows=asRows(data['items']);
+   await widget.queue.cache(key,rows);
+   if(mounted)setState(()=>marketSuggestions=rows.map((x)=>x['name'].toString()).toList());
+  }catch(e){
+   if(e is ApiFailure&&(e.status==401||e.status==403)){
+    if(mounted)setState(()=>marketSuggestions=[]);
+   }
+  }finally{if(mounted)setState(()=>marketLoading=false);}
+ }
+ void marketCheckedChanged(bool checked){
+  if(locked||busy)return;
+  setState((){
+   draft['market_brand_checked']=checked;
+   if(!checked)draft['market_brands']=null;
+   else draft['market_brands']=marketSelection;
+  });
+  unawaited(persist());
+ }
+ void selectMarketBrand(String name,bool selected){
+  if(locked||busy)return;
+  final value=name.trim().replaceAll(RegExp(r'\s+'),' ');
+  if(value.isEmpty||value.length>100)return;
+  final all=marketSelection.toList();
+  if(selected){
+   if(!all.any((s)=>s.toLowerCase()==value.toLowerCase()))all.add(value);
+  }else{
+   all.removeWhere((s)=>s.toLowerCase()==value.toLowerCase());
+  }
+  setState((){draft['market_brands']=all;draft['market_brand_checked']=true;});
+  unawaited(persist());
+ }
+ void addMarketBrand(){
+  final value=customMarketBrand.text.trim().replaceAll(RegExp(r'\s+'),' ');
+  if(value.isEmpty||value.length>100)return;
+  selectMarketBrand(value,true);
+  customMarketBrand.clear();
+ }
  void changed(){if(mounted)unawaited(acks());}
  Future<void> acks()async{
   try{final local=(await widget.queue.cached('survey-drafts')).where((s)=>s['id']==id).firstOrNull;
@@ -258,7 +325,10 @@ class _SurveyDetailState extends State<SurveyDetail>{
     final server=asMap(data['item']),serverPhotos=asRows(data['photos']).map((p)=>{...p,'sync_status':p['status']}).toList();
     await widget.queue.cache('survey-detail:$id',[{...server,'photos':serverPhotos}]);
     if(mounted)setState((){
-     if(server['status']=='completed'||local==null){draft={...server,'photos':serverPhotos,'server_status':server['status']};}
+     if(server['status']=='completed'||local==null){draft={...server,
+       'photos':serverPhotos,'server_status':server['status'],
+       'market_brands':server['market_brand_names'],
+       'market_brand_checked':server['market_brand_names'] is List};}
      else{final media=<String,Map<String,dynamic>>{for(final p in photos)p['id'].toString():p,for(final p in serverPhotos)p['id'].toString():p};draft={...draft,'server_status':server['status'],'server_version':server['version'],'location_initialized':server['location_initialized'],'photos':media.values.toList()};}
     });
    }catch(e){
@@ -297,7 +367,8 @@ class _SurveyDetailState extends State<SurveyDetail>{
   setState(()=>busy=true);
   try{
    final op=const Uuid().v4(),end=DateTime.now().toUtc().toIso8601String(),next={...snapshot(),'status':'completed_pending','ended_at':end,'finish_op':op};
-   await widget.queue.saveSurveyDraft(next,path:'/api/v1/sessions/$id',method:'PATCH',payload:{'client_ref':op,'version':draft['server_version']??draft['version']??1,'answers':answers,'note':draft['note']??'','ended_at':end},dependsOn:[...parent,...photos.map((p)=>p['id'].toString())]);
+   await widget.queue.saveSurveyDraft(next,path:'/api/v1/sessions/$id',method:'PATCH',payload:{'client_ref':op,'version':draft['server_version']??draft['version']??1,'answers':answers,'note':draft['note']??'','ended_at':end,
+      'market_brands':marketChecked?marketSelection:null},dependsOn:[...parent,...photos.map((p)=>p['id'].toString())]);
    if(mounted)setState(()=>draft=next);await acks();
   }catch(e){if(mounted)setState(()=>message=e.toString());}
   finally{if(mounted)setState(()=>busy=false);}
@@ -315,6 +386,46 @@ class _SurveyDetailState extends State<SurveyDetail>{
    if(bytes is List)Image.memory(Uint8List.fromList(bytes.cast<int>()),height:140,fit:BoxFit.contain)
    else if(p['sync_status']=='ready')FutureBuilder<Uint8List>(future:images.putIfAbsent(pid,()=>remoteImage(pid)),builder:(c,s)=>s.hasData?InkWell(onTap:()=>showDialog<void>(context:context,builder:(c)=>AlertDialog(title:const Text('Ảnh khảo sát'),content:FutureBuilder<Uint8List>(future:remoteImage(pid,thumbnail:false),builder:(c,v)=>v.hasData?Image.memory(v.data!):Text(v.hasError?'Không tải được ảnh':'Đang tải…')),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng'))])),child:Image.memory(s.data!,height:140,fit:BoxFit.contain)):Text(s.hasError?'Không tải được ảnh khi offline':'Đang tải ảnh…')),
   ])));
+ }
+ Widget marketBrandSection(){
+  final selected=marketSelection;
+  final choices={...marketSuggestions,...selected}.toList()..sort();
+  return Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(
+   crossAxisAlignment:CrossAxisAlignment.start,children:[
+    Text('Nhãn hàng đang thấy tại điểm bán',
+     style:Theme.of(context).textTheme.titleMedium),
+    const SizedBox(height:4),
+    const Text('Chỉ ghi nhận nhãn thực tế tại khách. '
+     'Quay lại tháng sau vẫn tính một khách cho mỗi nhãn, không cộng số lần khảo sát.',
+     style:TextStyle(fontSize:12)),
+    CheckboxListTile(
+     contentPadding:EdgeInsets.zero,
+     title:const Text('Đã kiểm tra nhãn hàng tại điểm bán'),
+     subtitle:const Text('Bỏ chọn nếu lần này không khảo sát nhãn. '
+      'Tích chọn và để trống nếu khách không có nhãn nào.'),
+     value:marketChecked,
+     onChanged:locked||busy?null:(v)=>marketCheckedChanged(v==true)),
+    if(marketLoading)const LinearProgressIndicator(minHeight:2),
+    if(marketChecked)...[
+     if(choices.isNotEmpty)Wrap(spacing:5,runSpacing:3,children:[
+      for(final name in choices)FilterChip(
+       label:Text(name),selected:selected.any((s)=>s.toLowerCase()==name.toLowerCase()),
+       onSelected:locked||busy?null:(value)=>selectMarketBrand(name,value)),
+     ]),
+     if(!locked)Row(children:[
+      Expanded(child:TextField(controller:customMarketBrand,
+       maxLength:100,
+       decoration:const InputDecoration(
+        isDense:true,labelText:'Nhãn khác (ví dụ MGP, Thành Đạt)'),
+       onSubmitted:(_)=>addMarketBrand())),
+      IconButton(onPressed:busy?null:addMarketBrand,
+       tooltip:'Thêm nhãn quan sát',icon:const Icon(Icons.add_circle_outline)),
+     ]),
+     Text(selected.isEmpty?'Đã xác nhận không có nhãn tại điểm bán.':
+      '${selected.length} nhãn quan sát: ${selected.join(', ')}'),
+    ],
+   ],
+  )));
  }
  Widget question(Map<String,dynamic> q){
   final key=q['id'].toString(),v=answers[key],label='${q['label']}${q['required']==true?' *':''}';
@@ -340,6 +451,7 @@ class _SurveyDetailState extends State<SurveyDetail>{
     if(!own)const Text('Chế độ xem của quản lý · không được sửa phiên người khác.'),
     if(busy)const LinearProgressIndicator(),if(message!=null)Text(message!),
     for(final p in pending)ListTile(contentPadding:EdgeInsets.zero,leading:const Icon(Icons.cloud_upload_outlined),title:Text(p['status']=='blocked'?'Cần xử lý lỗi đồng bộ':'Đang chờ đồng bộ'),subtitle:Text(p['error']?.toString()??p['path'].toString()),trailing:p['status']=='blocked'&&own?TextButton(onPressed:busy||widget.queue.syncing?null:()=>widget.queue.retrySurveyOperation(p['upload_id'].toString()),child:const Text('Thử lại')):null),
+    const SizedBox(height:12),marketBrandSection(),
     const SizedBox(height:16),Text('Checklist',style:Theme.of(context).textTheme.titleMedium),
     for(final q in qs)Padding(padding:const EdgeInsets.only(top:12),child:question(q)),
     const SizedBox(height:12),
