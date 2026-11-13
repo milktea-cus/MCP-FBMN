@@ -111,3 +111,16 @@
 6. **P0-J** hồi quy đơn hàng / nghiệp vụ / bảo mật / offline + UAT & nghiệm thu v1.0.
 
 **Quy tắc Done cho mỗi pha:** đọc code/head, migration additive + backup/compatibility, test auth/DB/API/frontend/offline, CI xanh, deploy đúng Cloudflare/Vercel khi liên quan, smoke production và ghi SHA/bằng chứng; không làm giả real-device UAT. Không chỉnh production để “làm đẹp checklist”. Không tạo repo hay ZIP thay thế.
+
+
+## Cập nhật 13/11/2026 — Staff Editor Mobile (chọn cấp dưới hàng loạt)
+
+- [x] **UX:** màn Thêm/Sửa nhân viên tối ưu cho mobile dạng toàn màn hình, nút Lưu/Hủy cố định; chỉ cần mở từng khu vực khi sử dụng, không hiển thị danh sách tỉnh/huyện dài từ đầu.
+- [x] Đổi nhãn **Cấp trên trực tiếp** (1 người), kèm diễn giải người quản lý nhân viên này; Manager có **Chọn nhân viên cấp dưới (N)**, tìm theo tên/mã, tích nhiều người và xem cấp trên hiện tại trước khi chuyển. Không dùng đội nhóm. Vai trò + chức danh vẫn độc lập.
+- [x] **Địa bàn phụ trách riêng** thu gọn, chọn nhiều tỉnh/huyện trực tiếp. Chuỗi/khách riêng tiếp tục quản lý ở tab **Phân công kinh doanh**, độc lập với cây nhân sự.
+- [x] **Ghi DB an toàn:** migration `032_staff_reporting_batch.sql`, RPC `sales_save_staff_with_reports` lưu hồ sơ và thay đổi cấp dưới trong cùng giao dịch, kiểm tra Admin, phiên bản từng nhân viên, không trùng, không có chu kỳ, cập nhật scope revision cho nhánh cũ/mới và ghi audit. Backend hỗ trợ payload cũ không gửi `report_changes`.
+- [x] **Test Neon tạm:** chuyển cấp dưới đạt; sai scope_revision và tạo vòng lặp đều bị từ chối (rollback); bỏ cấp dưới bị khóa đạt; quyền xem theo nhánh không tự thành quyền sửa. Production không tạo chuyển cấp dưới khi thử.
+- [x] **Deploy:** code commit `bf326eeba435e280d57ee7e34933b0d4eb7de6c7`; Neon production migration 032; Vercel `dpl_HsvrruCb6AGqUrzdAvTpj9BzaHQf` READY + alias `sales-mien-tay.vercel.app`; Worker `738d271e-42da-41dd-a8bd-a987dd25cba7` version `aa203aad-af61-4943-b199-17c55066bae8` 100%, SHA256 bundle `ff6270e282ffbf8c8ac423ed259568c0053705f8ef3d184391884b4eb5c84a0c`. 7 Cloudflare bindings preserved.
+- [x] TypeScript typecheck, Wrangler dry-run/minify, Flutter Analyze (117 infos, không lỗi/warning gây chặn), Flutter Web release, offline shell 42 tài nguyên không cache API, push check PASS; trang chủ production HTTP 200.
+- [ ] **UAT còn mở:** đăng nhập bằng phiên Admin và dùng chọn nhiều cấp dưới trên điện thoại thật; kiểm 401/403/409 API, mất mạng/IndexedDB và Android SQLite; URL /api qua Vercel tool bị share-link authentication chặn, không có bằng chứng HTTP API với cookie thật. Android APK chưa phát hành lại.
+
