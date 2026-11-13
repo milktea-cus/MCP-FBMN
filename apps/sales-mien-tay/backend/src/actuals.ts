@@ -37,7 +37,7 @@ export async function actualRoutes(req:Request,env:{DATABASE_URL:string},u:User,
  const match=/^\/api\/v1\/actuals\/([0-9a-f-]{36})\/history$/i.exec(path);
  if(match&&req.method==='GET'){
   const allowed=await sql`SELECT 1 FROM sales_actuals a JOIN customers c ON c.id=a.customer_id
-   WHERE a.id=${match[1]}::uuid AND c.owner_sub=a.owner_sub AND public.sales_can_access(${u.sub},a.owner_sub,c.province,c.district)`;
+   WHERE a.id=${match[1]}::uuid AND c.owner_sub=a.owner_sub AND public.sales_customer_allowed(${u.sub},c.id,'actuals')`;
   if(!allowed.length)return bad('Không có quyền',403);
   return reply({items:await sql`SELECT op_id,actor_sub,before_data,after_data,created_at FROM sales_actual_edits WHERE actual_id=${match[1]}::uuid ORDER BY created_at DESC LIMIT 100`});
  }
@@ -52,7 +52,7 @@ export async function actualRoutes(req:Request,env:{DATABASE_URL:string},u:User,
   if(!staff.some(s=>s.id===owner))return bad('Không có quyền nhân viên',403);
   if(kind==='customer')return reply({items:await sql`SELECT id::text AS id,code,name FROM customers
     WHERE owner_sub=${owner} AND status<>'inactive' AND
-    public.sales_can_access(${u.sub},owner_sub,province,district) AND
+    public.sales_customer_allowed(${u.sub},id,'actuals') AND
     (name ILIKE '%'||${q}||'%' OR code ILIKE '%'||${q}||'%') ORDER BY name LIMIT 100`});
   if(kind==='product')return reply({items:await sql`SELECT id::text AS id,company_code AS code,name FROM catalog_products
    WHERE active AND (name ILIKE '%'||${q}||'%' OR company_code ILIKE '%'||${q}||'%') ORDER BY company_code LIMIT 100`});
@@ -65,7 +65,7 @@ export async function actualRoutes(req:Request,env:{DATABASE_URL:string},u:User,
     FROM sales_actuals a JOIN customers c ON c.id=a.customer_id
     WHERE a.owner_sub=${owner} AND c.owner_sub=a.owner_sub AND a.status='active'
     AND a.sale_date>=make_date(${year},1,1) AND a.sale_date<make_date(${year+1},1,1)
-    AND public.sales_can_access(${u.sub},a.owner_sub,c.province,c.district)
+    AND public.sales_customer_allowed(${u.sub},c.id,'actuals')
     GROUP BY 1 ORDER BY 1`;
   return reply({owner,year,items:results});
  }
@@ -80,14 +80,14 @@ export async function actualRoutes(req:Request,env:{DATABASE_URL:string},u:User,
     JOIN customers c ON c.id=a.customer_id AND c.owner_sub=a.owner_sub JOIN catalog_products p ON p.id=a.product_id
     WHERE a.sale_date>=to_date(${month}||'-01','YYYY-MM-DD') AND a.sale_date<(to_date(${month}||'-01','YYYY-MM-DD')+interval '1 month')
     AND (${owner==='all'&&manager} OR a.owner_sub=${owner})
-    AND public.sales_can_access(${u.sub},a.owner_sub,c.province,c.district)
+    AND public.sales_customer_allowed(${u.sub},c.id,'actuals')
     ORDER BY a.sale_date DESC,a.created_at DESC LIMIT 500`;
   const [totals]=await sql`SELECT count(*)::int AS total_records,count(*) FILTER(WHERE a.status='active')::int AS active_records,
       coalesce(sum(a.amount) FILTER(WHERE a.status='active'),0)::text AS total_amount
     FROM sales_actuals a JOIN customers c ON c.id=a.customer_id AND c.owner_sub=a.owner_sub
     WHERE a.sale_date>=to_date(${month}||'-01','YYYY-MM-DD') AND a.sale_date<(to_date(${month}||'-01','YYYY-MM-DD')+interval '1 month')
     AND (${owner==='all'&&manager} OR a.owner_sub=${owner})
-    AND public.sales_can_access(${u.sub},a.owner_sub,c.province,c.district)`;
+    AND public.sales_customer_allowed(${u.sub},c.id,'actuals')`;
   return reply({month,items,summary:totals,can_import:manager});
  }
  if(['/api/v1/actuals/import/preview','/api/v1/actuals/import/confirm'].includes(path)&&req.method==='POST'){
@@ -111,7 +111,7 @@ export async function actualRoutes(req:Request,env:{DATABASE_URL:string},u:User,
   if(errs.length)return bad(errs.slice(0,25).join('; '));
   const [staff,customers,products,old]=await Promise.all([
    sql`SELECT user_sub,employee_code FROM staff_members WHERE active AND public.sales_can_access(${u.sub},user_sub,NULL,NULL) AND employee_code=ANY(${parsed.map(r=>r.employee_code)}::text[])`,
-   sql`SELECT id,owner_sub,code,province,district FROM customers WHERE code=ANY(${parsed.map(r=>r.customer_code)}::text[]) AND status<>'inactive' AND public.sales_can_access(${u.sub},owner_sub,province,district) AND public.sales_can_access(owner_sub,owner_sub,province,district)`,
+   sql`SELECT id,owner_sub,code,province,district FROM customers WHERE code=ANY(${parsed.map(r=>r.customer_code)}::text[]) AND status<>'inactive' AND public.sales_customer_allowed(${u.sub},id,'actuals') AND public.sales_can_access(owner_sub,owner_sub,province,district)`,
    sql`SELECT id,company_code FROM catalog_products WHERE company_code=ANY(${parsed.map(r=>r.company_code)}::text[]) AND active`,
    sql`SELECT id,external_ref,line_ref,owner_sub,customer_id,product_id,sale_date,quantity,amount,status FROM sales_actuals
       WHERE source='company' AND external_ref=ANY(${parsed.map(r=>r.external_ref)}::text[])`
