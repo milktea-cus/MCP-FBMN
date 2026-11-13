@@ -477,9 +477,8 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
  @override void initState(){super.initState();unawaited(loadBrands());}
  Future<void> loadBrands()async{
   try{
-   final result=await surveyGet(widget.service,'/api/v1/catalog/brands');
+   final result=await surveyGet(widget.service,'/api/v1/market/brands');
    if(mounted)setState(()=>officialBrands=asRows(result['items'])
-    .where((b)=>b['active']==true)
     .map((b)=>b['name'].toString()).toList()..sort());
   }catch(_){
    // Existing versioned templates stay available during a catalog outage.
@@ -488,7 +487,7 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
  void applyBrandCatalog(){
   if(officialBrands.length<2)return;
   final q=<String,dynamic>{
-   'id':'brands','label':'Nhãn hàng quan sát (danh mục chuẩn)',
+   'id':'brands','label':'Nhãn hàng thị trường (ghi nhận thực tế)',
    'type':'multi_choice','required':true,
    'catalog_source':'brands','options':List<String>.of(officialBrands),
   };
@@ -538,12 +537,12 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
      'label':'','type':'text','required':false})),child:const Text('Thêm câu hỏi')),
     OutlinedButton.icon(onPressed:busy||officialBrands.length<2?null:applyBrandCatalog,
      icon:const Icon(Icons.label_outline),
-     label:const Text('Dùng nhãn hàng chuẩn')),
+     label:const Text('Chọn nhãn thị trường đã gặp')),
     FilledButton(onPressed:busy?null:publish,child:const Text('Phát hành phiên bản')),
    ]),
    if(officialBrands.length<2)const Text(
     'Cần ít nhất 2 nhãn chuẩn để tạo câu chọn nhiều. '
-    'Admin thêm nhãn trong Danh mục nhãn hàng.'),
+    'Nhãn mới nhập trực tiếp khi khảo sát, không lấy từ SKU Futurebook.'),
   ]
  ]));
 }
