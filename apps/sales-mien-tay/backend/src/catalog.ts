@@ -102,7 +102,7 @@ export async function catalogRoutes(req:Request,env:{DATABASE_URL:string},actor:
   let v:Obj;try{v=await body(req);}catch{return bad('JSON không hợp lệ');}
   if(!validId(v.client_ref)||!validId(v.brand_id)||
      typeof v.alias_name!=='string'||!v.alias_name.trim()||
-     v.alias_name.trim().length>120||/[\\x00-\\x1f\\x7f]/.test(v.alias_name))
+     v.alias_name.trim().length>120||/[\x00-\x1f\x7f]/.test(v.alias_name))
    return bad('Nhãn và tên thay thế không hợp lệ');
   try{
    const rows=await db`SELECT public.sales_brand_alias_add(
