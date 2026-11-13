@@ -112,7 +112,9 @@ class _WorkHubPageState extends State<WorkHubPage>{
         '${route['scope_key']}\n'
         'Dự kiến: ${route['stop_count']??0} điểm · '
         'Đã ghé: ${route['visited_count']??'—'} · '
-        'Khảo sát: ${route['survey_count']??'—'}'),
+        'Chưa ghé: ${((route['stop_count'] as num?)?.toInt()??0)-((route['visited_count'] as num?)?.toInt()??0)}\n'
+        'Khảo sát hoàn tất: ${route['survey_count']??'—'} · '
+        'Lead mới: ${route['lead_count']??'—'}'),
        isThreeLine:true,
        trailing:const Icon(Icons.chevron_right),
        onTap:()=>openRoute(route),
