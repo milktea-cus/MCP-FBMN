@@ -29,14 +29,15 @@ export async function orgRoutes(req:Request,env:AuthEnv,actor:{sub:string;admin:
  const suffix=url.pathname.slice('/api/v1/admin/org'.length);
  const db=neon(env.DATABASE_URL);
  if(req.method==='GET'&&suffix===''){
-  const [staff,grants,teams,chains,teamMembers]=await Promise.all([
-   db`SELECT user_sub,employee_code,full_name,role,active,manager_sub,scope_revision,job_title FROM public.staff_members ORDER BY employee_code LIMIT 5000`,
+  const [staff,grants,teams,chains,teamMembers,assignments]=await Promise.all([
+   db`SELECT m.user_sub,m.employee_code,m.full_name,m.role,m.active,m.manager_sub,m.scope_revision,m.job_title,coalesce((SELECT jsonb_agg(jsonb_build_object('province',g.province,'district',g.district)) FROM public.staff_scopes g WHERE g.user_sub=m.user_sub),'[]'::jsonb) AS scopes FROM public.staff_members m ORDER BY m.employee_code LIMIT 5000`,
    db`SELECT id,grantee_sub,scope_kind,scope_key,action,active,granted_at,updated_at FROM public.scope_grants ORDER BY updated_at DESC LIMIT 2000`,
    db`SELECT id,name FROM public.org_teams ORDER BY name LIMIT 500`,
    db`SELECT id,name FROM public.customer_chains ORDER BY name LIMIT 500`,
-   db`SELECT team_id,user_sub FROM public.org_team_members LIMIT 5000`
+   db`SELECT team_id,user_sub FROM public.org_team_members LIMIT 5000`,
+   db`SELECT id,user_sub,scope_kind,scope_key,active,assigned_by FROM public.staff_business_assignments WHERE active ORDER BY user_sub,scope_kind,scope_key LIMIT 5000`
   ]);
-  return json({staff,grants,teams,chains,team_members:teamMembers});
+  return json({staff,grants,teams,chains,team_members:teamMembers,assignments});
  }
  if(req.method==='GET'&&suffix==='/territories'){
   const items=await db`SELECT t.name,t.level,p.name AS province FROM public.territory_catalog t
@@ -86,6 +87,14 @@ export async function orgRoutes(req:Request,env:AuthEnv,actor:{sub:string;admin:
    if(!['team','chain'].includes(String(data.kind))||!validString(data.name,160))return fail('Tên nhóm/chuỗi không hợp lệ');
    const result=await db`SELECT public.sales_create_org_unit(${actor.sub},${data.kind as string},${(data.name as string).trim()}) AS item`;
    return json({item:result[0].item},201);
+  }
+  if(suffix==='/assignments'){
+   if(!validString(data.user_sub,150)||!['chain','customer'].includes(String(data.scope_kind))||
+      !validString(data.scope_key,150)||!uuid.test(String(data.scope_key))||
+      typeof data.active!=='boolean')return fail('Phân công kinh doanh không hợp lệ');
+   const result=await db`SELECT public.sales_set_staff_business_assignment(
+     ${actor.sub},${data.user_sub as string},${data.scope_kind as string},${data.scope_key as string},${data.active}) AS item`;
+   return json({item:result[0].item});
   }
   if(suffix==='/grants'){
    if(!validString(data.grantee_sub,150)||!kinds.includes(String(data.scope_kind))||
