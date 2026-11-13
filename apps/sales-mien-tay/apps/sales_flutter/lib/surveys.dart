@@ -361,6 +361,31 @@ class SurveyTemplateAdmin extends StatefulWidget{
 class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
  String province='';int version=0;bool busy=false;String? message;
  List<Map<String,dynamic>> qs=[];
+ List<String> officialBrands=[];
+ @override void initState(){super.initState();unawaited(loadBrands());}
+ Future<void> loadBrands()async{
+  try{
+   final result=await surveyGet(widget.service,'/api/v1/catalog/brands');
+   if(mounted)setState(()=>officialBrands=asRows(result['items'])
+    .where((b)=>b['active']==true)
+    .map((b)=>b['name'].toString()).toList()..sort());
+  }catch(_){
+   // Existing versioned templates stay available during a catalog outage.
+  }
+ }
+ void applyBrandCatalog(){
+  if(officialBrands.length<2)return;
+  final q=<String,dynamic>{
+   'id':'brands','label':'Nhãn hàng quan sát (danh mục chuẩn)',
+   'type':'multi_choice','required':true,
+   'catalog_source':'brands','options':List<String>.of(officialBrands),
+  };
+  setState((){
+   final i=qs.indexWhere((item)=>item['id']=='brands');
+   if(i>=0)qs[i]=q;
+   else if(qs.length<50)qs.add(q);
+  });
+ }
  Future<void> load(String p)async{
   setState((){province=p;busy=true;message=null;qs=[];version=0;});
   try{final data=await surveyGet(widget.service,'/api/v1/survey-templates',{'province':p});final items=asRows(data['items']);if(items.isNotEmpty&&mounted)setState((){version=(items.first['version'] as num).toInt();qs=asRows(items.first['questions']);});}
@@ -384,12 +409,29 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
    for(final q in qs)Card(key:ValueKey(q['id']),child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
     TextFormField(key:ValueKey('${province}:$version:${q['id']}'),initialValue:q['label'].toString(),decoration:const InputDecoration(labelText:'Nội dung câu hỏi'),onChanged:(v)=>q['label']=v),
     const SizedBox(height:8),
-    DropdownButtonFormField<String>(initialValue:q['type'].toString(),decoration:const InputDecoration(labelText:'Kiểu trả lời'),items:const [DropdownMenuItem(value:'text',child:Text('Văn bản')),DropdownMenuItem(value:'number',child:Text('Số')),DropdownMenuItem(value:'boolean',child:Text('Có / Không')),DropdownMenuItem(value:'choice',child:Text('Chọn một')),DropdownMenuItem(value:'multi_choice',child:Text('Chọn nhiều'))],onChanged:(v)=>setState(()=>q['type']=v??'text')),
-    if(['choice','multi_choice'].contains(q['type']))TextFormField(initialValue:(q['options'] as List? ?? []).join(', '),decoration:const InputDecoration(labelText:'Lựa chọn (ngăn cách bằng dấu phẩy)'),onChanged:(v)=>q['options']=v.split(',').map((s)=>s.trim()).where((s)=>s.isNotEmpty).toSet().toList()),
+    DropdownButtonFormField<String>(initialValue:q['type'].toString(),decoration:const InputDecoration(labelText:'Kiểu trả lời'),items:const [DropdownMenuItem(value:'text',child:Text('Văn bản')),DropdownMenuItem(value:'number',child:Text('Số')),DropdownMenuItem(value:'boolean',child:Text('Có / Không')),DropdownMenuItem(value:'choice',child:Text('Chọn một')),DropdownMenuItem(value:'multi_choice',child:Text('Chọn nhiều'))],onChanged:busy||q['catalog_source']=='brands'?null:(v)=>setState(()=>q['type']=v??'text')),
+    if(q['catalog_source']=='brands')Text(
+    'Danh mục chuẩn · ${(q['options'] as List? ?? []).length} nhãn · '
+    'phiên bản giữ nguyên lựa chọn tại lúc phát hành')
+   else if(['choice','multi_choice'].contains(q['type']))TextFormField(
+    initialValue:(q['options'] as List? ?? []).join(', '),
+    decoration:const InputDecoration(labelText:'Lựa chọn (ngăn cách bằng dấu phẩy)'),
+    onChanged:(v)=>q['options']=v.split(',').map((s)=>s.trim()).where((s)=>s.isNotEmpty).toSet().toList()),
     CheckboxListTile(contentPadding:EdgeInsets.zero,value:q['required']==true,title:const Text('Bắt buộc'),onChanged:(v)=>setState(()=>q['required']=v==true)),
     TextButton(onPressed:busy?null:()=>setState(()=>qs.remove(q)),child:const Text('Bỏ câu hỏi trong bản mới')),
    ]))),
-   Wrap(spacing:8,children:[OutlinedButton(onPressed:busy||qs.length>=50?null:()=>setState(()=>qs.add({'id':'q_${const Uuid().v4().replaceAll('-','').substring(0,16)}','label':'','type':'text','required':false})),child:const Text('Thêm câu hỏi')),FilledButton(onPressed:busy?null:publish,child:const Text('Phát hành phiên bản'))]),
+   Wrap(spacing:8,runSpacing:8,children:[
+    OutlinedButton(onPressed:busy||qs.length>=50?null:()=>setState(()=>qs.add({
+     'id':'q_${const Uuid().v4().replaceAll('-','').substring(0,16)}',
+     'label':'','type':'text','required':false})),child:const Text('Thêm câu hỏi')),
+    OutlinedButton.icon(onPressed:busy||officialBrands.length<2?null:applyBrandCatalog,
+     icon:const Icon(Icons.label_outline),
+     label:const Text('Dùng nhãn hàng chuẩn')),
+    FilledButton(onPressed:busy?null:publish,child:const Text('Phát hành phiên bản')),
+   ]),
+   if(officialBrands.length<2)const Text(
+    'Cần ít nhất 2 nhãn chuẩn để tạo câu chọn nhiều. '
+    'Admin thêm nhãn trong Danh mục nhãn hàng.'),
   ]
  ]));
 }
