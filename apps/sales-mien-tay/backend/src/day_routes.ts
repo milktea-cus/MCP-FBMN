@@ -41,7 +41,8 @@ export function validRouteStop(v:Record<string,unknown>,editing:boolean):string|
 function saveError(e:unknown):Response{
  const message=(e as {message?:string;code?:string}).message??'';
  if(message.includes('permission')||message.includes('forbidden'))return fail('Phạm vi công tác đã bị thay đổi hoặc không có quyền',403);
- if(message.includes('stale')||message.includes('visited')||(e as {code?:string}).code==='23505')return fail('Tuyến hoặc điểm ghé bị trùng, đã ghé hoặc thay đổi phiên bản',409);
+ if(message.includes('stale')||message.includes('visited')||message.includes('conflict')||(e as {code?:string}).code==='23505')return fail('Tuyến hoặc điểm ghé bị trùng, đã ghé hoặc thay đổi phiên bản',409);
+ if(message.includes('invalid'))return fail('Dữ liệu công tác không hợp lệ',400);
  return fail('Không lưu được tuyến ngày/điểm ghé',503);
 }
 export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL):Promise<Response|null>{
@@ -52,10 +53,16 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
   const month=url.searchParams.get('month')??'';
   if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))return fail('Tháng không hợp lệ');
   const items=await db`SELECT r.*,p.period_ym,p.scope_kind,p.scope_key,p.province,p.district,
-    (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id)::integer AS stop_count,
-    (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id
+    (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id AND NOT s.is_unplanned)::integer AS stop_count,
+    (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id AND s.is_unplanned)::integer AS unplanned_count,
+    (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id AND NOT s.is_unplanned
+      AND s.missed_code IS NOT NULL)::integer AS missed_count,
+    (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id AND NOT s.is_unplanned
       AND (EXISTS(SELECT 1 FROM public.field_visits v WHERE v.day_route_stop_id=s.id)
         OR EXISTS(SELECT 1 FROM public.field_area_visits a WHERE a.day_route_stop_id=s.id)))::integer AS visited_count,
+    (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id AND s.is_unplanned
+      AND (EXISTS(SELECT 1 FROM public.field_visits v WHERE v.day_route_stop_id=s.id)
+        OR EXISTS(SELECT 1 FROM public.field_area_visits a WHERE a.day_route_stop_id=s.id)))::integer AS unplanned_visited_count,
     (SELECT count(DISTINCT se.day_route_stop_id) FROM public.field_survey_sessions se
       JOIN public.field_route_stops s ON s.id=se.day_route_stop_id
       WHERE s.day_route_id=r.id AND se.status='completed')::integer AS survey_count,
@@ -69,6 +76,47 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
      (${actor.manager} AND public.sales_staff_in_subtree(${actor.sub},r.owner_sub)))
    ORDER BY r.route_date,r.created_at,r.id LIMIT 2000`;
   return reply({items});
+ }
+
+ // Missed stops record a reason, never GPS or a completed survey.
+ const missed=/^\/([0-9a-f-]{36})\/stops\/([0-9a-f-]{36})\/missed$/i.exec(suffix);
+ if(missed&&req.method==='POST'){
+  if(!uuid.test(missed[1])||!uuid.test(missed[2]))return fail('UUID điểm ghé không hợp lệ');
+  let v:Record<string,unknown>;try{v=await parse(req);}catch{return fail('JSON không hợp lệ');}
+  if(!uuid.test(String(v.client_ref??''))||
+   !['closed','unavailable','unable','other'].includes(String(v.reason_code??''))||
+   !string(v.reason_note??'',0,1000)||
+   (v.reason_code==='other'&&!string(v.reason_note,2,1000))||
+   !string(v.captured_at,10,40)||!Number.isFinite(Date.parse(String(v.captured_at))))
+   return fail('Lý do không ghé hoặc thời gian không hợp lệ');
+  try{
+   const rows=await db`SELECT public.sales_mark_route_stop_missed(
+    ${actor.sub},${missed[1]}::uuid,${missed[2]}::uuid,${String(v.client_ref)}::uuid,
+    ${String(v.reason_code)},${String(v.reason_note??'')},${String(v.captured_at)}::timestamptz) AS item`;
+   return reply({item:rows[0].item},201);
+  }catch(e){return saveError(e);}
+ }
+ // Execution-only unplanned stops do not inflate original planned count.
+ const extra=/^\/([0-9a-f-]{36})\/unplanned-stops$/i.exec(suffix);
+ if(extra&&req.method==='POST'){
+  if(!uuid.test(extra[1]))return fail('UUID tuyến không hợp lệ');
+  let v:Record<string,unknown>;try{v=await parse(req);}catch{return fail('JSON không hợp lệ');}
+  const invalid=validRouteStop(v,false);
+  if(invalid)return fail(invalid);
+  if(!string(v.captured_at,10,40)||!Number.isFinite(Date.parse(String(v.captured_at))))
+   return fail('Thời gian phát sinh không hợp lệ');
+  const customer=v.stop_kind==='customer'?String(v.customer_id):null;
+  const chain=v.stop_kind==='chain'?String(v.chain_id):null;
+  const province=v.stop_kind==='area'?String(v.province):null;
+  const district=v.stop_kind==='area'?String(v.district):null;
+  try{
+   const rows=await db`SELECT public.sales_add_unplanned_route_stop(
+    ${actor.sub},${String(v.client_ref)}::uuid,${String(v.client_ref)}::uuid,
+    ${extra[1]}::uuid,${String(v.stop_kind)},${customer}::uuid,${chain}::uuid,
+    ${province},${district},${Number(v.sequence)},${String(v.purpose??'')},
+    ${String(v.captured_at)}::timestamptz) AS item`;
+   return reply({item:rows[0].item},201);
+  }catch(e){return saveError(e);}
  }
  const path=/^\/([0-9a-f-]{36})(?:\/(stops|candidates)(?:\/([0-9a-f-]{36}))?)?$/i.exec(suffix);
  if(path&&!uuid.test(path[1])||path?.[3]&&!uuid.test(path[3]))return fail('Route UUID không hợp lệ');
@@ -113,7 +161,8 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
   return reply({item:route,stops:stops.map(s=>({
    ...s,activity_status:Number(s.completed_sessions)>0?'survey_completed':
      Number(s.session_count)>0?'survey_started':
-     Number(s.visit_count)>0?'visited':'planned'}))});
+     Number(s.visit_count)>0?'visited':
+     s.missed_code!=null?'missed':'planned'}))});
  }
  if(req.method==='POST'&&suffix==='' || req.method==='PATCH'&&path&&!path[2]){
   let v:Record<string,unknown>;try{v=await parse(req);}catch{return fail('JSON không hợp lệ');}
