@@ -8,6 +8,31 @@ import 'day_route.dart';
 import 'planning_periods.dart';
 import 'session.dart';
 
+/// Plan and actual counters are deliberately separate: GPS does not finish a survey.
+class WorkCounts {
+ final int planned,visited,missed,unplanned,unplannedVisited,surveys,leads;
+ const WorkCounts(this.planned,this.visited,this.missed,this.unplanned,
+  this.unplannedVisited,this.surveys,this.leads);
+ int get notVisited=>planned>visited?planned-visited:0;
+ int get withoutReason=>notVisited>missed?notVisited-missed:0;
+ static int count(Map<String,dynamic> r,String key){
+  final v=r[key];return v is num&&v>0?v.toInt():0;
+ }
+ factory WorkCounts.fromRoutes(Iterable<Map<String,dynamic>> routes){
+  var planned=0,visited=0,missed=0,unplanned=0,unplannedVisited=0,surveys=0,leads=0;
+  for(final r in routes){
+   planned+=count(r,'stop_count');
+   visited+=count(r,'visited_count');
+   missed+=count(r,'missed_count');
+   unplanned+=count(r,'unplanned_count');
+   unplannedVisited+=count(r,'unplanned_visited_count');
+   surveys+=count(r,'survey_count');
+   leads+=count(r,'lead_count');
+  }
+  return WorkCounts(planned,visited,missed,unplanned,unplannedVisited,surveys,leads);
+ }
+}
+
 /// Single Sales entry: plan, execute, compare. The legacy route screen stays
 /// readable through old records but is no longer a second route editor.
 class WorkHubPage extends StatefulWidget {
@@ -73,6 +98,7 @@ class _WorkHubPageState extends State<WorkHubPage>{
     &&r['status']=='ready').toList();
  @override Widget build(BuildContext context){
   final today=dayKey(DateTime.now().toUtc().add(const Duration(hours:7)));
+  final totals=WorkCounts.fromRoutes(dayRoutes);
   return Column(children:[
    Padding(padding:const EdgeInsets.fromLTRB(12,12,12,6),child:Column(
     crossAxisAlignment:CrossAxisAlignment.stretch,children:[
@@ -104,25 +130,33 @@ class _WorkHubPageState extends State<WorkHubPage>{
       if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
       if(dayRoutes.isEmpty&&!busy)
        const Padding(padding:EdgeInsets.all(18),child:Text(
-        'Ngày này chưa có tuyến. Vào Kế hoạch để lập công tác theo địa bàn, khách hoặc chuỗi.')),
-      for(final route in dayRoutes)Card(child:ListTile(
-       leading:const Icon(Icons.route_outlined),
-       title:Text(route['purpose']?.toString()??'Công tác'),
-       subtitle:Text('${route['scope_kind']=='territory'?'Địa bàn':route['scope_kind']=='chain'?'Chuỗi':'Khách cụ thể'} · '
-        '${route['scope_key']}\n'
-        'Dự kiến: ${route['stop_count']??0} điểm · '
-        'Đã ghé: ${route['visited_count']??'—'} · '
-        'Chưa ghé: ${((route['stop_count'] as num?)?.toInt()??0)-((route['visited_count'] as num?)?.toInt()??0)}\n'
-        'Khảo sát hoàn tất: ${route['survey_count']??'—'} · '
-        'Lead mới: ${route['lead_count']??'—'}'),
-       isThreeLine:true,
-       trailing:const Icon(Icons.chevron_right),
-       onTap:()=>openRoute(route),
-      )),
-      if(tab==2&&dayRoutes.isNotEmpty)
-       Padding(padding:const EdgeInsets.all(10),child:Text(
-        'Kết quả lấy từ GPS/phiên khảo sát đã ghi nhận; điểm chưa ghé không tính hoàn thành.',
-        style:Theme.of(context).textTheme.bodySmall)),
+        'Chưa có công tác trong ngày. Mở Kế hoạch để lập lịch.')),
+      if(tab==2&&dayRoutes.isNotEmpty)Card(child:Padding(
+       padding:const EdgeInsets.all(12),child:Column(
+        crossAxisAlignment:CrossAxisAlignment.start,children:[
+         Text('Tổng kết ngày',style:Theme.of(context).textTheme.titleMedium),
+         Text('Kế hoạch: ${totals.planned} · Đã ghé: ${totals.visited} · Chưa ghé: ${totals.notVisited}'),
+         Text('Không ghé có lý do: ${totals.missed} · Chưa ghi nhận: ${totals.withoutReason}'),
+         Text('Hoàn thành khảo sát: ${totals.surveys} · Lead mới: ${totals.leads}'),
+         Text('Ngoài kế hoạch: ${totals.unplanned} điểm · Đã ghé: ${totals.unplannedVisited}'),
+        ],
+       ))),
+      for(final route in dayRoutes)Builder(builder:(context){
+       final c=WorkCounts.fromRoutes([route]);
+       return Card(child:ListTile(
+        leading:const Icon(Icons.route_outlined),
+        title:Text(route['purpose']?.toString()??'Công tác'),
+        subtitle:Text(
+         '${route['scope_kind']=='territory'?'Địa bàn':route['scope_kind']=='chain'?'Chuỗi':'Khách cụ thể'} · ${route['scope_key']}\n'
+         'Kế hoạch ${c.planned} · Đã ghé ${c.visited} · Chưa ghé ${c.notVisited}'
+         '${c.missed>0?' (lý do: ${c.missed})':''}\n'
+         'Khảo sát xong ${c.surveys} · Lead ${c.leads} · Phát sinh ${c.unplanned}',
+        ),
+        isThreeLine:true,
+        trailing:const Icon(Icons.chevron_right),
+        onTap:()=>openRoute(route),
+       ));
+      }),
     ])),
   ]);
  }
