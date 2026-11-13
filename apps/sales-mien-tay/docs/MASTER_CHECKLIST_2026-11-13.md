@@ -1,3 +1,5 @@
+> **Ưu tiên mới 13/11 — P0-L2:** [Chuẩn hóa Công tác — kế hoạch, đi thực tế, phân công khách/địa bàn/chuỗi, tổng nhãn hàng](WORKFLOW_CONG_TAC_P0_L2_2026_11_13.md). Thực hiện L2-A → L2-B → L2-C → L2-D → L2-E; không tick P0-L/P0-J chỉ vì đã có UI hoặc deploy. Không xóa lịch/survey cũ.
+
 # FIELD WORK — CHECKLIST TỔNG & NGHIỆP VỤ ĐÃ CHỐT (13/11/2026)
 
 **Nguồn sự thật cho việc tiếp theo:** tài liệu này + checklist đầu [Issue #3](https://github.com/milktea-cus/MCP-FBMN/issues/3). [Issue #4](https://github.com/milktea-cus/MCP-FBMN/issues/4) là lịch sử audit UI/ra đơn và bằng chứng P1-H/P0-I. **Không lấy checkbox chưa được cập nhật của Issue cũ làm bằng chứng đã/ chưa có code.** GitHub `main` lúc audit `557b49f2529132805e540fcd691efb3ba040bfe3`, CI [43154778431](https://github.com/milktea-cus/MCP-FBMN/actions/runs/43154778431) **4/4 PASS** (Flutter 158 unit/widget, 3 Chrome IndexedDB, Android debug build; không phải Android release). Production Cloudflare Worker APK API đã smoke health/DB OK, unauthorized 401, unknown origin 403. Web production gần nhất P1-H; chưa xác minh web đã nhận mọi cập nhật Dart P0-I. Không gọi v1.0 nghiệm thu khi chưa có UAT thật.
