@@ -416,8 +416,8 @@ class _CustomerBrandsPanelState extends State<_CustomerBrandsPanel>{
 }
 
 class _AssortmentReasonDialog extends StatefulWidget{
- final String action,label;
- const _AssortmentReasonDialog({required this.action,this.label='SKU'});
+ final String action;
+ const _AssortmentReasonDialog({required this.action});
  @override State<_AssortmentReasonDialog> createState()=>_AssortmentReasonDialogState();
 }
 class _AssortmentReasonDialogState extends State<_AssortmentReasonDialog>{
@@ -425,7 +425,7 @@ class _AssortmentReasonDialogState extends State<_AssortmentReasonDialog>{
  String value='';
  @override void dispose(){reason.dispose();super.dispose();}
  @override Widget build(BuildContext context)=>AlertDialog(
-  title:Text(widget.action=='verify'?'Xác minh ${widget.label} đang kinh doanh':'Bỏ xác minh ${widget.label}'),
+  title:Text(widget.action=='verify'?'Xác minh SKU đang kinh doanh':'Bỏ xác minh SKU'),
   content:SizedBox(width:420,child:Column(mainAxisSize:MainAxisSize.min,children:[
    const Text('Chỉ xác minh nếu đã kiểm tra thực tế. Đơn xuất không tự chứng minh khách đang bán.'),
    const SizedBox(height:12),
