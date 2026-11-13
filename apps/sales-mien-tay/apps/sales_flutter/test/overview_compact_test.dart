@@ -39,7 +39,7 @@ void main() {
        verifiedRows:[
         {'province':'Sóc Trăng','district':'Mỹ Xuyên','brand':'MGP','customers':1},
         {'province':'Sóc Trăng','district':'Mỹ Xuyên','brand':'Thành Đạt','customers':1},
-       ]))))));
+       ])))));
     expect(tester.takeException(),isNull);
     final table=tester.widget<DataTable>(find.byType(DataTable));
     expect(table.columns.map((c)=>(c.label as Text).data).toList(),
