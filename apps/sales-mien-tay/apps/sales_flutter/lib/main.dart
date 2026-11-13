@@ -13,6 +13,7 @@ import 'offline_queue.dart';
 import 'notifications.dart';
 import 'field_work.dart';
 import 'work_hub.dart';
+import 'package:http/http.dart' as http;
 import 'performance.dart';
 import 'orders.dart';
 import 'surveys.dart';
@@ -99,6 +100,9 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
   bool _loading = false, _fetchingRecords = false;
   int _selectedIndex = 0;
   String? _message;
+  List<Map<String,dynamic>> _brandRows=[],_brandCustomerRows=[];
+  List<String> _brandCatalog=[];
+  bool _brandLoaded=false;
   List<int> get _visibleMenuIndices=>[for(var i=0;i<_sections.length;i++)if(widget.me['role']=='admin'||i!=2)i];
 
   List<String> get _sections => ['Tổng quan', 'Khách hàng / Điểm bán', ...moduleKinds.map((e) => e=='survey'?'Quản trị khảo sát':e=='visit'?'Công tác':moduleLabels[e]!), 'Báo cáo tháng', 'Danh mục SKU', 'Tra tồn', 'Ra đơn'];
@@ -119,6 +123,47 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
     _notificationsTimer=Timer.periodic(const Duration(seconds:60),
       (_)=>unawaited(_notifications.refresh()));
     _refresh();
+    unawaited(_refreshBrands());
+  }
+
+  Future<void> _refreshBrands()async{
+    const catalogKey='canonical-brands-v1',coverageKey='brand-coverage-v1',
+      customersKey='brand-customer-counts-v1';
+    try{
+      final cached=await Future.wait([
+       _queue.cached(catalogKey),_queue.cached(coverageKey),_queue.cached(customersKey)]);
+      if(mounted)setState((){
+       _brandCatalog=cached[0].map((e)=>e['name'].toString()).toList();
+       _brandRows=cached[1];_brandCustomerRows=cached[2];
+       _brandLoaded=cached[0].isNotEmpty||cached[1].isNotEmpty;
+      });
+      final service=_customerService;
+      final results=await Future.wait([
+       http.get(service.uri('/api/v1/catalog/brands'),
+        headers:service.headers).timeout(const Duration(seconds:18)),
+       http.get(service.uri('/api/v1/catalog/brand-coverage'),
+        headers:service.headers).timeout(const Duration(seconds:18)),
+      ]);
+      final brands=decodeApi(results[0]),coverage=decodeApi(results[1]);
+      final names=(brands['items'] as List)
+       .map((e)=>Map<String,dynamic>.from(e as Map)).toList();
+      final rows=(coverage['items'] as List)
+       .map((e)=>Map<String,dynamic>.from(e as Map)).toList();
+      final counts=(coverage['customers'] as List)
+       .map((e)=>Map<String,dynamic>.from(e as Map)).toList();
+      await _queue.cache(catalogKey,names);
+      await _queue.cache(coverageKey,rows);
+      await _queue.cache(customersKey,counts);
+      if(mounted)setState((){
+       _brandCatalog=names.map((e)=>e['name'].toString()).toList();
+       _brandRows=rows;_brandCustomerRows=counts;_brandLoaded=true;
+      });
+    }catch(e){
+      if(e is ApiFailure&&(e.status==401||e.status==403)){
+       if(mounted)setState((){_brandRows=[];_brandCatalog=[];
+        _brandCustomerRows=[];_brandLoaded=false;});
+      }
+    }
   }
 
   void _notify(String message) {
@@ -128,6 +173,7 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
   Future<void> _refresh() async {
     if(_fetchingRecords)return;
     _fetchingRecords=true;
+    unawaited(_refreshBrands());
     if(mounted)setState(()=>_loading=true);
     try {
       // First paint: restore the account/revision-scoped snapshots; never
@@ -221,7 +267,8 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
   List<SalesRecord> _ofKind(String kind) => _items.where((e) => e.kind == kind && (_province.isEmpty || e.province == _province)).toList();
 
   Widget _coverageTable(List<SalesRecord> surveys) => SalesBrandCoverageTable(
-    surveys: surveys,
+    surveys: surveys,brandNames:_brandCatalog,verifiedRows:_brandRows,
+    customerCounts:_brandCustomerRows,verifiedData:_brandLoaded,
     provinces: _catalog.provinces.where((p) => _province.isEmpty || p == _province).toList(),
   );
 
@@ -229,8 +276,8 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
     final surveys = _ofKind('survey');
     final forecasts = _ofKind('forecast');
     final planned = forecasts.fold<double>(0, (sum, e) => sum + e.forecastTotal);
-    final countTD = surveys.where((e) =>
-      (e.data['brands'] is List && (e.data['brands'] as List).contains('Thành Đạt (đối thủ)'))).length;
+    final presentCustomers=_brandLoaded?
+      _brandRows.fold<int>(0,(sum,r)=>sum+((r['customers'] as num?)?.toInt()??0)):0;
     return ListView(padding: const EdgeInsets.all(18), children: [
       Text('Tổng quan', style: Theme.of(context).textTheme.headlineSmall),
       const SizedBox(height: 7),
@@ -238,7 +285,7 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
       SalesOverviewKpis(
         surveyed: surveys.length,
         planned: _money(planned),
-        brandPresence: countTD,
+        brandPresence: presentCustomers,
         onTarget: () => setState(() => _selectedIndex = 3),
       ),
       const SizedBox(height: 18),
@@ -393,7 +440,7 @@ class SalesOverviewKpis extends StatelessWidget {
       _KpiTile(label: 'Quản lý Target', value: 'Xem chỉ tiêu', icon: Icons.flag_outlined,
         onTap: onTarget),
       _KpiTile(label: 'Doanh thu dự kiến', value: planned, icon: Icons.payments_outlined),
-      _KpiTile(label: 'Có nhãn Thành Đạt', value: '$brandPresence', icon: Icons.analytics_outlined),
+      _KpiTile(label: 'Lượt hiện diện nhãn', value: '$brandPresence', icon: Icons.analytics_outlined),
     ];
     items[0] = _KpiTile(label: 'Điểm bán đã khảo sát', value: '$surveyed', icon: Icons.store_outlined);
     return GridView.count(
