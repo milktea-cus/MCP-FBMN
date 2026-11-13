@@ -58,7 +58,7 @@ async function inScope(db: Db, actor: Actor, province: string, district: string)
 }
 async function fetchCustomer(db: Db, actor: Actor, id: string) {
   const rows = await db`SELECT c.* FROM customers c WHERE c.id=${id}::uuid AND
-    public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district) LIMIT 1`;
+    public.sales_customer_allowed(${actor.sub},c.id,'view') LIMIT 1`;
   return rows[0] ?? null;
 }
 function dataError(data: ObjectBody) {
@@ -106,7 +106,7 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
           c.contact_name,c.phone,c.address_line,c.province,c.district,c.latitude,c.longitude,
           c.location_accuracy_m,c.location_consent,c.location_source,c.location_recorded_by,c.location_recorded_at,
            c.note,c.status,c.version,c.created_at,c.updated_at
-        FROM customers c WHERE public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)
+        FROM customers c WHERE public.sales_customer_allowed(${actor.sub},c.id,'view')
           AND (${!url.searchParams.get('province')} OR c.province=${url.searchParams.get('province')??''})
         ORDER BY c.updated_at DESC,c.id DESC LIMIT ${limit} OFFSET ${offset}`;
       return response({items:rows,limit,offset});
@@ -123,15 +123,15 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       const consent=data.location_consent===true;
       const hasPoint=lat!==null&&lat!==undefined&&lon!==null&&lon!==undefined;
       const source=hasPoint?(data.location_source??(acc!==null&&acc!==undefined?'gps':null)):null;
-      const rows=await db`INSERT INTO customers(client_ref,owner_sub,name,code,category,contact_name,phone,
+      const rows=await db`INSERT INTO customers(client_ref,owner_sub,created_by_sub,name,code,category,contact_name,phone,
           address_line,province,district,latitude,longitude,location_accuracy_m,location_consent,
           location_source,location_recorded_by,location_recorded_at,note,status)
-        SELECT ${String(data.client_ref)}::uuid,${actor.sub},${name},${code},${data.category??'tap_hoa'},${contact},${phone},
+        SELECT ${String(data.client_ref)}::uuid,${actor.sub},${actor.sub},${name},${code},${data.category??'tap_hoa'},${contact},${phone},
           ${address},${province},${district},${lat??null},${lon??null},${acc??null},${consent},
           ${source},${hasPoint?actor.sub:null},${hasPoint?new Date().toISOString():null}::timestamptz,${note},${data.status??'active'}
         WHERE public.sales_can_access(${actor.sub},${actor.sub},${province},${district})
         ON CONFLICT(owner_sub,client_ref) DO NOTHING RETURNING *`;
-      const existing=rows.length?rows:await db`SELECT * FROM customers WHERE owner_sub=${actor.sub} AND client_ref=${String(data.client_ref)}::uuid AND public.sales_can_access(${actor.sub},owner_sub,province,district)`;
+      const existing=rows.length?rows:await db`SELECT * FROM customers WHERE owner_sub=${actor.sub} AND client_ref=${String(data.client_ref)}::uuid AND public.sales_customer_allowed(${actor.sub},id,'view')`;
       if(!existing.length) return fail('Không có quyền với bản ghi đã tồn tại',403);
       if(rows.length) await db`INSERT INTO field_audit_events(actor_sub,action,entity_type,entity_id) VALUES (${actor.sub},'create','customer',${rows[0].id}::uuid)`;
       return response({item:existing[0],idempotent:rows.length===0},rows.length?201:200);
@@ -145,7 +145,8 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
   if(!current) return fail('Không tìm thấy điểm bán hoặc không có quyền',404);
   if (!match[2] && req.method==='GET') return response({item:current});
   if (!match[2] && req.method==='PATCH') {
-    if (current.owner_sub!==actor.sub && !actor.admin) return fail('Không được sửa khách hàng của người khác',403);
+    const writePermission=await db`SELECT public.sales_customer_allowed(${actor.sub},${id}::uuid,'edit') AS allowed`;
+     if(writePermission[0]?.allowed!==true)return fail('Không có quyền sửa khách hàng',403);
     let data: ObjectBody;try{data=await input(req);}catch{return fail('JSON không hợp lệ');}
     if(data.client_ref!==undefined&&!uuid.test(String(data.client_ref)))return fail('client_ref không hợp lệ');
     if(data.client_ref&&current.last_mutation_ref===data.client_ref)return response({item:current,idempotent:true});
@@ -153,7 +154,8 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
     const merged:ObjectBody={...current,...data};
     const error=dataError(merged);if(error)return fail(error);
     const province=String(merged.province),district=String(merged.district);
-    if(!await inScope(db,actor,province,district))return fail('Không có quyền địa bàn',403);
+    if((province!==current.province||district!==current.district)&&!await inScope(db,actor,province,district))
+       return fail('Chuyển địa bàn cần quyền trên địa bàn mới',403);
     const requestedLocation=data.latitude!==undefined||data.longitude!==undefined||
       data.location_source!==undefined;
     const newSource=data.location_source===undefined?current.location_source:data.location_source;
@@ -180,21 +182,21 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
         location_recorded_by=CASE WHEN ${locationChanged} THEN ${actor.sub} ELSE location_recorded_by END,
         location_recorded_at=CASE WHEN ${locationChanged} THEN now() ELSE location_recorded_at END,
         note=${optional(merged.note,2000)},status=${merged.status},last_mutation_ref=${data.client_ref??null}::uuid,version=version+1,updated_at=now()
-      WHERE id=${id}::uuid AND version=${data.version as number} AND public.sales_can_access(${actor.sub},owner_sub,province,district) AND public.sales_can_access(${actor.sub},owner_sub,${province},${district}) RETURNING *`;
+      WHERE id=${id}::uuid AND version=${data.version as number} AND public.sales_customer_allowed(${actor.sub},id,'edit') RETURNING *`;
     if(!rows.length)return fail('Xung đột phiên bản',409);
     await db`INSERT INTO field_audit_events(actor_sub,action,entity_type,entity_id) VALUES (${actor.sub},'update','customer',${id}::uuid)`;
     return response({item:rows[0]});
   }
   if(match[2]==='cover') {
     if(req.method!=='PATCH'||match[3])return fail('Method not allowed',405);
-    if(current.owner_sub!==actor.sub)return fail('Chỉ chủ điểm bán được chọn ảnh đại diện',403);
+    const coverAllowed=await db`SELECT public.sales_customer_allowed(${actor.sub},${id}::uuid,'media') AS allowed`;
+     if(coverAllowed[0]?.allowed!==true)return fail('Không có quyền quản lý ảnh',403);
     let data:ObjectBody;try{data=await input(req);}catch{return fail('JSON không hợp lệ');}
     const photoId=String(data.photo_id??'');
     if(!uuid.test(photoId))return fail('Mã ảnh không hợp lệ');
     if(current.cover_photo_id===photoId)return response({item:{id,cover_photo_id:photoId},idempotent:true});
     const rows=await db`UPDATE customers c SET cover_photo_id=${photoId}::uuid
-      WHERE c.id=${id}::uuid AND c.owner_sub=${actor.sub}
-        AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)
+      WHERE c.id=${id}::uuid AND public.sales_customer_allowed(${actor.sub},c.id,'media')
         AND EXISTS(SELECT 1 FROM customer_photos p WHERE p.id=${photoId}::uuid
           AND p.customer_id=c.id AND p.owner_sub=c.owner_sub)
       RETURNING c.id,c.cover_photo_id`;
@@ -211,14 +213,14 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       (p.id=c.cover_photo_id) AS is_cover
       FROM customer_photos p JOIN customers c ON c.id=p.customer_id
       WHERE p.customer_id=${id}::uuid
-        AND public.sales_can_access(${actor.sub},p.owner_sub,c.province,c.district)
+        AND public.sales_customer_allowed(${actor.sub},c.id,'media')
       ORDER BY captured_at DESC,p.id DESC LIMIT 300`;
     return response({items:rows});
   }
   if (match[2]==='visits') {
     if (req.method==='GET') {
       const rows=await db`SELECT id,customer_id,owner_sub,checkin_at,latitude,longitude,accuracy_m,distance_m,note
-        FROM field_visits WHERE customer_id=${id}::uuid AND public.sales_can_access(${actor.sub},owner_sub,${current.province},${current.district}) ORDER BY checkin_at DESC LIMIT 100`;
+        FROM field_visits WHERE customer_id=${id}::uuid AND public.sales_customer_allowed(${actor.sub},${id}::uuid,'view') ORDER BY checkin_at DESC LIMIT 100`;
       return response({items:rows});
     }
     if (req.method!=='POST' || match[3])return fail('Method not allowed',405);
@@ -236,7 +238,7 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
     const rows=await db`INSERT INTO field_visits(customer_id,owner_sub,client_ref,latitude,longitude,accuracy_m,distance_m,note,checkin_at)
       SELECT ${id}::uuid,${actor.sub},${String(data.client_ref)}::uuid,${data.latitude as number},${data.longitude as number},
         ${data.accuracy_m},${distance},${optional(data.note,2000)},${new Date(captured).toISOString()}::timestamptz
-      WHERE EXISTS(SELECT 1 FROM customers c WHERE c.id=${id}::uuid AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district))
+      WHERE EXISTS(SELECT 1 FROM customers c WHERE c.id=${id}::uuid AND public.sales_customer_allowed(${actor.sub},c.id,'view'))
       ON CONFLICT(owner_sub,client_ref) DO NOTHING RETURNING *`;
     const existing=rows.length?rows:await db`SELECT * FROM field_visits WHERE owner_sub=${actor.sub} AND client_ref=${String(data.client_ref)}::uuid AND customer_id=${id}::uuid`;
     if(!existing.length)return fail('client_ref đã dùng cho điểm bán khác',409);
@@ -246,12 +248,12 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
   if(match[2]==='photos') {
     if(req.method==='GET' && !match[3]) {
       const rows=await db`SELECT id,mime_type,bytes,created_at FROM customer_photos
-        WHERE customer_id=${id}::uuid AND public.sales_can_access(${actor.sub},owner_sub,${current.province},${current.district}) ORDER BY created_at DESC LIMIT 100`;
+        WHERE customer_id=${id}::uuid AND public.sales_customer_allowed(${actor.sub},${id}::uuid,'media') ORDER BY created_at DESC LIMIT 100`;
       return response({items:rows});
     }
     if(req.method==='GET' && match[3] && uuid.test(match[3])) {
       if(!env.PHOTOS_BUCKET)return fail('Kho ảnh chưa được cấu hình',503);
-      const rows=await db`SELECT object_key,mime_type FROM customer_photos WHERE id=${match[3]}::uuid AND customer_id=${id}::uuid AND public.sales_can_access(${actor.sub},owner_sub,${current.province},${current.district}) LIMIT 1`;
+      const rows=await db`SELECT object_key,mime_type FROM customer_photos WHERE id=${match[3]}::uuid AND customer_id=${id}::uuid AND public.sales_customer_allowed(${actor.sub},${id}::uuid,'media') LIMIT 1`;
       if(!rows.length)return fail('Không tìm thấy ảnh',404);
       const thumb=url.searchParams.get('thumbnail')==='1'
         ?await env.PHOTOS_BUCKET.get(rows[0].object_key+'/thumbnail'):null;
@@ -260,7 +262,8 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       return new Response(blob.body,{headers:{'Content-Type':thumb?'image/jpeg':rows[0].mime_type,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
     }
     if(req.method==='POST' && !match[3]) {
-      if(current.owner_sub!==actor.sub)return fail('Chỉ thêm ảnh cho khách hàng của mình',403);
+      const uploadAllowed=await db`SELECT public.sales_customer_allowed(${actor.sub},${id}::uuid,'media') AS allowed`;
+      if(uploadAllowed[0]?.allowed!==true)return fail('Không có quyền thêm ảnh',403);
       if(!env.PHOTOS_BUCKET)return fail('Kho ảnh chưa được cấu hình',503);
       const uploadId=req.headers.get('X-Upload-Id');
       if(!uploadId || !uuid.test(uploadId))return fail('Thiếu X-Upload-Id UUID');
@@ -307,8 +310,8 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       }
       try {
         const rows=await db`INSERT INTO customer_photos(id,customer_id,owner_sub,object_key,mime_type,bytes)
-          SELECT ${uploadId}::uuid,${id}::uuid,${actor.sub},${key},${mime},${bytes.byteLength} WHERE EXISTS(SELECT 1 FROM customers c WHERE c.id=${id}::uuid AND public.sales_can_access(${actor.sub},c.owner_sub,c.province,c.district)) ON CONFLICT(id) DO NOTHING RETURNING id,mime_type,bytes,created_at`;
-        if(!rows.length){const existing=await db`SELECT id,mime_type,bytes FROM customer_photos WHERE id=${uploadId}::uuid AND customer_id=${id}::uuid AND owner_sub=${actor.sub}`;if(existing.length)return response({item:existing[0],idempotent:true});return fail('Không thể lưu ảnh',409);}
+          SELECT ${uploadId}::uuid,${id}::uuid,${current.owner_sub},${key},${mime},${bytes.byteLength} WHERE EXISTS(SELECT 1 FROM customers c WHERE c.id=${id}::uuid AND public.sales_customer_allowed(${actor.sub},c.id,'media')) ON CONFLICT(id) DO NOTHING RETURNING id,mime_type,bytes,created_at`;
+        if(!rows.length){const existing=await db`SELECT id,mime_type,bytes FROM customer_photos WHERE id=${uploadId}::uuid AND customer_id=${id}::uuid AND owner_sub=${current.owner_sub}`;if(existing.length)return response({item:existing[0],idempotent:true});return fail('Không thể lưu ảnh',409);}
         await db`INSERT INTO field_audit_events(actor_sub,action,entity_type,entity_id) VALUES (${actor.sub},'upload','photo',${uploadId}::uuid)`;
         return response({item:rows[0]},201);
       }catch(e){throw e;}
