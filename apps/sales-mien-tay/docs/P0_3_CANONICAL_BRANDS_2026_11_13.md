@@ -19,7 +19,7 @@ Neon production tại lúc audit: **609 SKU**, **25 khách**, **13 mẫu khảo 
 
 - Migrations 043 (20 statements) và 044 (3 statements) áp dụng Neon transaction thành công, dữ liệu SKU/khách gốc không xóa. `sales_api` được quyền EXECUTE hàm nghiệp vụ; PUBLIC không được quyền; audit raw không cấp SELECT cho `sales_api`.
 - Cloudflare Worker `field-sales-api` được cập nhật **trên script hiện hữu**, deployment `07218691-e76d-4f5e-be1c-eb457b5fbb91` 100%. Đã kiểm tra code có p03BrandRoutes, alias/verify, survey-version guard, canonical SKU; **giữ nguyên bảy binding/secret** gồm Neon/R2/push. Script bundle đã upload được Cloudflare xác nhận; chưa có kiểm thử HTTP đăng nhập production vì môi trường không truy cập được URL public trực tiếp.
-- Code đến SHA `f38a80ddeff27e1d69d07e924b4cd2172ee55320`. Vercel production build `dpl_A41CxAnz1RexaShhattCJ3sEGjK7` từ SHA này; kiểm tra trạng thái READY/Flutter tests trước đánh dấu nghiệm thu triển khai (không tự coi đây là UAT thiết bị thật).
+- Code tới SHA `f38a80ddeff27e1d69d07e924b4cd2172ee55320`. Vercel production deployment `dpl_A41CxAnz1RexaShhattCJ3sEGjK7` từ chính SHA này **READY**; `npm --prefix ../../backend run typecheck` PASS, Flutter analyze `--no-fatal-infos` PASS (còn thông tin lint), **179 Flutter tests PASS**, Flutter web release PASS, offline shell 42 assets, production aliases của project hiện hữu được duy trì. Link: `https://sales-mien-tay.vercel.app` (HTTP browser UAT chưa có bằng chứng do môi trường không mở được website).
 - Chưa đóng P0-J: UAT tạo nhãn/SKU/khách/khảo sát thực bằng tài khoản Admin–Manager–Sales trên mobile, offline/revoke/thiết bị Android, snapshot sau import Excel, production HTTP 401/403/409 là cổng riêng.
 
 ## Các API chính
