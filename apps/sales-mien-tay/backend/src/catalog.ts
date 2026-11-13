@@ -43,34 +43,79 @@ export async function catalogRoutes(req:Request,env:{DATABASE_URL:string},actor:
  const path=url.pathname;
  if(!path.startsWith('/api/v1/catalog'))return null;
  const db=neon(env.DATABASE_URL);
- // Brand identity comes from one catalog; SKU imports keep it synchronized.
+ // SKU, customer and survey evidence share stable catalog brand IDs.
  if(path==='/api/v1/catalog/brands'&&req.method==='GET'){
   const rows=await db`SELECT b.id,b.name,b.active,b.version,
     (SELECT count(*)::integer FROM public.catalog_products p
-     WHERE lower(btrim(p.brand))=b.normalized_name) AS product_count
+     WHERE p.brand_id=b.id) AS product_count,
+    (SELECT coalesce(json_agg(a.alias_name ORDER BY a.alias_name),'[]'::json)
+     FROM public.catalog_brand_aliases a WHERE a.brand_id=b.id) AS aliases
     FROM public.catalog_brands b WHERE (${actor.admin} OR b.active)
     ORDER BY b.name,b.id LIMIT 500`;
   return json({items:rows});
  }
  if(path==='/api/v1/catalog/brand-coverage'&&req.method==='GET'){
+  // Do not infer trading from orders, imports, unchecked surveys, or duplicate SKUs.
   const [byProvince,customers]=await Promise.all([
-   db`SELECT c.province,b.name AS brand,
-      count(DISTINCT c.id)::integer AS customers
-    FROM public.customer_product_assortment a
-    JOIN public.catalog_brands b ON b.normalized_name=lower(btrim(a.brand))
-      AND b.active
-    JOIN public.customers c ON c.id=a.customer_id
-    WHERE a.is_trading
-      AND public.sales_customer_allowed(${actor.sub},c.id,'view')
-    GROUP BY c.province,b.name
-    ORDER BY c.province,b.name LIMIT 4000`,
+   db`WITH sku AS (
+     SELECT a.customer_id,p.brand_id,
+       bool_or(a.ordered_orders>0) AS ordered,
+       bool_or(a.imported_orders>0) AS imported,
+       bool_or(a.is_trading) AS sku_trading
+     FROM public.customer_product_assortment a
+     JOIN public.catalog_products p ON p.id=a.product_id
+     WHERE p.brand_id IS NOT NULL
+     GROUP BY a.customer_id,p.brand_id
+   ), unique_brands AS (
+     SELECT customer_id,brand_id FROM sku
+     UNION SELECT customer_id,brand_id FROM public.customer_brand_verifications
+   ), evidence AS (
+     SELECT ub.customer_id,ub.brand_id,
+       coalesce(sku.ordered,false) AS ordered,
+       coalesce(sku.imported,false) AS imported,
+       (coalesce(sku.sku_trading,false) OR coalesce(v.is_trading,false)) AS trading
+     FROM unique_brands ub
+     LEFT JOIN sku ON sku.customer_id=ub.customer_id AND sku.brand_id=ub.brand_id
+     LEFT JOIN public.customer_brand_verifications v
+       ON v.customer_id=ub.customer_id AND v.brand_id=ub.brand_id
+   )
+   SELECT c.province,b.id::text AS brand_id,b.name AS brand,
+     count(*) FILTER (WHERE e.trading)::integer AS customers,
+     count(*) FILTER (WHERE e.ordered)::integer AS ordered_customers,
+     count(*) FILTER (WHERE e.imported)::integer AS imported_customers
+   FROM evidence e
+   JOIN public.catalog_brands b ON b.id=e.brand_id AND b.active
+   JOIN public.customers c ON c.id=e.customer_id
+   WHERE public.sales_customer_allowed(${actor.sub},c.id,'view')
+   GROUP BY c.province,b.id,b.name
+   ORDER BY c.province,b.name LIMIT 4000`,
    db`SELECT c.province,count(*)::integer AS customers
     FROM public.customers c
     WHERE public.sales_customer_allowed(${actor.sub},c.id,'view')
     GROUP BY c.province ORDER BY c.province LIMIT 500`
   ]);
   return json({items:byProvince,customers,
-    semantics:'Khách có SKU được xác minh đang kinh doanh; không suy ra từ đơn hàng hoặc phiếu khảo sát.'});
+    semantics:'Đã đặt/đã nhập là chứng từ riêng; đang bán chỉ từ SKU hoặc nhãn được xác minh, không tự suy ra từ khảo sát.'});
+ }
+ if(path==='/api/v1/catalog/brand-aliases'&&req.method==='POST'){
+  if(!actor.admin)return bad('Chỉ Admin quản lý tên thay thế nhãn hàng',403);
+  let v:Obj;try{v=await body(req);}catch{return bad('JSON không hợp lệ');}
+  if(!validId(v.client_ref)||!validId(v.brand_id)||
+     typeof v.alias_name!=='string'||!v.alias_name.trim()||
+     v.alias_name.trim().length>120||/[\\x00-\\x1f\\x7f]/.test(v.alias_name))
+   return bad('Nhãn và tên thay thế không hợp lệ');
+  try{
+   const rows=await db`SELECT public.sales_brand_alias_add(
+     ${actor.sub},${v.client_ref}::uuid,${v.brand_id}::uuid,
+     ${v.alias_name.trim()}) AS item`;
+   return json({item:rows[0].item},201);
+  }catch(e){
+   const message=String((e as Error).message??'');
+   if(message.includes('brand_alias_forbidden'))return bad('Không có quyền',403);
+   if(message.includes('brand_alias_conflict'))return bad('Tên này đã được dùng hoặc UUID trùng',409);
+   if(message.includes('brand_alias_inactive'))return bad('Nhãn không hoạt động',409);
+   return bad('Không lưu được tên thay thế',503);
+  }
  }
  const brandMatch=/^\/api\/v1\/catalog\/brands\/([a-f0-9-]{36})$/i.exec(path);
  if(path==='/api/v1/catalog/brands'&&req.method==='POST'||
