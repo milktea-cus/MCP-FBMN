@@ -8,6 +8,27 @@ class Disconnected extends SalesSession {
  @override Future<Map<String,dynamic>> get(String path) async => throw const ApiFailure(503,'offline');
 }
 void main(){
+ test('unplanned and missed visits are accepted by account-scoped offline outbox',() async{
+  const route='11111111-1111-4111-8111-111111111111';
+  const stop='22222222-2222-4222-8222-222222222222';
+  final unplanned='/api/v1/day-routes/$route/unplanned-stops';
+  final missed='/api/v1/day-routes/$route/stops/$stop/missed';
+  expect(isWorkVisitOfflineOperation(unplanned),isTrue);
+  expect(isWorkVisitOfflineOperation(missed),isTrue);
+  expect(isWorkVisitOfflineOperation('/api/v1/day-routes/not-a-uuid/unplanned-stops'),isFalse);
+  final factory=newIdbFactoryMemory();
+  final q=OfflineQueue(Disconnected(),'field-owner','9',factory:factory);
+  await q.enqueue(unplanned,{'client_ref':'33333333-3333-4333-8333-333333333333','stop_kind':'area'});
+  await q.enqueue(missed,{'client_ref':'44444444-4444-4444-8444-444444444444','reason_code':'closed'});
+  final reopened=OfflineQueue(Disconnected(),'field-owner','9',factory:factory);
+  await reopened.reload();
+  expect(reopened.pending.map((v)=>v['path']).toList(),[unplanned,missed]);
+  final revoked=OfflineQueue(Disconnected(),'field-owner','10',factory:factory);
+  await revoked.reload();
+  expect(revoked.pending,isEmpty);
+  q.dispose();reopened.dispose();revoked.dispose();
+ });
+
  test('session draft and dependent operations survive restart and isolate accounts',() async{
   final factory=newIdbFactoryMemory();final a=OfflineQueue(Disconnected(),'survey-owner','1',factory:factory);
   final draft=<String,dynamic>{'id':'11111111-1111-4111-8111-111111111111','status':'in_progress','answers':{'present':true},'photos':[]};
