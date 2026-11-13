@@ -66,7 +66,7 @@ async function getSession(db:Db,actor:Actor,id:string){
  return rows[0]??null;
 }
 async function sessionPhotos(db:Db,id:string,actor:Actor){
- return db`SELECT p.id,p.kind,p.mime_type,p.bytes,p.sha256,p.thumbnail_bytes,p.thumbnail_sha256,p.captured_at,p.created_by,p.status FROM field_survey_photos p JOIN field_survey_sessions s ON s.id=p.session_id JOIN customers c ON c.id=s.customer_id WHERE p.session_id=${id}::uuid AND public.sales_customer_allowed(${actor.sub},c.id,'media') ORDER BY p.captured_at,p.id`;
+ return db`SELECT p.id,p.kind,p.mime_type,p.bytes,p.sha256,p.thumbnail_bytes,p.thumbnail_sha256,p.captured_at,p.created_by,p.status FROM field_survey_photos p JOIN field_survey_sessions s ON s.id=p.session_id JOIN customers c ON c.id=s.customer_id WHERE p.session_id=${id}::uuid AND (s.owner_sub=${actor.sub} AND public.sales_customer_fieldwork_allowed(${actor.sub},c.id) OR public.sales_customer_allowed(${actor.sub},c.id,'media')) ORDER BY p.captured_at,p.id`;
 }
 // Inspect JPEG marker segments before SOS; reject metadata and oversized dimensions.
 export function cleanJpeg(b:Uint8Array,max:number):boolean{
@@ -145,13 +145,14 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
  }
  if(path==='/api/v1/sessions'&&req.method==='POST'){
   let v:Body;try{v=await body(req);}catch{return bad('JSON không hợp lệ');}
-  const id=v.client_ref,cid=v.customer_id,tid=v.template_id,rid=v.route_stop_id??null,started=captureTime(v.started_at);
-  if(!isUuid(id)||!isUuid(cid)||!isUuid(tid)||(rid!==null&&!isUuid(rid))||!started||!point(v.latitude,v.longitude,v.accuracy_m))return bad('Phiên hoặc GPS không hợp lệ (độ chính xác tối đa 100m)');
+  const id=v.client_ref,cid=v.customer_id,tid=v.template_id,rid=v.route_stop_id??null,drid=v.day_route_stop_id??null,started=captureTime(v.started_at);
+  if(!isUuid(id)||!isUuid(cid)||!isUuid(tid)||(rid!==null&&!isUuid(rid))||(drid!==null&&!isUuid(drid))||(rid!==null&&drid!==null)||!started||!point(v.latitude,v.longitude,v.accuracy_m))return bad('Phiên hoặc GPS không hợp lệ (độ chính xác tối đa 100m)');
   const prior=await getSession(db,actor,id);
-  if(prior)return prior.owner_sub===actor.sub&&prior.customer_id===cid&&prior.template_id===tid&&(prior.route_stop_id??null)===rid?json({item:prior,idempotent:true}):bad('UUID phiên đã được sử dụng',409);
-  const customers=await db`SELECT c.* FROM customers c WHERE c.id=${cid}::uuid AND c.owner_sub=${actor.sub} AND public.sales_customer_allowed(${actor.sub},c.id,'view')`;
+  if(prior)return prior.owner_sub===actor.sub&&prior.customer_id===cid&&prior.template_id===tid&&(prior.route_stop_id??null)===rid&&(prior.day_route_stop_id??null)===drid?json({item:prior,idempotent:true}):bad('UUID phiên đã được sử dụng',409);
+  const customers=await db`SELECT c.* FROM customers c WHERE c.id=${cid}::uuid AND public.sales_customer_fieldwork_allowed(${actor.sub},c.id)`;
   const c=customers[0];if(!c)return bad('Không có quyền điểm bán',403);
   const first=c.latitude===null&&c.longitude===null;
+  const initializeCustomer=first&&c.owner_sub===actor.sub;
   if(first&&v.initialize_location!==true)return bad('Điểm bán chưa có tọa độ. Cần xác nhận ghi nhận vị trí lần đầu tại điểm bán.',409);
   if(!first&&(!c.location_consent||c.latitude===null||c.longitude===null))return bad('Tọa độ điểm bán chưa được phép sử dụng',409);
   const distance=first?0:meters(c.latitude,c.longitude,v.latitude as number,v.longitude as number);
@@ -159,16 +160,28 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   const template=await db`SELECT id FROM field_survey_templates WHERE id=${tid}::uuid AND province=${c.province}`;
   if(!template.length)return bad('Mẫu không thuộc tỉnh điểm bán',409);
   if(rid){const stops=await db`SELECT id FROM sales_records WHERE id=${rid}::uuid AND kind='visit' AND owner_sub=${actor.sub} AND data->>'customerId'=${cid} AND data->>'plannedDate'=${vnDay(started)} AND public.sales_can_access(${actor.sub},owner_sub,province,district)`;if(!stops.length)return bad('Điểm ghé không thuộc tuyến/ngày thực tế',409);}
+  if(drid){
+   const stops=await db`SELECT s.id FROM public.field_route_stops s
+    JOIN public.field_day_routes r ON r.id=s.day_route_id
+    JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id
+    WHERE s.id=${drid}::uuid AND s.stop_kind='customer'
+      AND s.customer_id=${cid}::uuid AND s.owner_sub=${actor.sub}
+      AND r.owner_sub=${actor.sub} AND r.status='ready' AND p.status='planned'
+      AND r.route_date=${vnDay(started)}::date
+      AND public.sales_monthly_plan_scope_allowed(${actor.sub},p.scope_kind,p.scope_key,p.province,p.district)`;
+   if(!stops.length)return bad('Điểm khảo sát không thuộc tuyến/ngày thực tế',409);
+  }
   // One transaction: verified GPS history and parent session share the stable client UUID.
   const rows=await db`WITH eligible AS MATERIALIZED (
-   SELECT c.* FROM customers c WHERE c.id=${cid}::uuid AND c.owner_sub=${actor.sub} AND c.province=${c.province} AND c.district=${c.district}
-   AND public.sales_customer_allowed(${actor.sub},c.id,'view')
+   SELECT c.* FROM customers c WHERE c.id=${cid}::uuid AND c.province=${c.province} AND c.district=${c.district}
+   AND public.sales_customer_fieldwork_allowed(${actor.sub},c.id)
    AND ((${first} AND c.latitude IS NULL AND c.longitude IS NULL) OR (NOT ${first} AND c.location_consent AND c.latitude IS NOT DISTINCT FROM ${c.latitude}::double precision AND c.longitude IS NOT DISTINCT FROM ${c.longitude}::double precision))
    AND (${rid===null} OR EXISTS(SELECT 1 FROM sales_records r WHERE r.id=${rid}::uuid AND r.kind='visit' AND r.owner_sub=${actor.sub} AND r.data->>'customerId'=${cid} AND r.data->>'plannedDate'=${vnDay(started)}))
+   AND (${drid===null} OR EXISTS(SELECT 1 FROM public.field_route_stops st JOIN public.field_day_routes r ON r.id=st.day_route_id JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id WHERE st.id=${drid}::uuid AND st.customer_id=${cid}::uuid AND st.owner_sub=${actor.sub} AND st.stop_kind='customer' AND r.owner_sub=${actor.sub} AND r.status='ready' AND p.status='planned' AND r.route_date=${vnDay(started)}::date AND public.sales_monthly_plan_scope_allowed(${actor.sub},p.scope_kind,p.scope_key,p.province,p.district)))
    FOR UPDATE
   ), created AS (
-   INSERT INTO field_survey_sessions(id,customer_id,owner_sub,province,district,route_stop_id,template_id,started_at,latitude,longitude,accuracy_m,distance_m,location_initialized)
-   SELECT ${id}::uuid,c.id,${actor.sub},c.province,c.district,${rid}::uuid,${tid}::uuid,${started}::timestamptz,${v.latitude as number},${v.longitude as number},${v.accuracy_m as number},${distance},${first}
+   INSERT INTO field_survey_sessions(id,customer_id,owner_sub,province,district,route_stop_id,day_route_stop_id,template_id,started_at,latitude,longitude,accuracy_m,distance_m,location_initialized)
+   SELECT ${id}::uuid,c.id,${actor.sub},c.province,c.district,${rid}::uuid,${drid}::uuid,${tid}::uuid,${started}::timestamptz,${v.latitude as number},${v.longitude as number},${v.accuracy_m as number},${distance},${initializeCustomer}
    FROM eligible c ON CONFLICT(id) DO NOTHING RETURNING *
   ), initialized AS (
    UPDATE customers c SET latitude=s.latitude,longitude=s.longitude,location_accuracy_m=s.accuracy_m,location_consent=true,
@@ -176,13 +189,13 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
       version=c.version+1,updated_at=now()
    FROM created s WHERE c.id=s.customer_id AND s.location_initialized AND c.latitude IS NULL AND c.longitude IS NULL RETURNING c.id
   ), gps AS (
-   INSERT INTO field_visits(customer_id,owner_sub,client_ref,checkin_at,latitude,longitude,accuracy_m,distance_m,note)
+   INSERT INTO field_visits(customer_id,owner_sub,client_ref,checkin_at,latitude,longitude,accuracy_m,distance_m,note,day_route_stop_id)
    SELECT customer_id,owner_sub,id,started_at,latitude,longitude,accuracy_m,distance_m,
-    CASE WHEN location_initialized THEN 'Phiên khảo sát · ghi nhận tọa độ lần đầu' ELSE 'Phiên khảo sát' END
+    CASE WHEN location_initialized THEN 'Phiên khảo sát · ghi nhận tọa độ lần đầu' ELSE 'Phiên khảo sát' END,day_route_stop_id
    FROM created WHERE NOT location_initialized OR EXISTS(SELECT 1 FROM initialized) RETURNING id
   ) SELECT created.* FROM created JOIN gps ON true`;
   const item=await getSession(db,actor,id);
-  if(!item||item.owner_sub!==actor.sub||item.customer_id!==cid||item.template_id!==tid||(item.route_stop_id??null)!==rid)return bad('Xung đột phiên hoặc quyền',409);
+  if(!item||item.owner_sub!==actor.sub||item.customer_id!==cid||item.template_id!==tid||(item.route_stop_id??null)!==rid||(item.day_route_stop_id??null)!==drid)return bad('Xung đột phiên hoặc quyền',409);
   return json({item,idempotent:!rows.length},rows.length?201:200);
  }
  const m=/^\/api\/v1\/sessions\/([a-f0-9-]{36})(?:\/(photos)(?:\/([a-f0-9-]{36}))?)?$/i.exec(path);
@@ -202,7 +215,7 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
    db`SELECT id FROM field_survey_sessions WHERE id=${id}::uuid FOR UPDATE`,
    db`UPDATE field_survey_sessions s SET answers=${JSON.stringify(v.answers)}::jsonb,note=${v.note},ended_at=${end}::timestamptz,status='completed',version=version+1,last_mutation_ref=${v.client_ref}::uuid
     WHERE s.id=${id}::uuid AND s.owner_sub=${actor.sub} AND s.version=${v.version as number} AND s.status='in_progress'
-    AND public.sales_can_access(${actor.sub},s.owner_sub,s.province,s.district)
+    AND public.sales_customer_fieldwork_allowed(${actor.sub},s.customer_id)
     AND EXISTS(SELECT 1 FROM customers c WHERE c.id=s.customer_id AND public.sales_customer_allowed(${actor.sub},c.id,'view'))
     AND NOT EXISTS(SELECT 1 FROM field_survey_photos p WHERE p.session_id=s.id AND p.status<>'ready')
     AND (SELECT count(DISTINCT p.kind) FROM field_survey_photos p WHERE p.session_id=s.id AND p.status='ready' AND p.kind IN ('front','shelf','goods'))=3 RETURNING *`
@@ -214,7 +227,7 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   if(req.method==='GET'&&!m[3])return json({items:await sessionPhotos(db,id,actor)});
   if(req.method==='GET'&&m[3]){
    if(!env.PHOTOS_BUCKET)return bad('Kho ảnh chưa cấu hình',503);
-   const rows=await db`SELECT p.object_key,p.mime_type,p.thumbnail_key FROM field_survey_photos p JOIN field_survey_sessions s ON s.id=p.session_id JOIN customers c ON c.id=s.customer_id WHERE p.id=${m[3]}::uuid AND p.session_id=${id}::uuid AND p.status='ready' AND public.sales_customer_allowed(${actor.sub},c.id,'media')`;
+   const rows=await db`SELECT p.object_key,p.mime_type,p.thumbnail_key FROM field_survey_photos p JOIN field_survey_sessions s ON s.id=p.session_id JOIN customers c ON c.id=s.customer_id WHERE p.id=${m[3]}::uuid AND p.session_id=${id}::uuid AND p.status='ready' AND (s.owner_sub=${actor.sub} AND public.sales_customer_fieldwork_allowed(${actor.sub},c.id) OR public.sales_customer_allowed(${actor.sub},c.id,'media'))`;
    if(!rows.length)return bad('Không tìm thấy ảnh',404);
    const thumb=url.searchParams.get('thumbnail')==='1'&&rows[0].thumbnail_key;const blob=await env.PHOTOS_BUCKET.get(thumb||rows[0].object_key);if(!blob)return bad('Ảnh không còn trên kho',404);
    return new Response(blob.body,{headers:{'Content-Type':thumb?'image/jpeg':rows[0].mime_type,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
