@@ -43,25 +43,27 @@ export async function catalogRoutes(req:Request,env:{DATABASE_URL:string},actor:
  const path=url.pathname;
  if(!path.startsWith('/api/v1/catalog'))return null;
  const db=neon(env.DATABASE_URL);
- // The product catalog defines canonical brand names. Real presence is derived
- // only from independently verified customer assortment, not survey free-text.
+ // Brand identity comes from one catalog; SKU imports keep it synchronized.
  if(path==='/api/v1/catalog/brands'&&req.method==='GET'){
-  const names=await db`SELECT DISTINCT btrim(brand) AS name
-    FROM public.catalog_products WHERE brand IS NOT NULL
-      AND btrim(brand)<>'' AND active
-    ORDER BY name LIMIT 500`;
-  return json({items:names});
+  const rows=await db`SELECT b.id,b.name,b.active,b.version,
+    (SELECT count(*)::integer FROM public.catalog_products p
+     WHERE lower(btrim(p.brand))=b.normalized_name) AS product_count
+    FROM public.catalog_brands b WHERE (${actor.admin} OR b.active)
+    ORDER BY b.name,b.id LIMIT 500`;
+  return json({items:rows});
  }
  if(path==='/api/v1/catalog/brand-coverage'&&req.method==='GET'){
   const [byProvince,customers]=await Promise.all([
-   db`SELECT c.province,btrim(a.brand) AS brand,
+   db`SELECT c.province,b.name AS brand,
       count(DISTINCT c.id)::integer AS customers
     FROM public.customer_product_assortment a
+    JOIN public.catalog_brands b ON b.normalized_name=lower(btrim(a.brand))
+      AND b.active
     JOIN public.customers c ON c.id=a.customer_id
-    WHERE a.is_trading AND a.brand IS NOT NULL AND btrim(a.brand)<>''
+    WHERE a.is_trading
       AND public.sales_customer_allowed(${actor.sub},c.id,'view')
-    GROUP BY c.province,btrim(a.brand)
-    ORDER BY c.province,btrim(a.brand) LIMIT 4000`,
+    GROUP BY c.province,b.name
+    ORDER BY c.province,b.name LIMIT 4000`,
    db`SELECT c.province,count(*)::integer AS customers
     FROM public.customers c
     WHERE public.sales_customer_allowed(${actor.sub},c.id,'view')
@@ -69,6 +71,30 @@ export async function catalogRoutes(req:Request,env:{DATABASE_URL:string},actor:
   ]);
   return json({items:byProvince,customers,
     semantics:'Khách có SKU được xác minh đang kinh doanh; không suy ra từ đơn hàng hoặc phiếu khảo sát.'});
+ }
+ const brandMatch=/^\/api\/v1\/catalog\/brands\/([a-f0-9-]{36})$/i.exec(path);
+ if(path==='/api/v1/catalog/brands'&&req.method==='POST'||
+   brandMatch&&req.method==='PATCH'){
+  if(!actor.admin)return bad('Chỉ Admin quản lý danh mục nhãn hàng',403);
+  let v:Obj;try{v=await body(req);}catch{return bad('JSON nhãn hàng không hợp lệ');}
+  const id=brandMatch?.[1]??v.client_ref,op=v.client_ref;
+  if(!validId(id)||!validId(op)||typeof v.name!=='string'||
+    v.name.trim().length<1||v.name.trim().length>120||
+    /[\x00-\x1f\x7f]/.test(v.name)||typeof v.active!=='boolean'||
+    (brandMatch?(!Number.isInteger(v.version)||Number(v.version)<1):v.active!==true))
+    return bad('Tên, trạng thái hoặc phiên bản nhãn hàng không hợp lệ');
+  try{
+   const rows=await db`SELECT public.sales_save_catalog_brand(
+    ${actor.sub},${id}::uuid,${op}::uuid,
+    ${brandMatch?Number(v.version):0},${v.name.trim()},${v.active}) AS item`;
+   return json({item:rows[0].item},brandMatch?200:201);
+  }catch(e){
+   const err=e as {message?:string;code?:string};
+   if(err.message?.includes('brand_forbidden'))return bad('Không có quyền quản lý nhãn hàng',403);
+   if(err.message?.includes('brand_stale')||err.code==='23505')
+    return bad('Nhãn hàng đã có hoặc phiên bản đã thay đổi',409);
+   return bad('Không lưu được danh mục nhãn hàng',503);
+  }
  }
  if(path==='/api/v1/catalog/products'&&req.method==='GET'){
   const q=(url.searchParams.get('q')??'').trim().slice(0,120),after=url.searchParams.get('after')??'';
