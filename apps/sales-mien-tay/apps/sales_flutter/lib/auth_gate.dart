@@ -25,10 +25,45 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   timer=Timer.periodic(const Duration(seconds:30),(_){if(me!=null||recovering)unawaited(revalidate());});
   unawaited(start());
  }
+ /// A failed offline SQLite read must not be mistaken for an expired login.
+ /// A valid server session remains usable even when the optional lease fails.
  Future<void> start() async{
-  try{await session.restore();if(await OfflineLease.logoutPending()){if(mounted)setState(()=>logoutPending=true);try{await session.logout();await OfflineLease.finishLogout();if(mounted)setState(()=>logoutPending=false);}catch(_){if(mounted)setState(()=>error='Đã đăng xuất trên máy. Kết nối mạng và bấm Đăng xuất để hoàn tất.');}return;}await revalidate();}
-  catch(_){if(mounted)setState(()=>error='Không khôi phục được phiên. Vui lòng đăng nhập lại.');}
-  finally{if(mounted)setState(()=>busy=false);}
+  try{
+   try{
+    await session.restore();
+   }catch(_){
+    if(mounted)setState(()=>error='Không đọc được phiên bảo mật trên thiết bị. '
+      'Dữ liệu chưa đồng bộ vẫn giữ nguyên. Hãy đăng nhập lại.');
+    return;
+   }
+   bool pending=false;
+   try{
+    pending=await OfflineLease.logoutPending();
+   }catch(_){
+    // Retry a transient database-open failure; never erase the secure cookie.
+    try{pending=await OfflineLease.logoutPending();}
+    catch(_){
+     if(mounted)setState(()=>error='Không mở được dữ liệu offline để kiểm tra '
+       'yêu cầu đăng xuất. Hãy chọn Khôi phục phiên sau khi khởi động lại.');
+     return;
+    }
+   }
+   if(pending){
+    if(mounted)setState(()=>logoutPending=true);
+    try{
+     await session.logout();
+     try{await OfflineLease.finishLogout();}catch(_){}
+     if(mounted)setState(()=>logoutPending=false);
+    }catch(_){
+     if(mounted)setState(()=>error='Đã yêu cầu đăng xuất. Kết nối mạng '
+       'và bấm Hoàn tất đăng xuất.');
+    }
+    return;
+   }
+   await revalidate();
+  }finally{
+   if(mounted)setState(()=>busy=false);
+  }
  }
  @override void didChangeAppLifecycleState(AppLifecycleState state){if(state==AppLifecycleState.resumed&&me!=null)unawaited(revalidate());}
  Future<void> revalidate() async{
@@ -39,7 +74,9 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
    if(connectionNotice||recovering){if(mounted)setState((){connectionNotice=false;recovering=false;error=null;});}
    final changed=me==null||me!['identity']!=next['identity']||me!['scope_revision']!=next['scope_revision']||me!['role']!=next['role'];
    if(changed){
-    await OfflineLease.clear();
+    // Cache/lease I/O is best-effort; server-authenticated users must not be
+    // sent to the login page solely because an offline database is unavailable.
+    try{await OfflineLease.clear();}catch(_){}
     if(me!=null){if(!mounted)return;Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;});}
     final meta=await session.get('/api/v1/meta');
     final regions=RegionCatalog((meta['districts'] as Map<String,dynamic>).map((k,v)=>MapEntry(k,(v as List).cast<String>())));
