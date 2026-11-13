@@ -3,6 +3,10 @@
 set -euo pipefail
 export CI=true
 export FLUTTER_SUPPRESS_ANALYTICS=true
+# Gate production web release on the matching backend TypeScript source.
+# Build does not deploy Worker or alter production secrets/bindings.
+npm --prefix ../../backend install --ignore-scripts --no-audit --no-fund --no-package-lock
+npm --prefix ../../backend run typecheck
 sdk="/tmp/sales-flutter-sdk"
 git clone --depth 1 --branch 3.47.9 https://github.com/flutter/flutter.git "$sdk"
 export PATH="$sdk/bin:$PATH"
