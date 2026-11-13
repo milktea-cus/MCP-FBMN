@@ -52,7 +52,13 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
   const month=url.searchParams.get('month')??'';
   if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))return fail('Tháng không hợp lệ');
   const items=await db`SELECT r.*,p.period_ym,p.scope_kind,p.scope_key,p.province,p.district,
-    (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id)::integer AS stop_count
+    (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id)::integer AS stop_count,
+    (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id
+      AND (EXISTS(SELECT 1 FROM public.field_visits v WHERE v.day_route_stop_id=s.id)
+        OR EXISTS(SELECT 1 FROM public.field_area_visits a WHERE a.day_route_stop_id=s.id)))::integer AS visited_count,
+    (SELECT count(DISTINCT se.day_route_stop_id) FROM public.field_survey_sessions se
+      JOIN public.field_route_stops s ON s.id=se.day_route_stop_id
+      WHERE s.day_route_id=r.id AND se.status='completed')::integer AS survey_count
    FROM public.field_day_routes r JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id
    WHERE p.period_ym=${month} AND
     (r.owner_sub=${actor.sub} OR ${actor.admin} OR
