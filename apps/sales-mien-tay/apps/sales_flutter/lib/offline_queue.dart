@@ -39,6 +39,8 @@ class OfflineQueue extends ChangeNotifier {
  int transientFailures=0;
  int get blockedCount=>pending.where((r)=>r['status']=='blocked').length;
  int get readyCount=>pending.length-blockedCount;
+ bool get isStalled=>syncing&&lastAttemptAt!=null&&
+  DateTime.now().difference(lastAttemptAt!)>const Duration(minutes:2);
  Duration get retryDelay{
   final power=transientFailures.clamp(1,5).toInt();
   return Duration(seconds:(15*(1<<power)).clamp(30,300).toInt());
@@ -204,7 +206,17 @@ class OfflineQueue extends ChangeNotifier {
   unawaited(sync());
  }
  Future<void> sync({bool manual=false}) async{
-  if(_closed||syncing)return;
+  if(_closed)return;
+  if(syncing){
+   // iOS may suspend an in-flight IndexedDB/network Future when PWA sleeps.
+   // Do not start a concurrent write: tell the user how to resume safely.
+   if(isStalled){
+    error='Lượt đồng bộ đã quá 2 phút không phản hồi. Đóng rồi mở lại '
+     'Field Work để tiếp tục; dữ liệu chưa gửi vẫn nằm trên máy.';
+    _notify();
+   }
+   return;
+  }
   final now=DateTime.now();
   if(!manual&&nextRetryAt!=null&&now.isBefore(nextRetryAt!))return;
   if(manual){nextRetryAt=null;transientFailures=0;}
