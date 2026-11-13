@@ -29,11 +29,11 @@ String surveyStatus(Map<String,dynamic> s){
 List<String> marketBrandNamesFromAnswer(Object? input){
  final values=input is List
    ?input.map((v)=>v.toString()).toList()
-   :input is String?input.split(RegExp(r'[,;\\n/]|\\s+hoặc\\s+',caseSensitive:false))
+   :input is String?input.split(RegExp(r'[,;\n/]|\s+hoặc\s+',caseSensitive:false))
    :<String>[];
  final result=<String>[],seen=<String>{};
  for(final raw in values){
-  final name=raw.trim().replaceAll(RegExp(r'\\s+'),' ');
+  final name=raw.trim().replaceAll(RegExp(r'\s+'),' ');
   if(name.isEmpty||name.length>100||
     ['khác','không có','không','chưa có','không rõ','chưa xác định','none']
      .contains(name.toLowerCase()))continue;
