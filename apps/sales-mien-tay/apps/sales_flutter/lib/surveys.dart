@@ -43,7 +43,7 @@ class _SurveyPageState extends State<SurveyPage>{
  DateTime day=vnToday();bool weekly=false,all=false,busy=false;String district='',employee='';String? error;
  List<Map<String,dynamic>> routes=[],sessions=[],drafts=[];
  int lastPending=0;
- @override void initState(){super.initState();all=widget.initialCustomer!=null;lastPending=widget.queue.pending.length;widget.queue.addListener(changed);load();}
+ @override void initState(){super.initState();all=widget.initialCustomer!=null&&widget.initialStop==null;lastPending=widget.queue.pending.length;widget.queue.addListener(changed);load();}
  @override void dispose(){widget.queue.removeListener(changed);super.dispose();}
  void changed(){if(!mounted)return;final n=widget.queue.pending.length;if(n<lastPending&&!busy){unawaited(load());}else{unawaited(readDrafts());}lastPending=n;}
  Future<void> readDrafts()async{try{final d=await widget.queue.cached('survey-drafts');if(mounted)setState(()=>drafts=d);}catch(_){}}
@@ -188,14 +188,14 @@ class _SurveyPageState extends State<SurveyPage>{
   final districts=routes.map((r)=>r['district'].toString()).toSet().toList()..sort();
   final staff=<String,String>{for(final r in routes)r['owner_sub'].toString():r['full_name']?.toString()??''};
   final candidates=<Map<String,dynamic>>[...routes.where((r)=>r['planned']==true),if(all)...{for(final r in routes)r['customer_id']:{...r,'planned':false,'id':null,'data':{},'visited':false}}.values];
-  final visible=candidates.where((r)=>(all||r['planned']==true)&&(district.isEmpty||r['district']==district)&&(employee.isEmpty||r['owner_sub']==employee)&&(widget.initialCustomer==null||r['customer_id']==widget.initialCustomer)).toList();
+  final visible=candidates.where((r)=>(all||r['planned']==true)&&(district.isEmpty||r['district']==district)&&(employee.isEmpty||r['owner_sub']==employee)&&(widget.initialCustomer==null||r['customer_id']==widget.initialCustomer)&&(widget.initialStop==null||r['id']==widget.initialStop!['id'])).toList();
   return ListView(padding:const EdgeInsets.all(12),children:[
-   Row(children:[Expanded(child:Text('Khảo sát theo tuyến',style:Theme.of(context).textTheme.titleLarge)),IconButton(onPressed:busy?null:load,tooltip:'Đồng bộ',icon:const Icon(Icons.sync))]),
+   Row(children:[Expanded(child:Text(widget.initialStop==null?'Khảo sát theo tuyến':'Khảo sát điểm ghé',style:Theme.of(context).textTheme.titleLarge)),IconButton(onPressed:busy?null:load,tooltip:'Đồng bộ',icon:const Icon(Icons.sync))]),
    Wrap(spacing:8,runSpacing:8,children:[OutlinedButton.icon(onPressed:busy?null:pickDay,icon:const Icon(Icons.calendar_today),label:Text(dayKey(day))),if(widget.admin)OutlinedButton(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>SurveyTemplateAdmin(service:widget.service,regions:widget.regions))),child:const Text('Mẫu khảo sát')),if(widget.admin)OutlinedButton(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>MediaUsagePage(service:widget.service))),child:const Text('Dung lượng')),if(widget.legacy!=null)TextButton(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:widget.legacy!)),child:const Text('Mẫu cũ'))]),
    const SizedBox(height:8),
    SegmentedButton<bool>(segments:const [ButtonSegment(value:false,label:Text('Ngày')),ButtonSegment(value:true,label:Text('Tuần'))],selected:{weekly},onSelectionChanged:busy?null:(v){setState(()=>weekly=v.first);load();}),
    if(weekly)Text('${dayKey(weekMonday(day))} – ${dayKey(weekMonday(day).add(const Duration(days:6)))}'),
-   SwitchListTile(contentPadding:EdgeInsets.zero,title:const Text('Tất cả khách trong quyền'),subtitle:const Text('Bật để ghé ngoài tuyến.'),value:all,onChanged:(v)=>setState(()=>all=v)),
+   if(widget.initialStop==null)SwitchListTile(contentPadding:EdgeInsets.zero,title:const Text('Tất cả khách trong quyền'),subtitle:const Text('Bật để ghé ngoài tuyến.'),value:all,onChanged:(v)=>setState(()=>all=v)),
    AdaptiveFilterRow(minFieldWidth:190,children:[
       DropdownButtonFormField<String>(key:ValueKey(districts.join('|')),
         initialValue:districts.contains(district)?district:'',isExpanded:true,
