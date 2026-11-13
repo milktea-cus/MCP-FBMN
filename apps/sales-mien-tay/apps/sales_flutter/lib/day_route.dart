@@ -98,6 +98,9 @@ class _DayRoutePageState extends State<DayRoutePage>{
  Future<void> addAreaOrChain()async{
   if(!canModify)return;
   final r=route!;
+  if(r['scope_kind']=='customer'){
+   notice('Lịch khách riêng không được tạo điểm thuộc địa bàn/chuỗi khác. Lập thêm công tác theo địa bàn hoặc chuỗi đã được giao.');return;
+  }
   final area=r['scope_kind']=='territory';
   final ref=const Uuid().v4();
   final payload=<String,dynamic>{
@@ -287,10 +290,10 @@ class _DayRoutePageState extends State<DayRoutePage>{
     if(route!=null)...[
      Text('${route!['route_date']?.toString().substring(0,10)} · ${route!['purpose']}',
        style:Theme.of(context).textTheme.titleMedium),
-     Text('${route!['scope_kind']=='chain'?'Chuỗi':'Địa bàn'}: ${route!['scope_key']} · Đã ghé ${count}/${sorted.length} điểm'),
+     Text('${route!['scope_kind']=='chain'?'Chuỗi':route!['scope_kind']=='customer'?'Khách cụ thể':'Địa bàn'}: ${route!['scope_key']} · Đã ghé ${count}/${sorted.length} điểm'),
      const SizedBox(height:8),
      Wrap(spacing:8,runSpacing:6,children:[
-      OutlinedButton.icon(onPressed:canModify?addAreaOrChain:null,
+      if(route!['scope_kind']!='customer')OutlinedButton.icon(onPressed:canModify?addAreaOrChain:null,
        icon:const Icon(Icons.place_outlined),label:Text(route!['scope_kind']=='chain'?'Điểm công tác chuỗi':'Điểm tìm khách')),
       OutlinedButton.icon(onPressed:canModify?addCustomers:null,
        icon:const Icon(Icons.group_add_outlined),label:const Text('Chọn nhiều khách')),
