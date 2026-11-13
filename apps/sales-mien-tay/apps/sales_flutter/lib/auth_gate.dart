@@ -63,6 +63,9 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     return;
    }
    await revalidate();
+  }catch(_){
+   if(mounted)setState(()=>error='Chưa hoàn tất bước khôi phục. '
+     'Phiên trên máy chưa bị xóa; chọn Khôi phục phiên để thử lại.');
   }finally{
    if(mounted)setState(()=>busy=false);
   }
@@ -131,7 +134,13 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     return;
    }
    recovering=false;
-   if(rejected){try{await OfflineLease.clear();}catch(_){}await session.clear();}
+   if(rejected){
+    try{await OfflineLease.clear();}catch(_){}
+    try{await session.clear();}catch(_){
+     // The server already rejected the cookie. No authenticated UI may stay.
+     session.cookie='';
+    }
+   }
    if(mounted){
     if(hadSession)Navigator.of(context).popUntil((r)=>r.isFirst);
     setState((){me=null;catalog=null;error=hadSession||e.status!=401?e.toString():null;});
