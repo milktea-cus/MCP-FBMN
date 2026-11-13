@@ -43,7 +43,7 @@ class _SurveyPageState extends State<SurveyPage>{
  DateTime day=vnToday();bool weekly=false,all=false,busy=false;String district='',employee='';String? error;
  List<Map<String,dynamic>> routes=[],sessions=[],drafts=[];
  int lastPending=0;
- @override void initState(){super.initState();all=widget.initialCustomer!=null&&widget.initialStop==null;lastPending=widget.queue.pending.length;widget.queue.addListener(changed);load();}
+ @override void initState(){super.initState();day=DateTime.tryParse(widget.initialStop?['route_date']?.toString()??'')??vnToday();all=widget.initialCustomer!=null&&widget.initialStop==null;lastPending=widget.queue.pending.length;widget.queue.addListener(changed);load();}
  @override void dispose(){widget.queue.removeListener(changed);super.dispose();}
  void changed(){if(!mounted)return;final n=widget.queue.pending.length;if(n<lastPending&&!busy){unawaited(load());}else{unawaited(readDrafts());}lastPending=n;}
  Future<void> readDrafts()async{try{final d=await widget.queue.cached('survey-drafts');if(mounted)setState(()=>drafts=d);}catch(_){}}
@@ -176,7 +176,7 @@ class _SurveyPageState extends State<SurveyPage>{
    final history=mergeSessions(items,local);
    if(!mounted)return;
    final chosen=await showDialog<Map<String,dynamic>>(context:context,builder:(c)=>AlertDialog(title:Text(row['name'].toString()),content:SizedBox(width:420,child:ListView(shrinkWrap:true,children:[
-    Text(row['planned']==true?'Theo lịch ${(row['data'] as Map)['plannedDate']}':'Ngoài tuyến · ghé đột xuất'),
+    Text(row['is_unplanned']==true?'Ngoài kế hoạch':row['planned']==true?'Theo lịch ${(row['data'] as Map)['plannedDate']}':'Ngoài tuyến · ghé đột xuất'),
     if(history.isEmpty)const Text('Chưa có phiên khảo sát.'),
     for(final s in history)ListTile(title:Text(surveyStatus(s)),subtitle:Text('${s['started_at']} · Mẫu v${s['template_version']} · ${s['route_stop_id']==null?'Ngoài tuyến':'Theo tuyến'}'),onTap:()=>Navigator.pop(c,s)),
    ])),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng')),if(canStart(row)&&isToday(row))FilledButton(onPressed:()=>Navigator.pop(c,{'new':true}),child:const Text('Bắt đầu phiên mới'))]));
@@ -211,7 +211,7 @@ class _SurveyPageState extends State<SurveyPage>{
         onChanged:(v)=>setState(()=>employee=v??'')),
     ]),
     if(busy)const LinearProgressIndicator(),if(error!=null)Padding(padding:const EdgeInsets.all(8),child:Text(error!)),
-   if(visible.isEmpty&&!busy)const Padding(padding:EdgeInsets.all(16),child:Text('Không có điểm ghé trong kỳ này. Bật tất cả khách để ghé đột xuất.')),
+   if(visible.isEmpty&&!busy)const Padding(padding:EdgeInsets.all(16),child:Text(widget.initialStop==null?'Không có điểm ghé trong kỳ này.':'Chưa tải được điểm ghé này; hãy đồng bộ tuyến trước khi khảo sát.')),
    for(final r in visible)Card(child:ListTile(title:Text(r['name'].toString()),leading:r['category']==null
       ?CircleAvatar(child:Text(r['planned']==true?((r['data'] as Map)['sequence']??'').toString():'–'))
       :Stack(clipBehavior:Clip.none,children:[
