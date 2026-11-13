@@ -1,3 +1,5 @@
+> **ĐÃ ĐIỀU CHỈNH NGHIỆP VỤ 14/11/2026:** Phần nhãn hàng **Tổng quan** dưới đây từng dùng nhãn SKU, nay không còn đúng. SKU toàn bộ thuộc Futurebook; thống kê thị trường chỉ dùng nhãn mà Sales ghi nhận tại **từng khách/phiên Công tác**, đếm một lần cho mỗi khách–nhãn và cho phép tìm theo tỉnh/huyện. Xem tài liệu chính thức thay thế: [P0-3 — Nhãn hàng thị trường](P0_3_MARKET_BRANDS_CORRECTION_2026_11_14.md). Tài liệu cũ được giữ lại làm lịch sử, **không dùng làm đặc tả hiện hành**.
+
 # P0-3 — Danh mục nhãn hàng dùng chung (13/11/2026)
 
 ## Phạm vi đã đưa vào mã nguồn
