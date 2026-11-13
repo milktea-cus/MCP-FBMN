@@ -7,6 +7,7 @@ import {customerRoutes} from './customers';
 import {assortmentRoutes} from './assortment';
 import {surveyRoutes} from './surveys';
 import {monthlyPlanRoutes} from './monthly_plans';
+import {dayRouteRoutes} from './day_routes';
 import {catalogRoutes} from './catalog';
 import {catalogImportRoutes} from './catalog_import';
 import {inventoryRoutes} from './inventory';
@@ -177,6 +178,8 @@ export default {
       if(catalogResponse)return catalogResponse;
       const monthlyResponse=await monthlyPlanRoutes(req,env,user,url);
       if(monthlyResponse)return monthlyResponse;
+      const dayRouteResponse=await dayRouteRoutes(req,env,user,url);
+      if(dayRouteResponse)return dayRouteResponse;
       const surveyResponse=await surveyRoutes(req,env,user,url);
       if(surveyResponse)return surveyResponse;
       const sql = neon(env.DATABASE_URL);
