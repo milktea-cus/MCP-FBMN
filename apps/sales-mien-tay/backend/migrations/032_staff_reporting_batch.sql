@@ -42,7 +42,7 @@ BEGIN
    seen := array_append(seen,target_sub);
    SELECT * INTO previous FROM public.staff_members
      WHERE user_sub=target_sub FOR UPDATE;
-   IF NOT FOUND OR previous.role='admin' OR NOT previous.active
+   IF NOT FOUND OR previous.role='admin' OR (NOT previous.active AND should_assign)
    THEN RAISE EXCEPTION 'invalid report'; END IF;
    IF previous.scope_revision<>expected_rev
    THEN RAISE EXCEPTION 'stale report revision'; END IF;

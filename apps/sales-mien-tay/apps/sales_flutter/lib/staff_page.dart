@@ -159,7 +159,7 @@ class _StaffEditorState extends State<StaffEditor> {
    context:context,isScrollControlled:true,useSafeArea:true,
    builder:(sheetContext)=>StatefulBuilder(builder:(sheetContext,setModalState){
     final candidates=widget.allStaff.where((m)=>
-      m['role']!='admin'&&m['active']==true&&m['user_sub']!=subject.text&&
+      m['role']!='admin'&&(m['active']==true||reports.contains(m['user_sub'].toString()))&&m['user_sub']!=subject.text&&
       !isAncestor(m['user_sub'].toString())).toList();
     candidates.sort((a,b){
      final av=draft.contains(a['user_sub'])?0:1,bv=draft.contains(b['user_sub'])?0:1;

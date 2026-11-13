@@ -13,9 +13,10 @@ export async function staffRoutes(req:Request,env:AuthEnv,actor:{sub:string;admi
  }
  if(req.method!=='POST')return json({error:'Method not allowed'},405);
  let data:Record<string,unknown>;try{const raw=await req.text();if(raw.length>64000)throw Error();data=JSON.parse(raw);}catch{return json({error:'JSON không hợp lệ'},400);}
- if(typeof data?.job_title!=='string'||data.job_title.trim().length>120)return json({error:'Chức danh không hợp lệ (tối đa 120 ký tự).'},400);
- if(!Array.isArray(data.report_changes)||data.report_changes.length>200)return json({error:'Danh sách cấp dưới không hợp lệ.'},400);
- for(const change of data.report_changes){
+ if(data?.job_title!==undefined&&(typeof data.job_title!=='string'||data.job_title.trim().length>120))return json({error:'Chức danh không hợp lệ (tối đa 120 ký tự).'},400);
+ const reportChanges=data.report_changes===undefined?[]:data.report_changes;
+ if(!Array.isArray(reportChanges)||reportChanges.length>200)return json({error:'Danh sách cấp dưới không hợp lệ.'},400);
+ for(const change of reportChanges){
   if(!change||typeof change.user_sub!=='string'||!/^[-0-9a-f]{36}$/i.test(change.user_sub)||
     typeof change.assigned!=='boolean'||typeof change.scope_revision!=='string'||!/^\d{1,18}$/.test(change.scope_revision))
     return json({error:'Dữ liệu thay đổi cấp dưới không hợp lệ.'},400);
@@ -38,7 +39,7 @@ export async function staffRoutes(req:Request,env:AuthEnv,actor:{sub:string;admi
  try{
   const email=typeof data.email==='string'?data.email.trim().toLowerCase():null;
   if(email!==null&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return json({error:'Email không hợp lệ'},400);
-  const old=(await db`SELECT email,scope_revision,role,active FROM staff_members WHERE user_sub=${data.user_sub}`)[0];
+  const old=(await db`SELECT email,scope_revision,role,active,job_title FROM staff_members WHERE user_sub=${data.user_sub}`)[0];
   if(old&&email&&email!==String(old.email).toLowerCase()){
    if(actor.sub===data.user_sub)return json({error:'Không đổi email của chính Admin đang đăng nhập tại đây. Dùng một Admin khác để đổi an toàn.'},409);
    if(String(old.scope_revision)!==String(data.scope_revision??'0'))return json({error:'Hồ sơ đã thay đổi, mở lại trước khi lưu.'},409);
@@ -48,7 +49,7 @@ export async function staffRoutes(req:Request,env:AuthEnv,actor:{sub:string;admi
    if(old.role==='admin'&&old.active&&(!data.active||data.role!=='admin')&&!(await db`SELECT 1 FROM staff_members WHERE role='admin' AND active AND user_sub<>${data.user_sub}`).length)return json({error:'Không được khóa hoặc hạ quyền Admin cuối cùng.'},409);
    await changeStaffEmail(req,data.user_sub,email);
   }
-  const result=await db`SELECT public.sales_save_staff_with_reports(${actor.sub},${data.user_sub},${data.employee_code.trim()},${data.full_name.trim()},${String(data.phone??'')},${String(data.role)},${data.active},${manager as string|null},${JSON.stringify(canonical)}::jsonb,${String(data.scope_revision??'0')}::bigint,${(data.job_title as string).trim()},${JSON.stringify(data.report_changes)}::jsonb) AS item`;
+  const result=await db`SELECT public.sales_save_staff_with_reports(${actor.sub},${data.user_sub},${data.employee_code.trim()},${data.full_name.trim()},${String(data.phone??'')},${String(data.role)},${data.active},${manager as string|null},${JSON.stringify(canonical)}::jsonb,${String(data.scope_revision??'0')}::bigint,${typeof data.job_title==='string'?data.job_title.trim():String(old?.job_title??'')},${JSON.stringify(reportChanges)}::jsonb) AS item`;
   if(email&&String(result[0].item?.profile?.staff?.email??'').toLowerCase()!==email)return json({error:'Email xác thực chưa đồng bộ. Mở lại hồ sơ và thử lại.'},409);
   return json({item:result[0].item});
  }catch(e){
