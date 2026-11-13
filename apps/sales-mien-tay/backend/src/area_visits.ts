@@ -4,7 +4,7 @@ type Actor={sub:string;admin:boolean;manager:boolean};
 const json=(v:unknown,status=200)=>new Response(JSON.stringify(v),{
  status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}});
 const bad=(error:string,status=400)=>json({error},status);
-const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i;
+const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 async function input(req:Request){
  if(!req.headers.get('Content-Type')?.includes('application/json'))throw Error('Content-Type');
  const raw=await req.text();if(raw.length>12000)throw Error('Body too large');
