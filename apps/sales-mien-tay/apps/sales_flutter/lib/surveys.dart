@@ -211,7 +211,7 @@ class _SurveyPageState extends State<SurveyPage>{
         onChanged:(v)=>setState(()=>employee=v??'')),
     ]),
     if(busy)const LinearProgressIndicator(),if(error!=null)Padding(padding:const EdgeInsets.all(8),child:Text(error!)),
-   if(visible.isEmpty&&!busy)const Padding(padding:EdgeInsets.all(16),child:Text(widget.initialStop==null?'Không có điểm ghé trong kỳ này.':'Chưa tải được điểm ghé này; hãy đồng bộ tuyến trước khi khảo sát.')),
+   if(visible.isEmpty&&!busy)Padding(padding:EdgeInsets.all(16),child:Text(widget.initialStop==null?'Không có điểm ghé trong kỳ này.':'Chưa tải được điểm ghé này; hãy đồng bộ tuyến trước khi khảo sát.')),
    for(final r in visible)Card(child:ListTile(title:Text(r['name'].toString()),leading:r['category']==null
       ?CircleAvatar(child:Text(r['planned']==true?((r['data'] as Map)['sequence']??'').toString():'–'))
       :Stack(clipBehavior:Clip.none,children:[
