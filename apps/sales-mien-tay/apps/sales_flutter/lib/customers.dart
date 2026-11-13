@@ -93,7 +93,7 @@ class FieldCustomer {
         locationRecordedBy=j['location_recorded_by'] as String?,
         locationRecordedAt=DateTime.tryParse(j['location_recorded_at']?.toString()??''),
         version = (j['version'] as num?)?.toInt() ?? 1,
-        canPlan = j['can_plan'] is bool?j['can_plan'] as bool:null;
+        canPlan = j['can_plan'] is bool ? j['can_plan'] as bool : null;
 }
 
 class CustomerService {
