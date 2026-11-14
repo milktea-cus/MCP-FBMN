@@ -130,7 +130,15 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   if(req.method==='GET'){
    const province=url.searchParams.get('province')??'';
    if(province&&province!=='*'&&!areas[province])return bad('Tỉnh không hợp lệ');
-   const rows=await db`SELECT DISTINCT ON (province) id,province,version,questions,created_at FROM field_survey_templates
+   const history=url.searchParams.get('history')==='1';
+   if(history){
+    if(!actor.admin||!province)return bad('Chỉ Admin được xem lịch sử mẫu',403);
+    const older=await db`SELECT id,province,version,questions,created_by,created_at
+      FROM public.field_survey_templates WHERE province=${province}
+      ORDER BY version DESC LIMIT 100`;
+    return json({items:older});
+   }
+   const rows=await db`SELECT DISTINCT ON (province) id,province,version,questions,created_by,created_at FROM field_survey_templates
    WHERE (${!province} OR province=${province} OR (${province!=='*'} AND province='*'))
     AND (${actor.admin}
       OR (field_survey_templates.province='*' AND EXISTS(

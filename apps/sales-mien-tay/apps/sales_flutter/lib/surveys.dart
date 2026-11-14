@@ -526,8 +526,10 @@ class SurveyTemplateAdmin extends StatefulWidget{
  @override State<SurveyTemplateAdmin> createState()=>_SurveyTemplateAdminState();
 }
 class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
- String province='';int version=0;bool busy=false;String? message;
+ String province='';int version=0,draftRevision=0;bool busy=false;String? message;
  List<Map<String,dynamic>> qs=[];
+ List<Map<String,dynamic>> publishedVersions=[];
+ String publishedSignature='';
  List<String> officialBrands=[];
  List<FieldCustomer> knownCustomers=[];
  List<String> supplierOptions=const ['Mua trực tiếp công ty','NPP khác (ghi chú tên)'];
@@ -581,27 +583,72 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
  }
  Future<void> load(String p)async{
   setState((){
-   province=p;busy=true;message=null;qs=[];version=0;
+   province=p;busy=true;message=null;qs=[];publishedVersions=[];publishedSignature='';version=0;draftRevision++;
    supplierOptions=supplySourceOptions(
     knownCustomers.where((c)=>c.province==p));
   });
-  try{final data=await surveyGet(widget.service,'/api/v1/survey-templates',{'province':p});final items=asRows(data['items']);final selected=items.where((v)=>v['province']==p).firstOrNull;
-   if(selected!=null&&mounted)setState((){
-    version=(selected['version'] as num).toInt();
-    qs=asRows(selected['questions']);
-   });}
+  try{
+   final data=await surveyGet(widget.service,
+    '/api/v1/survey-templates',{'province':p,'history':'1'});
+   final items=asRows(data['items']);
+   final selected=items.firstOrNull;
+   if(mounted)setState((){
+    publishedVersions=items;
+    version=(selected?['version'] as num?)?.toInt()??0;
+    final authored=selected!=null&&selected['created_by']!='system:initial';
+    qs=authored?asRows(selected['questions']):[];
+    publishedSignature=jsonEncode(qs);
+    draftRevision++;
+   });
+  }
   catch(e){if(mounted)setState(()=>message=e.toString());}
   finally{if(mounted)setState(()=>busy=false);}
  }
  Future<void> publish()async{
   if(busy||province.isEmpty)return;
   if(qs.isEmpty||qs.length>50||qs.any((q)=>q['label'].toString().trim().isEmpty||['choice','multi_choice'].contains(q['type'])&&((q['options'] as List? ?? []).length<2))){setState(()=>message='Mỗi câu cần nhãn; câu chọn cần ít nhất 2 lựa chọn.');return;}
+  if(jsonEncode(qs)==publishedSignature){
+   setState(()=>message='Chưa có thay đổi. Mẫu hiện tại vẫn đang được áp dụng.');
+   return;
+  }
+  final selection=province=='*'?'tất cả các tỉnh':'tỉnh $province';
+  final confirmed=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(
+   title:const Text('Phát hành mẫu làm việc?'),
+   content:Text('Áp dụng ${qs.length} câu hỏi cho $selection. '
+    'Mẫu đang điền trước đây giữ nguyên phiên bản để đối chiếu.'),
+   actions:[
+    TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('Kiểm tra lại')),
+    FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('Phát hành')),
+   ],
+  ));
+  if(confirmed!=true||!mounted)return;
   setState(()=>busy=true);
   try{
-   final r=await http.post(widget.service.uri('/api/v1/survey-templates'),headers:widget.service.headers,body:jsonEncode({'client_ref':const Uuid().v4(),'province':province,'expected_version':version,'questions':qs})).timeout(const Duration(seconds:20));
-   final item=asMap(decodeApi(r)['item']);if(mounted)setState((){version=(item['version'] as num).toInt();qs=asRows(item['questions']);message='Đã phát hành mẫu v$version. Phiên cũ giữ nguyên mẫu.';});
-  }catch(e){if(mounted)setState(()=>message=e.toString());}
-  finally{if(mounted)setState(()=>busy=false);}
+   final r=await http.post(widget.service.uri('/api/v1/survey-templates'),
+    headers:widget.service.headers,body:jsonEncode({
+     'client_ref':const Uuid().v4(),'province':province,
+     'expected_version':version,'questions':qs,
+    })).timeout(const Duration(seconds:20));
+   final item=asMap(decodeApi(r)['item']);
+   final v=(item['version'] as num).toInt();
+   if(mounted){
+    setState((){
+     version=v;qs=asRows(item['questions']);
+     publishedSignature=jsonEncode(qs);
+     draftRevision++;
+     publishedVersions=[item,...publishedVersions];
+     message='ĐÃ PHÁT HÀNH mẫu v$v · ${qs.length} câu hỏi.';
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+     content:Text('Đã phát hành mẫu v$v · ${qs.length} câu hỏi. Sales có thể điền ngay.')));
+   }
+  }catch(e){
+   if(mounted){
+    setState(()=>message='PHÁT HÀNH THẤT BẠI: $e');
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+     content:Text('Không lưu được mẫu. Bản nháp vẫn được giữ để sửa và thử lại.')));
+   }
+  }finally{if(mounted)setState(()=>busy=false);}
  }
  @override Widget build(BuildContext context)=>Scaffold(
  appBar:widget.embedded?null:AppBar(title:const Text('Mẫu làm việc với khách')),
@@ -613,13 +660,42 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
    items:[const DropdownMenuItem(value:'*',child:Text('Mẫu chung · tất cả tỉnh')),
     for(final p in widget.regions.provinces)DropdownMenuItem(value:p,child:Text('Theo tỉnh · $p'))],
    onChanged:busy?null:(p){if(p!=null)load(p);}),
-  if(busy)const LinearProgressIndicator(),if(message!=null)Text(message!),
+  if(busy)const LinearProgressIndicator(),
+  if(message!=null)Padding(padding:const EdgeInsets.symmetric(vertical:8),
+   child:Text(message!,style:TextStyle(fontWeight:FontWeight.w600,
+    color:Theme.of(context).colorScheme.primary))),
   if(province.isNotEmpty)...[
+   Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(
+    crossAxisAlignment:CrossAxisAlignment.start,children:[
+     Text('Quản lý mẫu đã phát hành',style:Theme.of(context).textTheme.titleMedium),
+     Text('${publishedVersions.isEmpty?'Chưa có mẫu':version==1&&publishedVersions.first['created_by']=='system:initial'?'Chưa cấu hình mẫu tỉnh · câu mặc định không áp dụng':'Đang áp dụng v$version · ${publishedVersions.isNotEmpty?asRows(publishedVersions.first['questions']).length:0} câu'}'),
+     for(final v in publishedVersions.take(12))ExpansionTile(
+      tilePadding:EdgeInsets.zero,
+      title:Text('Phiên bản v${v['version']} · ${v['created_by']=='system:initial'?'Mẫu cũ tự động':'Đã lưu'}'),
+      subtitle:Text('${asRows(v['questions']).length} câu hỏi · ${v['created_at']?.toString().substring(0,10)??''}'),
+      children:[
+       for(final q in asRows(v['questions']))ListTile(
+        dense:true,title:Text(q['label']?.toString()??''),
+        subtitle:Text(q['type']?.toString()??'')),
+       TextButton.icon(
+        onPressed:busy?null:()=>setState((){
+         qs=asRows(v['questions']);draftRevision++;
+         message='Đã sao chép v${v['version']} vào bản nháp. '
+          'Hãy kiểm tra rồi phát hành phiên bản mới.';
+        }),
+        icon:const Icon(Icons.copy_outlined),
+        label:const Text('Sao chép để chỉnh sửa'),
+       ),
+      ],
+     ),
+    ],
+   ))),
+
    Text(province=='*'
     ?'Mẫu chung · phiên bản $version · luôn đi kèm mẫu tỉnh'
     :'Mẫu $province · phiên bản $version · dùng NPP của tỉnh này'),
    const Text('Chọn nhiều cho NPP, nhãn hàng, SKU. Thêm lựa chọn Khác và câu văn bản tùy chọn để ghi tên ngoài danh mục.',style:TextStyle(fontSize:12)),
-   for(final q in qs)Card(key:ValueKey(q['id']),child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
+   for(final q in qs)Card(key:ValueKey('draft:$province:$version:$draftRevision:${q['id']}'),child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
     TextFormField(key:ValueKey('${province}:$version:${q['id']}'),initialValue:q['label'].toString(),decoration:const InputDecoration(labelText:'Nội dung câu hỏi'),onChanged:(v)=>q['label']=v),
     const SizedBox(height:8),
     DropdownButtonFormField<String>(initialValue:q['type'].toString(),decoration:const InputDecoration(labelText:'Kiểu trả lời'),items:const [DropdownMenuItem(value:'text',child:Text('Văn bản')),DropdownMenuItem(value:'number',child:Text('Số')),DropdownMenuItem(value:'boolean',child:Text('Có / Không')),DropdownMenuItem(value:'choice',child:Text('Chọn một')),DropdownMenuItem(value:'multi_choice',child:Text('Chọn nhiều'))],onChanged:busy||q['catalog_source']=='brands'?null:(v)=>setState(()=>q['type']=v??'text')),
@@ -639,15 +715,14 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
      'label':'','type':'text','required':false})),child:const Text('Thêm câu hỏi')),
     OutlinedButton.icon(onPressed:busy||officialBrands.length<2?null:applyBrandCatalog,
      icon:const Icon(Icons.label_outline),
-     label:const Text('Chọn nhãn thị trường đã gặp')),
+     label:const Text('Thêm từ danh mục nhãn hàng')),
     OutlinedButton.icon(onPressed:busy||province.isEmpty||province=='*'?null:applySupplierChoices,
      icon:const Icon(Icons.local_shipping_outlined),
      label:const Text('Nguồn hàng / NPP')),
     FilledButton(onPressed:busy?null:publish,child:const Text('Phát hành phiên bản')),
    ]),
-   if(officialBrands.length<2)const Text(
-    'Cần ít nhất 2 nhãn chuẩn để tạo câu chọn nhiều. '
-    'Nhãn mới nhập trực tiếp khi khảo sát, không lấy từ SKU Futurebook.'),
+   const Text('Câu chọn một/nhiều cần ít nhất 2 lựa chọn trong chính câu hỏi. '
+    'Không bắt buộc phải tạo 2 nhãn hàng trong danh mục.',style:TextStyle(fontSize:12)),
   ]
  ]));
 }

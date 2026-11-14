@@ -49,7 +49,13 @@ Map<String,dynamic>? mergeCustomerVisitTemplates(
         .compareTo((a['version'] as num?)?.toInt()??0));
   return candidates.isEmpty?null:candidates.first;
  }
- final common=latest('*'),specific=latest(province);
+ final common=latest('*');
+ final rawProvince=latest(province);
+ // Seed-only province forms are examples, not administrator-published forms.
+ final specific=rawProvince!=null&&
+   (rawProvince['created_by']!='system:initial'&&
+    ((rawProvince['version'] as num?)?.toInt()??0)>1)
+   ?rawProvince:null;
  if(common==null&&specific==null)return null;
  final localQuestions=((specific?['questions'] as List?)??[])
    .map((q)=>Map<String,dynamic>.from(q as Map)).toList();
@@ -57,15 +63,51 @@ Map<String,dynamic>? mergeCustomerVisitTemplates(
  final commonQuestions=((common?['questions'] as List?)??[])
    .map((q)=>Map<String,dynamic>.from(q as Map))
    .where((q)=>!localIds.contains(q['id']?.toString()))
-   .map((q)=>{...q,'template_scope':'common'}).toList();
+   .map((q)=>{...q,'template_scope':'common','source_template_id':common!['id']}).toList();
  return {
   ...?specific,...?((specific==null)?common:null),
   'questions':[...commonQuestions,
-   for(final q in localQuestions){...q,'template_scope':'province'}],
+   for(final q in localQuestions){...q,'template_scope':'province','source_template_id':specific!['id']}],
+  'common_template_id':common?['id'],
+  'province_template_id':specific?['id'],
   'common_version':common?['version'],
   'province_version':specific?['version'],
   'template_province':province,
  };
+}
+
+/// Preserve the immutable template ID for each question at save time.
+List<Map<String,dynamic>> customerWorkFormSegments(
+ Map<String,dynamic>? effective,Map<String,dynamic> input,String note,
+ {List<String>? marketBrands}){
+ final qs=((effective?['questions'] as List?)??[])
+  .map((x)=>Map<String,dynamic>.from(x as Map)).toList();
+ final grouped=<String,Map<String,dynamic>>{};
+ String? brandTemplateId;
+ for(final q in qs){
+  final id=q['id']?.toString()??'',source=q['source_template_id']?.toString()??
+   effective?['id']?.toString()??'';
+  if(id.isEmpty||source.isEmpty)continue;
+  if(q['catalog_source']=='brands')brandTemplateId=source;
+  if(input.containsKey(id))grouped.putIfAbsent(source,()=>{})[id]=input[id];
+ }
+ if(marketBrands!=null&&brandTemplateId!=null)
+  grouped.putIfAbsent(brandTemplateId,()=>{});
+ if(grouped.isEmpty&&note.trim().isNotEmpty){
+  final id=effective?['common_template_id']?.toString()??
+   effective?['province_template_id']?.toString();
+  grouped[id??'']={};
+ }
+ final output=<Map<String,dynamic>>[];
+ for(final item in grouped.entries){
+  output.add({
+   'template_id':item.key.isEmpty?null:item.key,
+   'answers':item.value,
+   'market_brands':item.key==brandTemplateId?marketBrands:null,
+   'note':output.isEmpty?note.trim():'',
+  });
+ }
+ return output;
 }
 
 class CustomerWorkPage extends StatefulWidget{
@@ -247,8 +289,31 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
    inform('Chọn một hạng mục hoặc nhập ghi chú để lưu lần ghé.');return;
   }
   try{await persistDraft();}catch(e){inform('Chưa lưu được nháp: $e');return;}
-  await record('form',noteText:trimmed,form:Map<String,dynamic>.from(answers),
-   brands:hasConfiguredBrands&&brandsChecked?selected:null);
+  final pieces=customerWorkFormSegments(template,answers,trimmed,
+   marketBrands:hasConfiguredBrands&&brandsChecked?selected:null);
+  if(pieces.isEmpty){inform('Chưa có câu trả lời để ghi nhận.');return;}
+  setState(()=>saving=true);
+  try{
+   final stop=await resolveStop();
+   if(stop==null)return;
+   final capturedAt=DateTime.now().toUtc().toIso8601String();
+   final deps=dependenciesFor(stop);
+   for(final part in pieces){
+    await widget.queue.enqueue('/api/v1/day-routes/$routeId/customer-work',{
+     'client_ref':const Uuid().v4(),'kind':'form','customer_id':cid,
+     'route_stop_id':stop['id'],'template_id':part['template_id'],
+     'answers':part['answers'],'market_brands':part['market_brands'],
+     'note':part['note'],'captured_at':capturedAt,
+    },dependsOn:deps);
+   }
+   widget.onSaved?.call();
+   if(mounted){
+    setState(()=>message='Đã ghi ${pieces.length} phần nội dung vào bộ nhớ máy · chờ đồng bộ.');
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(
+     'Đã lưu câu trả lời · ${pieces.length} phần · chờ đồng bộ')));
+   }
+  }catch(e){inform('Lưu chưa đủ nội dung: $e. Dữ liệu đã ghi vào hàng đợi vẫn được giữ.');}
+  finally{if(mounted)setState(()=>saving=false);}
  }
  Future<void> checkIn()async{
   if(!writable||saving)return;
@@ -405,7 +470,15 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
     ]),
     const SizedBox(height:12),
     if(loading)const LinearProgressIndicator(minHeight:2),
-    if(denied)const Text('Quyền khách đã thay đổi. Không lưu hoặc hiện dữ liệu cũ.'),
+    if(denied)const Text('Không được xem khách này theo phân quyền hiện tại.'),
+    if(!widget.editable)Padding(padding:const EdgeInsets.symmetric(vertical:6),
+     child:Text(widget.route['owner_sub']!=widget.queue.identity
+      ?'Chỉ người phụ trách chuyến được nhập; khách được chia sẻ theo địa bàn, không theo người tạo.'
+      :'Chuyến chưa ở trạng thái làm việc hoặc đã kết thúc.',
+      style:TextStyle(color:Theme.of(context).colorScheme.error))),
+    if(widget.editable&&!isToday)const Padding(
+     padding:EdgeInsets.symmetric(vertical:6),
+     child:Text('Chỉ ghi nhận trong ngày thuộc chuyến đang diễn ra.')),
     if(message!=null)Padding(padding:const EdgeInsets.all(8),
      child:Text(message!,style:Theme.of(context).textTheme.bodySmall)),
     Text(customerWorkRecorded(activities,cid)||hasGps?'Đã ghé · đã có hoạt động'
@@ -416,8 +489,7 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
      'Admin cấu hình tại Thiết lập · Mẫu làm việc; có thể ghi chú/GPS/ảnh/đơn.'),
     if(template!=null)...[
      Text('Mẫu chung v${template!['common_version']??'—'}'
-      ' · tỉnh ${province.isEmpty?'—':province}'
-      ' v${template!['province_version']??'—'}',
+      '${template!['province_version']==null?'':' · $province v${template!['province_version']}'}',
       style:Theme.of(context).textTheme.titleMedium),
      const SizedBox(height:8),
      for(final q in fields)...[

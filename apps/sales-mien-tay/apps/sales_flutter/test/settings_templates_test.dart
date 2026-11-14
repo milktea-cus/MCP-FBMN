@@ -95,4 +95,65 @@ void main(){
   expect(find.text('Tên khách / mã khách / nhãn hàng'),findsNothing);
   expect(find.text('MGP'),findsOneWidget);
  });
+
+ test('Seeded province v1 never adds six unwanted default questions',(){
+  final common={
+   'id':'11111111-1111-4111-8111-111111111111',
+   'province':'*','version':4,'created_by':'system:remove-inherited-questions',
+   'questions':[{'id':'business_brands','label':'Nhãn hàng kinh doanh','type':'text'},
+    {'id':'visit_content','label':'Nội dung làm việc','type':'text'},
+    {'id':'rating','label':'Đánh giá','type':'choice','options':['A','B']}],
+  };
+  final legacy={
+   'id':'22222222-2222-4222-8222-222222222222',
+   'province':'Bến Tre','version':1,'created_by':'system:initial',
+   'questions':[for(var i=0;i<6;i++){'id':'legacy_$i','label':'Câu mặc định $i','type':'text'}],
+  };
+  final effective=mergeCustomerVisitTemplates([common,legacy],'Bến Tre')!;
+  final questions=effective['questions'] as List;
+  expect(questions,hasLength(3));
+  expect(effective['province_template_id'],null);
+  expect(effective['common_version'],4);
+  expect(effective['province_version'],null);
+  expect(questions.every((q)=>(q as Map)['source_template_id']==common['id']),true);
+  expect(customerWorkFormSegments(effective,{'rating':'A','visit_content':'Gặp khách'},'Ghi chú'),
+   hasLength(1));
+ });
+ test('Own published provincial questions are saved under own immutable template ID',(){
+  final common={
+   'id':'11111111-1111-4111-8111-111111111111',
+   'province':'*','version':4,'created_by':'system:remove-inherited-questions',
+   'questions':[{'id':'common_text','label':'Nội dung chung','type':'text'}],
+  };
+  final province={
+   'id':'33333333-3333-4333-8333-333333333333',
+   'province':'Bến Tre','version':2,'created_by':'admin',
+   'questions':[{'id':'local_npp','label':'NPP tỉnh','type':'text'}],
+  };
+  final effective=mergeCustomerVisitTemplates([common,province],'Bến Tre')!;
+  final chunks=customerWorkFormSegments(effective,{
+   'common_text':'Đã giới thiệu','local_npp':'NPP tỉnh','old_deleted':'should not save',
+  },'Kết quả');
+  expect(chunks,hasLength(2));
+  expect(chunks[0]['template_id'],common['id']);
+  expect(chunks[0]['answers'],{'common_text':'Đã giới thiệu'});
+  expect(chunks[0]['note'],'Kết quả');
+  expect(chunks[1]['template_id'],province['id']);
+  expect(chunks[1]['answers'],{'local_npp':'NPP tỉnh'});
+  expect(chunks[1]['note'],'');
+  expect(chunks.every((v)=>(v['answers'] as Map).containsKey('old_deleted')==false),true);
+ });
+ test('Published source-specific market brand choices remain on their template',(){
+  final common={'id':'11111111-1111-4111-8111-111111111111',
+   'province':'*','version':4,'questions':[{'id':'brands','label':'Nhãn','type':'multi_choice','catalog_source':'brands','options':['MGP','M&G']}]};
+  final province={'id':'33333333-3333-4333-8333-333333333333',
+   'province':'Bến Tre','version':2,'created_by':'admin',
+   'questions':[{'id':'local_npp','label':'NPP','type':'text'}]};
+  final form=mergeCustomerVisitTemplates([common,province],'Bến Tre')!;
+  final submissions=customerWorkFormSegments(form,{'brands':['MGP'],'local_npp':'A'},'Ghi chú',marketBrands:['MGP']);
+  expect(submissions,hasLength(2));
+  expect(submissions[0]['market_brands'],['MGP']);
+  expect(submissions[1]['market_brands'],null);
+ });
+
 }
