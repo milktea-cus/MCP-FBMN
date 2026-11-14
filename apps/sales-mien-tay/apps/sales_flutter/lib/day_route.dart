@@ -657,7 +657,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
        TextButton.icon(key:const ValueKey('work-session-delete-empty'),
         onPressed:deleteEmptyWorkSession,
         icon:const Icon(Icons.delete_outline),label:const Text('Xóa công tác rỗng')),
-     ]),,
+     ]),
     ],
     if(busy)const LinearProgressIndicator(),
     if(offline)const Text('Đang hiển thị dữ liệu offline.'),
