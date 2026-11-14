@@ -34,6 +34,7 @@ class DayRoutePage extends StatefulWidget {
 class _DayRoutePageState extends State<DayRoutePage>{
  Map<String,dynamic>? route;
  List<Map<String,dynamic>> stops=[],candidates=[];
+ String candidateQuery='';
  bool busy=false,offline=false;
  String? error;
  int previousPending=0;
@@ -317,7 +318,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
 
  /// An unplanned STOP must always represent a real customer. Market discovery
  /// is recorded against the route itself, never as an area/chain stop.
- Future<void> addUnplanned()async{
+ Future<void> addUnplanned({String? customerId})async{
   if(!canExecute||!scopeSupportsExtra(route!))return;
   final occupied=<String>{
    for(final s in stops)if(s['customer_id']!=null)s['customer_id'].toString(),
@@ -329,8 +330,11 @@ class _DayRoutePageState extends State<DayRoutePage>{
    notice('Chưa có khách phù hợp để thêm. Dùng Tìm khách mới để ghi nhận lead thực tế.');
    return;
   }
+  if(customerId!=null&&!eligible.any((c)=>c['id'].toString()==customerId)){
+   notice('Khách không còn trong phạm vi được giao hoặc đã có trên tuyến.');return;
+  }
   var query='';
-  final selected=await showDialog<String>(context:context,builder:(dialog)=>StatefulBuilder(
+  final selected=customerId??await showDialog<String>(context:context,builder:(dialog)=>StatefulBuilder(
    builder:(dialog,update){
     final visible=eligible.where((c)=>('${c['name']} ${c['code']??''}')
       .toLowerCase().contains(query.toLowerCase())).toList();
@@ -587,7 +591,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
        onPressed:openMarketEvidence,
        icon:const Icon(Icons.map_outlined),label:const Text('GPS / lead')),
       OutlinedButton.icon(onPressed:canEditPlannedStops?addCustomers:null,
-       icon:const Icon(Icons.group_add_outlined),label:const Text('Chọn nhiều khách')),
+       icon:const Icon(Icons.group_add_outlined),label:const Text('Ưu tiên khách')),
       if(scopeSupportsExtra(route!))OutlinedButton.icon(
        onPressed:canExecute?addUnplanned:null,
        icon:const Icon(Icons.add_circle_outline),label:const Text('Khách phát sinh')),
@@ -666,7 +670,61 @@ class _DayRoutePageState extends State<DayRoutePage>{
        ],
       ),
      )),
-    if(!busy&&sorted.isEmpty&&pending.isEmpty)
+    if(route!=null&&scopeSupportsExtra(route!))...[
+     const SizedBox(height:12),
+     ExpansionTile(
+      key:const ValueKey('territory-all-customers'),
+      initiallyExpanded:true,
+      title:Text('Tất cả khách thuộc ${route!['scope_kind']=='chain'?'chuỗi':'địa bàn'} (${candidates.length})'),
+      subtitle:const Text('Không cần tích trước khi lập lịch. Khách chưa ưu tiên vẫn được ghé khi đi thực tế.'),
+      children:[
+       if(candidates.isEmpty)Padding(padding:const EdgeInsets.all(12),
+        child:Text(offline||error!=null
+         ?'Chưa tải được danh sách khách. Bấm Làm mới khi có mạng.'
+         :'Chưa có khách trong phạm vi. Vẫn có thể đi tìm lead mới.')),
+       if(candidates.isNotEmpty)...[
+        Padding(padding:const EdgeInsets.all(8),
+         child:TextField(onChanged:(value)=>setState(()=>candidateQuery=value),
+          decoration:const InputDecoration(
+           prefixIcon:Icon(Icons.search),
+           hintText:'Tìm khách trong địa bàn / chuỗi'))),
+        Builder(builder:(context){
+         final occupied=<String>{
+          for(final stop in stops)if(stop['customer_id']!=null)
+           stop['customer_id'].toString(),
+          for(final op in pendingStops)
+           if((op['payload'] as Map)['customer_id']!=null)
+            (op['payload'] as Map)['customer_id'].toString(),
+         };
+         final filtered=candidates.where((c)=>
+           !occupied.contains(c['id'].toString())&&
+           ('${c['name']} ${c['code']??''} ${c['district']??''}')
+             .toLowerCase().contains(candidateQuery.toLowerCase())).toList();
+         return Column(children:[
+          Padding(padding:const EdgeInsets.symmetric(horizontal:12),
+           child:Text('Chưa có trong tuyến: ${filtered.length} · có thể tìm và ghé trực tiếp',
+            style:Theme.of(context).textTheme.bodySmall)),
+          for(final c in filtered.take(70))ListTile(
+           dense:true,
+           leading:const Icon(Icons.storefront_outlined),
+           title:Text(c['name']?.toString()??'Khách hàng'),
+           subtitle:Text('${c['code']??''} · ${c['district']??''}'),
+           trailing:canExecute
+            ?const Icon(Icons.add_circle_outline)
+            :const Icon(Icons.info_outline),
+           onTap:canExecute
+            ?()=>unawaited(addUnplanned(customerId:c['id'].toString()))
+            :()=>notice('Bắt đầu phiên công tác của hôm nay để ghé khách này.'),
+          ),
+          if(filtered.length>70)Padding(padding:const EdgeInsets.all(10),
+           child:Text('Đang hiển thị 70/${filtered.length} khách. Nhập tên để tìm khách khác.')),
+         ]);
+        }),
+       ],
+      ],
+     ),
+    ],
+    if(!busy&&sorted.isEmpty&&pending.isEmpty&&candidates.isEmpty)
      Padding(padding:const EdgeInsets.all(18),
       child:Text('Không có khách hẹn trước. ${scopeSupportsExtra(route??{})?'Bắt đầu phiên và bấm Tìm khách mới để ghi GPS/lead.':'Mở kế hoạch để thêm khách cụ thể.'}')),
    ]),
