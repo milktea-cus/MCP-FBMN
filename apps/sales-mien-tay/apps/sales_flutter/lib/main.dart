@@ -13,6 +13,7 @@ import 'staff_page.dart';
 import 'offline_queue.dart';
 import 'notifications.dart';
 import 'work_hub.dart';
+import 'route_template_library.dart';
 import 'package:http/http.dart' as http;
 import 'performance.dart';
 import 'orders.dart';
@@ -376,6 +377,8 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
         onRefresh:(){unawaited(_queue.sync());_refresh();},
         onStaff:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>StaffPage(session:widget.session))),
         onProfile:_profile,
+        onRouteTemplates:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>
+          RouteTemplateLibraryPage(service:_customerService,queue:_queue))),
         onSurveyTemplate:widget.me['role']=='admin'
           ?()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>
             SurveyTemplateAdmin(service:_customerService,regions:_catalog)))
@@ -902,19 +905,25 @@ class SalesHomeDrawer extends StatelessWidget {
   final List<IconData> icons;
   final ValueChanged<int> onSection;
   final VoidCallback onRefresh,onStaff,onProfile;
-  final VoidCallback? onUpdate,onSurveyTemplate;
+  final VoidCallback? onUpdate,onSurveyTemplate,onRouteTemplates;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
   const SalesHomeDrawer({super.key,required this.admin,required this.loading,
     required this.selectedIndex,required this.sections,required this.icons,
     required this.onSection,required this.onRefresh,required this.onStaff,required this.onProfile,
-    this.onUpdate,this.onSurveyTemplate,this.themeMode = ThemeMode.light, this.onThemeModeChanged});
+    this.onUpdate,this.onSurveyTemplate,this.onRouteTemplates,
+    this.themeMode = ThemeMode.light, this.onThemeModeChanged});
   @override Widget build(BuildContext context){
     void run(VoidCallback action){Navigator.of(context).pop();action();}
     Widget section(int i)=>ListTile(leading:Icon(icons[i]),title:Text(sections[i]),
       selected:selectedIndex==i,onTap:()=>run(()=>onSection(i)));
     return Drawer(child:SafeArea(child:ListView(padding:EdgeInsets.zero,children:[
       const ListTile(title:Text('PHÂN HỆ SALES')),
+      if(onRouteTemplates!=null)ListTile(
+        key:const Key('route-templates-menu'),
+        leading:const Icon(Icons.bookmarks_outlined),
+        title:const Text('Cài đặt mẫu tuyến'),
+        onTap:()=>run(onRouteTemplates!)),
       if(onSurveyTemplate!=null)ListTile(
         key:const Key('survey-template-menu'),
         leading:const Icon(Icons.tune_outlined),
