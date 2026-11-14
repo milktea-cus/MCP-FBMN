@@ -191,4 +191,36 @@ void main(){
   expect(q.pending.length,1);expect(posts,1);
   q.dispose();net.close();
  });
+ test('archiving server schedule removes only orphaned planned route/stops from outbox',()async{
+  final factory=newIdbFactoryMemory();
+  final q=OfflineQueue(Authorized(),owner,'8',factory:factory);
+  await q.enqueue('/api/v1/day-routes',draftRoute);
+  await q.enqueue('/api/v1/day-routes/'+oldRoute+'/stops',{
+   'client_ref':stop,'stop_kind':'area','sequence':1,'purpose':'Tìm điểm bán mới',
+  },dependsOn:[oldRoute]);
+  expect(q.pending.length,2);
+  final cleared=await q.discardPendingForArchivedPlan(plan);
+  expect(cleared,2);
+  expect(q.pending,isEmpty);
+  final reopened=OfflineQueue(Authorized(),owner,'8',factory:factory);
+  await reopened.reload();expect(reopened.pending,isEmpty);
+  q.dispose();reopened.dispose();
+ });
+
+ test('archived plan retains queued area visit and its route graph for safety',()async{
+  final factory=newIdbFactoryMemory();
+  final q=OfflineQueue(Authorized(),owner,'8',factory:factory);
+  await q.enqueue('/api/v1/day-routes',draftRoute);
+  await q.enqueue('/api/v1/day-routes/'+oldRoute+'/stops',{
+   'client_ref':stop,'stop_kind':'area','sequence':1,'purpose':'Tìm điểm bán mới',
+  },dependsOn:[oldRoute]);
+  await q.enqueue('/api/v1/area-visits',{
+   'client_ref':'66666666-6666-4666-8666-666666666666',
+   'day_route_stop_id':stop,
+  },dependsOn:[stop]);
+  expect(await q.discardPendingForArchivedPlan(plan),0);
+  expect(q.pending.length,3);
+  q.dispose();
+ });
+
 }
