@@ -242,6 +242,10 @@ class OfflineQueue extends ChangeNotifier {
 
  /// Even old iPhone builds stored 409 as plain Vietnamese text without a
  /// numeric status. Read-only matching is safe for any blocked route creation.
+ bool isRoutePatchConflict(Map<String,dynamic> row)=>
+  row['status']=='blocked'&&row['method']=='PATCH'&&
+  RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}$',caseSensitive:false)
+    .hasMatch(row['path']?.toString()??'');
  bool isRouteDuplicateConflict(Map<String,dynamic> row){
   final path=row['path']?.toString()??'';
   return row['status']=='blocked'&&row['method']=='POST'&&
@@ -412,6 +416,32 @@ class OfflineQueue extends ChangeNotifier {
   }
   return false;
  }
+ /// A stale PATCH after a plan's date has already been corrected on the
+ /// server is safe to ACK only if EVERY requested field matches. A real
+ /// conflict stays durable, never silently overwritten by another device.
+ Future<bool> _ackAlreadyAppliedRoutePatch(Map<String,dynamic> row)async{
+  final path=row['path']?.toString()??'';
+  if(row['method']!='PATCH'||!RegExp(
+    r'^/api/v1/day-routes/[a-f0-9-]{36}$',caseSensitive:false).hasMatch(path))
+   return false;
+  final payload=row['payload'] as Map?;
+  if(payload==null)return false;
+  final response=await _readRoute(path);
+  final item=response['item'];
+  if(item is! Map||item['owner_sub']!=identity||
+     item['id'].toString()!=path.split('/').last||
+     item['monthly_plan_id']!=payload['monthly_plan_id']||
+     item['status']!=payload['status']||
+     item['purpose']!=payload['purpose']?.toString().trim()||
+     (item['note']??'')!=(payload['note']??'')||
+     !item['route_date'].toString().startsWith(
+      payload['route_date']?.toString()??'INVALID')||
+     (item['version'] as num?)?.toInt()==null||
+     (item['version'] as num).toInt()<(payload['version'] as num).toInt())
+   return false;
+  await _remove(row['key'] as String);
+  return true;
+ }
  bool _reconciling=false;
  Future<void> reconcileBlockedRoutes()async{
   if(_closed||syncing||_reconciling)return;
@@ -420,8 +450,12 @@ class OfflineQueue extends ChangeNotifier {
    await reload();
    var fixed=false;
    for(final row in List<Map<String,dynamic>>.of(pending)){
-    if(!isRouteDuplicateConflict(row))continue;
-    try{if(await _resolveDuplicate(row))fixed=true;}
+    if(!isRouteDuplicateConflict(row)&&!isRoutePatchConflict(row))continue;
+    try{
+     if(isRoutePatchConflict(row)
+      ?await _ackAlreadyAppliedRoutePatch(row)
+      :await _resolveDuplicate(row))fixed=true;
+    }
     catch(_){
      // A 401/403/timeout must never erase an unacknowledged local operation.
     }
@@ -497,9 +531,11 @@ class OfflineQueue extends ChangeNotifier {
   if(rawRow is Map){
    final row=Map<String,dynamic>.from(rawRow);
    if(row['namespace']!=namespace)return;
-   if(isRouteDuplicateConflict(row)){
+   if(isRouteDuplicateConflict(row)||isRoutePatchConflict(row)){
     try{
-     final matched=await _resolveDuplicate(row);
+     final matched=isRoutePatchConflict(row)
+      ?await _ackAlreadyAppliedRoutePatch(row)
+      :await _resolveDuplicate(row);
      await reload();
      if(matched){error=null;await retryNow();}
      else{
@@ -627,6 +663,16 @@ class OfflineQueue extends ChangeNotifier {
      lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;
     }catch(e){
      final path=row['path']?.toString()??'';
+     if(e is ApiFailure&&e.status==409&&row['method']=='PATCH'&&
+       RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}$',
+        caseSensitive:false).hasMatch(path)){
+      try{
+       if(await _ackAlreadyAppliedRoutePatch(row)){
+        matchedDuplicate=true;lastSuccessAt=DateTime.now();error=null;
+        break;
+       }
+      }catch(_){}
+     }
      if(e is ApiFailure&&e.status==409&&row['method']=='POST'&&
       (path=='/api/v1/day-routes'||
        RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}/(stops|unplanned-stops)$',
