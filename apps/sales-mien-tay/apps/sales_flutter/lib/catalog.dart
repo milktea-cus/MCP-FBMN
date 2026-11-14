@@ -31,19 +31,54 @@ class _CatalogPageState extends State<CatalogPage>{
   final gen=++generation,q=search.text.trim(),after=more?cursor!:'';
   setState((){busy=true;error=null;if(!more){rows=[];cursor=null;offline=false;}});
   final key='catalog-v1:${widget.admin?'admin':'viewer'}:$q';
+  // Show account-scoped cached products immediately. A slow catalog API
+  // should not leave the Products tab visually empty for 20 seconds.
+  if(!more){
+   try{
+    final saved=await widget.queue.cached(key);
+    if(mounted&&gen==generation&&saved.isNotEmpty&&saved.first['items'] is List){
+     setState((){
+      rows=(saved.first['items'] as List).map(map).toList();
+      offline=true;
+     });
+    }
+   }catch(_){
+    // Storage failure must not suppress a fresh server request.
+   }
+  }
   try{
    final data=decodeApi(await http.get(widget.service.uri('/api/v1/catalog/products',{'q':q,'after':after,'limit':'50'}),headers:widget.service.headers).timeout(const Duration(seconds:20)));
    final page=(data['items'] as List).map(map).toList();
    if(!mounted||gen!=generation)return;
    final items=more?[...rows,...page]:page;
-   await widget.queue.cache(key,[{'items':items,'synced_at':data['synced_at'],'next_cursor':data['next_cursor']}]);
-   if(mounted&&gen==generation)setState((){rows=items;cursor=data['next_cursor'] as String?;});
+   try{
+    await widget.queue.cache(key,[{'items':items,'synced_at':data['synced_at'],
+     'next_cursor':data['next_cursor']}]);
+   }catch(_){
+    // Cached-write errors never replace a successfully loaded catalog.
+   }
+   if(mounted&&gen==generation)setState((){
+    rows=items;cursor=data['next_cursor'] as String?;offline=false;
+   });
   }catch(e){
    if(!mounted||gen!=generation)return;
    if(e is ApiFailure&&(e.status==401||e.status==403)){setState((){rows=[];cursor=null;error='Không còn quyền truy cập danh mục';});}
    else{
-    final saved=await widget.queue.cached(key);
-    if(mounted&&gen==generation)setState((){offline=true;cursor=null;rows=saved.isEmpty?[]:(saved.first['items'] as List).map(map).toList();error=saved.isEmpty?'Không có dữ liệu danh mục đã lưu cho tìm kiếm này.':'Dữ liệu lưu máy · ${saved.first['synced_at']} · có thể chưa đầy đủ';});
+    try{
+     final saved=await widget.queue.cached(key);
+     if(mounted&&gen==generation)setState((){
+      offline=true;cursor=null;
+      if(saved.isNotEmpty&&saved.first['items'] is List)
+       rows=(saved.first['items'] as List).map(map).toList();
+      error=rows.isEmpty?'Không tải được sản phẩm. Nhấn Làm mới để thử lại.'
+       :'Đang xem sản phẩm lưu máy · chưa tải được dữ liệu mới.';
+     });
+    }catch(_){
+     if(mounted&&gen==generation)setState((){
+      offline=true;cursor=null;
+      error='Không tải được sản phẩm. Kiểm tra kết nối hoặc bộ nhớ offline.';
+     });
+    }
    }
   }finally{if(mounted&&gen==generation)setState(()=>busy=false);}
  }
