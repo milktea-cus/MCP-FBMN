@@ -640,7 +640,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
       ),
      )),
     if(!busy&&sorted.isEmpty&&pending.isEmpty)
-     const Padding(padding:EdgeInsets.all(18),
+     Padding(padding:const EdgeInsets.all(18),
       child:Text('Không có khách hẹn trước. ${scopeSupportsExtra(route??{})?'Bắt đầu phiên và bấm Tìm khách mới để ghi GPS/lead.':'Mở kế hoạch để thêm khách cụ thể.'}')),
    ]),
   );
