@@ -8,6 +8,7 @@ import {assortmentRoutes} from './assortment';
 import {surveyRoutes} from './surveys';
 import {monthlyPlanRoutes} from './monthly_plans';
 import {dayRouteRoutes} from './day_routes';
+import {workSessionRoutes} from './work_sessions';
 import {areaVisitRoutes} from './area_visits';
 import {areaVisitMediaRoutes} from './area_visit_media';
 import {routeTemplateRoutes} from './route_templates';
@@ -186,6 +187,8 @@ export default {
       if(monthlyResponse)return monthlyResponse;
       const templateResponse=await routeTemplateRoutes(req,env,user,url);
       if(templateResponse)return templateResponse;
+      const workSessionResponse=await workSessionRoutes(req,env,user,url);
+      if(workSessionResponse)return workSessionResponse;
       const dayRouteResponse=await dayRouteRoutes(req,env,user,url);
       if(dayRouteResponse)return dayRouteResponse;
       const areaPhotoResponse=await areaVisitMediaRoutes(req,env,user,url);
