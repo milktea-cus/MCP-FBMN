@@ -254,25 +254,39 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
        final route=matching.firstOrNull;
        final assigned=r['owner_sub']==widget.queue.identity&&scopes.any(
          (s)=>s['scope_key']==r['scope_key']&&s['scope_kind']==r['scope_kind']);
-       return Wrap(spacing:0,children:[
-        if(assigned&&r['status']=='planned')...[
-         IconButton(tooltip:'Sửa kế hoạch',icon:const Icon(Icons.edit_outlined),onPressed:()=>_edit(original:r)),
-         IconButton(key:ValueKey('delete-plan:${r['id']}'),
-          tooltip:'Xóa lịch',icon:const Icon(Icons.delete_outline),
-          onPressed:()=>deletePlan(r)),
-        ],
-        if(assigned&&route==null&&queued.isEmpty&&r['status']=='planned')
-         IconButton(tooltip:'Tạo tuyến ngày',icon:const Icon(Icons.add_road),onPressed:()=>createRoute(r)),
-        if(route!=null)...[
-         IconButton(tooltip:'Mở tuyến ngày',icon:const Icon(Icons.route),onPressed:()=>openRoute(route)),
-         if(assigned&&r['status']=='planned'&&route['status']=='ready')IconButton(tooltip:'Dời ngày tuyến',
-          icon:const Icon(Icons.event_repeat),onPressed:()=>moveRoute(route)),
-        ],
-        for(final op in queued)IconButton(tooltip:'Mở tuyến chờ đồng bộ',icon:const Icon(Icons.cloud_upload_outlined),
-         onPressed:()=>openRoute({...Map<String,dynamic>.from(op['payload'] as Map),
-          'id':(op['payload'] as Map)['client_ref'],'owner_sub':widget.queue.identity,
-          'scope_kind':r['scope_kind'],'scope_key':r['scope_key'],
-          'province':r['province'],'district':r['district'],'plan_status':r['status']})),
+       return Row(mainAxisSize:MainAxisSize.min,children:[
+        if(assigned&&r['status']=='planned')IconButton(
+         key:ValueKey('delete-plan:${r['id']}'),tooltip:'Xóa lịch',
+         icon:const Icon(Icons.delete_outline),onPressed:()=>deletePlan(r),
+         visualDensity:VisualDensity.compact),
+        if(assigned||route!=null||queued.isNotEmpty)PopupMenuButton<String>(
+         tooltip:'Thao tác lịch',icon:const Icon(Icons.more_vert),
+         onSelected:(action){
+          if(action=='edit')unawaited(_edit(original:r));
+          if(action=='create')unawaited(createRoute(r));
+          if(action=='open'&&route!=null)unawaited(openRoute(route));
+          if(action=='move'&&route!=null)unawaited(moveRoute(route));
+          if(action=='queued'&&queued.isNotEmpty){
+           final op=queued.first,plan=Map<String,dynamic>.from(op['payload'] as Map);
+           unawaited(openRoute({...plan,'id':plan['client_ref'],
+            'owner_sub':widget.queue.identity,
+            'scope_kind':r['scope_kind'],'scope_key':r['scope_key'],
+            'province':r['province'],'district':r['district'],
+            'plan_status':r['status']}));
+          }
+         },
+         itemBuilder:(context)=>[
+          if(assigned&&r['status']=='planned')
+           const PopupMenuItem(value:'edit',child:Text('Sửa lịch')),
+          if(assigned&&route==null&&queued.isEmpty&&r['status']=='planned')
+           const PopupMenuItem(value:'create',child:Text('Tạo tuyến ngày')),
+          if(route!=null)
+           const PopupMenuItem(value:'open',child:Text('Mở tuyến ngày')),
+          if(assigned&&r['status']=='planned'&&route!=null&&route['status']=='ready')
+           const PopupMenuItem(value:'move',child:Text('Dời ngày tuyến')),
+          if(queued.isNotEmpty)
+           const PopupMenuItem(value:'queued',child:Text('Tuyến chờ đồng bộ')),
+         ]),
        ]);
       }),
     )),
