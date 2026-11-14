@@ -263,7 +263,7 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
          key:ValueKey('delete-plan:${r['id']}'),tooltip:'Xóa lịch',
          icon:const Icon(Icons.delete_outline),onPressed:()=>deletePlan(r),
          visualDensity:VisualDensity.compact),
-        if(assigned||route!=null||queued.isNotEmpty)PopupMenuButton<String>(
+        if((assigned&&r['status']=='planned')||route!=null||queued.isNotEmpty)PopupMenuButton<String>(
          tooltip:'Thao tác lịch',icon:const Icon(Icons.more_vert),
          onSelected:(action){
           if(action=='edit')unawaited(_edit(original:r));
