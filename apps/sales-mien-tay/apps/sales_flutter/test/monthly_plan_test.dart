@@ -31,7 +31,7 @@ void main() {
   }
  });
 
- testWidgets('P0-2A keeps period dropdown beside Add on 320dp mobile', (tester) async {
+ testWidgets('P0-2A keeps Add fully visible below period on 320dp mobile', (tester) async {
   tester.view.physicalSize=const Size(320,700);
   tester.view.devicePixelRatio=1;
   addTearDown(tester.view.resetPhysicalSize);
@@ -55,8 +55,9 @@ void main() {
   expect(added,isTrue);
   final menu=tester.getTopLeft(find.byType(DropdownButtonFormField<int>));
   final action=tester.getTopLeft(find.text('Thêm công tác'));
-  expect(menu.dx,lessThan(action.dx));
-  expect((menu.dy-action.dy).abs(),lessThan(36));
+  expect(menu.dy,lessThan(action.dy));
+  expect(action.dx,greaterThanOrEqualTo(12));
+  expect(tester.getBottomRight(find.text('Thêm công tác')).dx,lessThanOrEqualTo(320));
  });
  testWidgets('P0-2A omits empty fifth period in February', (tester) async {
   await tester.pumpWidget(MaterialApp(home:Scaffold(body:MonthlyPeriodActions(
