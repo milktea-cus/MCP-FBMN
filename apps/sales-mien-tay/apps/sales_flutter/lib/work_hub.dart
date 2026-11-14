@@ -212,12 +212,12 @@ class _WorkHubPageState extends State<WorkHubPage>{
        final state=workSessionState(route,widget.queue.pending);
        final own=route['owner_sub']==widget.queue.identity;
        final start=state=='open'&&own&&route['route_date'].toString().startsWith(today);
-       final action=start?'Bắt đầu phiên':state=='ongoing'?'Tiếp tục phiên'
+       final action=start?'Làm việc tại khách':state=='ongoing'?'Tiếp tục công tác'
         :state=='done'||state=='cancelled'?'Xem lịch sử':'Xem lịch';
        final status=route['pending_route_date']==true
         ?'Ngày mới đã lưu máy · chờ máy chủ xác nhận'
         :state=='ongoing'?'Đang đi':state=='done'?'Đã kết thúc'
-        :state=='cancelled'?'Đã hủy':'Chưa bắt đầu';
+        :state=='cancelled'?'Đã hủy':'Trong lịch công tác';
        return Card(child:Column(children:[
         ListTile(
          leading:Icon(state=='ongoing'?Icons.directions_walk_outlined:Icons.route_outlined),

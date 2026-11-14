@@ -422,9 +422,11 @@ class CustomerEditor extends StatefulWidget {
   final OfflineQueue? queue;
   /// Optional fieldwork lead draft. Only a confirmed customer is linked afterwards.
   final Map<String,dynamic>? prospect;
+  final String? defaultProvince,defaultDistrict;
   final Future<void> Function(String customerId)? onCreated;
   const CustomerEditor({super.key, required this.service, required this.regions,
-    this.customer,this.queue,this.prospect,this.onCreated});
+    this.customer,this.queue,this.prospect,this.onCreated,
+    this.defaultProvince,this.defaultDistrict});
   @override State<CustomerEditor> createState() => _CustomerEditorState();
 }
 class _CustomerEditorState extends State<CustomerEditor> {
@@ -455,6 +457,12 @@ class _CustomerEditorState extends State<CustomerEditor> {
     super.initState();
     final c=widget.customer;
     final lead=widget.prospect;
+    if(c==null&&lead==null&&widget.defaultProvince!=null&&
+      widget.regions.provinces.contains(widget.defaultProvince)){
+      province=widget.defaultProvince;
+      if(widget.regions.districts[province]?.contains(widget.defaultDistrict)==true)
+       district=widget.defaultDistrict;
+    }
     if(c==null&&lead!=null){
       name.text=lead['name']?.toString()??'';
       address.text=lead['address_line']?.toString()??'';
@@ -655,6 +663,7 @@ class _CustomerEditorState extends State<CustomerEditor> {
           photo:compressed?.image,thumbnail:compressed?.thumbnail,
           sha256:compressed?.hash,thumbnailSha256:compressed?.thumbnailHash,
           mime:compressed==null?null:'image/jpeg',method:widget.customer==null?'POST':'PATCH');
+        if(widget.customer==null&&widget.onCreated!=null)await widget.onCreated!(clientRef);
         if(mounted){ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Đã lưu điểm bán trên máy · chờ đồng bộ')));Navigator.pop(context,true);}return;
       }
       final created=widget.customer==null?await widget.service.add(data):await widget.service.update(widget.customer!,data);

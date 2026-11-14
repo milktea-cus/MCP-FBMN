@@ -376,6 +376,10 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
         onRefresh:(){unawaited(_queue.sync());_refresh();},
         onStaff:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>StaffPage(session:widget.session))),
         onProfile:_profile,
+        onSurveyTemplate:widget.me['role']=='admin'
+          ?()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>
+            SurveyTemplateAdmin(service:_customerService,regions:_catalog)))
+          :null,
         onUpdate:kIsWeb
           ?()=>Navigator.push(context,MaterialPageRoute(
             builder:(_)=>const PwaUpdatePage()))
@@ -898,19 +902,24 @@ class SalesHomeDrawer extends StatelessWidget {
   final List<IconData> icons;
   final ValueChanged<int> onSection;
   final VoidCallback onRefresh,onStaff,onProfile;
-  final VoidCallback? onUpdate;
+  final VoidCallback? onUpdate,onSurveyTemplate;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
   const SalesHomeDrawer({super.key,required this.admin,required this.loading,
     required this.selectedIndex,required this.sections,required this.icons,
     required this.onSection,required this.onRefresh,required this.onStaff,required this.onProfile,
-    this.onUpdate,this.themeMode = ThemeMode.light, this.onThemeModeChanged});
+    this.onUpdate,this.onSurveyTemplate,this.themeMode = ThemeMode.light, this.onThemeModeChanged});
   @override Widget build(BuildContext context){
     void run(VoidCallback action){Navigator.of(context).pop();action();}
     Widget section(int i)=>ListTile(leading:Icon(icons[i]),title:Text(sections[i]),
       selected:selectedIndex==i,onTap:()=>run(()=>onSection(i)));
     return Drawer(child:SafeArea(child:ListView(padding:EdgeInsets.zero,children:[
       const ListTile(title:Text('PHÂN HỆ SALES')),
+      if(onSurveyTemplate!=null)ListTile(
+        key:const Key('survey-template-menu'),
+        leading:const Icon(Icons.tune_outlined),
+        title:const Text('Cài đặt mẫu khảo sát · nhãn hàng'),
+        onTap:()=>run(onSurveyTemplate!)),
       if(admin)ListTile(leading:const Icon(Icons.manage_accounts_outlined),
         title:const Text('Quản lý nhân viên'),onTap:()=>run(onStaff)),
       ListTile(leading:const Icon(Icons.account_circle_outlined),

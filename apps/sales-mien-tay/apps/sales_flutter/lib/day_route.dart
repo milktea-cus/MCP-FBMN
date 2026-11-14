@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 import 'customers.dart';
+import 'customer_categories.dart';
 import 'models.dart';
 import 'offline_queue.dart';
 import 'session.dart';
@@ -161,6 +162,55 @@ class _DayRoutePageState extends State<DayRoutePage>{
    if(op['path']=='/api/v1/day-routes/${widget.routeId}/work-session')
     sessionId,
  ];
+ Future<void> createCustomer()async{
+  if(!canExecute||!scopeSupportsExtra(route!))return;
+  final regions=await RegionCatalog.load();
+  if(!mounted)return;
+  final current=route!;
+  final created=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>
+   CustomerEditor(service:widget.service,regions:regions,queue:widget.queue,
+    defaultProvince:current['scope_kind']=='territory'?current['province']?.toString():null,
+    defaultDistrict:current['scope_kind']=='territory'?current['district']?.toString():null,
+    onCreated:(id)async{
+     await widget.queue.enqueue('/api/v1/day-routes/${widget.routeId}/unplanned-stops',{
+      'client_ref':const Uuid().v4(),'stop_kind':'customer','customer_id':id,
+      'sequence':nextOrder,'purpose':'Khách mới trong công tác',
+      'captured_at':DateTime.now().toUtc().toIso8601String(),
+     },dependsOn:[id,..._routeDependencies()]);
+    },
+   )));
+  if(created==true&&mounted){notice('Đã lưu khách mới vào công tác trên máy.');await load();}
+ }
+ Future<void> customerWork(Map<String,dynamic> stop)async{
+  if(stop['stop_kind']!='customer')return;
+  final action=await showModalBottomSheet<String>(context:context,
+   showDragHandle:true,isScrollControlled:true,builder:(sheet)=>SafeArea(
+    child:Padding(padding:const EdgeInsets.fromLTRB(12,4,12,16),child:
+     Column(mainAxisSize:MainAxisSize.min,children:[
+      CustomerCategoryLabel(category:stop['category']?.toString()),
+      ListTile(title:Text(stop['customer_name']?.toString()??'Khách hàng',
+       style:Theme.of(context).textTheme.titleMedium),
+       subtitle:Text('${stop['customer_district']??''} · ${stop['customer_province']??''}')),
+      const Divider(),
+      ListTile(leading:const Icon(Icons.location_on_outlined),
+       title:const Text('Check-in GPS'),
+       enabled:canExecute&&stop['missed_code']==null,
+       onTap:()=>Navigator.pop(sheet,'gps')),
+      ListTile(leading:const Icon(Icons.checklist_outlined),
+       title:const Text('Thông tin khách · Tick nhãn hàng'),
+       subtitle:const Text('Khảo sát, ảnh và ghi chú theo lần ghé'),
+       enabled:sessionActive&&isOwner&&isTodayRoute,
+       onTap:()=>Navigator.pop(sheet,'survey')),
+      ListTile(leading:const Icon(Icons.event_busy_outlined),
+       title:const Text('Không ghé · Ghi lý do'),
+       enabled:canExecute&&stop['missed_code']==null,
+       onTap:()=>Navigator.pop(sheet,'missed')),
+     ]))));
+  if(!mounted)return;
+  if(action=='gps')await visit(stop);
+  if(action=='survey')await openCustomerSurvey(stop);
+  if(action=='missed')await recordMissed(stop);
+ }
  Future<void> addCustomers()async{
   if(!canEditPlannedStops)return;
   if(candidates.isEmpty){
@@ -253,7 +303,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
      'client_ref':const Uuid().v4(),'route_stop_id':stop['id'],
      'latitude':pos.latitude,'longitude':pos.longitude,'accuracy_m':pos.accuracy,
      'captured_at':pos.timestamp.toUtc().toIso8601String(),
-    },dependsOn:_routeDependencies());
+    },dependsOn:[..._routeDependencies(),if(pendingStops.any((p)=>(p['payload'] as Map?)?['client_ref']==stop['id']))stop['id'].toString()]);
    }else{
     final note=TextEditingController();
     final prospect=TextEditingController();
@@ -580,9 +630,9 @@ class _DayRoutePageState extends State<DayRoutePage>{
  @override Widget build(BuildContext context){
   final pending=pendingStops;
   final sorted=[...stops]..sort((a,b)=>(a['sequence'] as num).compareTo(b['sequence'] as num));
-  final count=sorted.where((s)=>((s['visit_count'] as num?)?.toInt()??0)>0).length;
+  final count=sorted.where((s)=>s['stop_kind']=='customer'&&((s['visit_count'] as num?)?.toInt()??0)>0).length;
   return Scaffold(
-   appBar:AppBar(title:const Text('Tuyến ngày'),actions:[
+   appBar:AppBar(title:const Text('Công tác tại khách'),actions:[
     IconButton(tooltip:'Làm mới',onPressed:busy?null:load,icon:const Icon(Icons.sync)),
    ]),
    body:ListView(padding:const EdgeInsets.all(12),children:[
@@ -595,34 +645,19 @@ class _DayRoutePageState extends State<DayRoutePage>{
      const SizedBox(height:8),
      Wrap(spacing:8,runSpacing:6,children:[
       if(scopeSupportsExtra(route!))FilledButton.icon(
-       key:const ValueKey('route-find-new-lead'),
-       onPressed:canExecute?recordMarketVisit:null,
-       icon:const Icon(Icons.add_location_alt_outlined),
-       label:const Text('Tìm khách mới')),
-      if(scopeSupportsExtra(route!))OutlinedButton.icon(
-       key:const ValueKey('route-market-evidence'),
-       onPressed:openMarketEvidence,
-       icon:const Icon(Icons.map_outlined),label:const Text('GPS / lead')),
-      OutlinedButton.icon(onPressed:canEditPlannedStops?addCustomers:null,
-       icon:const Icon(Icons.group_add_outlined),label:const Text('Ưu tiên khách')),
-      if(scopeSupportsExtra(route!))OutlinedButton.icon(
-       onPressed:canExecute?addUnplanned:null,
-       icon:const Icon(Icons.add_circle_outline),label:const Text('Khách phát sinh')),
-      OutlinedButton.icon(onPressed:openTemplates,icon:const Icon(Icons.bookmark_outline),label:const Text('Mẫu tuyến')),
+       key:const ValueKey('route-create-customer'),
+       onPressed:canExecute?createCustomer:null,
+       icon:const Icon(Icons.person_add_alt_1_outlined),label:const Text('Thêm khách')),
       if(canExecute)OutlinedButton.icon(
        key:const ValueKey('work-session-finish'),
        onPressed:endWorkSession,
-       icon:const Icon(Icons.flag_outlined),label:const Text('Kết thúc phiên')),
+       icon:const Icon(Icons.flag_outlined),label:const Text('Kết thúc sớm')),
       if(isOwner&&['done','cancelled'].contains(workState)&&
-        !hasRecordedActivity&&widget.queue.pending.isEmpty)OutlinedButton.icon(
-       key:const ValueKey('work-session-delete-empty'),
-       onPressed:deleteEmptyWorkSession,
-       icon:const Icon(Icons.delete_forever_outlined),label:const Text('Xóa phiên rỗng')),
-      if(isOwner&&workState=='open'&&route!['plan_status']!='cancelled')OutlinedButton.icon(
-       key:const ValueKey('day-route-delete-schedule'),
-       onPressed:busy?null:deleteSchedule,
-       icon:const Icon(Icons.delete_outline),label:const Text('Xóa lịch')),
-     ]),
+        !hasRecordedActivity&&widget.queue.pending.isEmpty)
+       TextButton.icon(key:const ValueKey('work-session-delete-empty'),
+        onPressed:deleteEmptyWorkSession,
+        icon:const Icon(Icons.delete_outline),label:const Text('Xóa công tác rỗng')),
+     ]),,
     ],
     if(busy)const LinearProgressIndicator(),
     if(offline)const Text('Đang hiển thị dữ liệu offline.'),
@@ -640,7 +675,9 @@ class _DayRoutePageState extends State<DayRoutePage>{
     )),
     for(var i=0;i<sorted.length;i++)
      Card(child:ListTile(
-      leading:CircleAvatar(child:Text('${sorted[i]['sequence']}')),
+      leading:sorted[i]['stop_kind']=='customer'
+       ?CustomerCategoryAvatar(category:sorted[i]['category']?.toString())
+       :const Icon(Icons.location_on_outlined),
       title:Text(sorted[i]['stop_kind']=='customer'
        ?sorted[i]['customer_name']?.toString()??'Điểm bán'
        :sorted[i]['stop_kind']=='chain'
@@ -655,7 +692,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
       }}${sorted[i]['stop_kind']=='customer'?' · Chạm khảo sát':' · Ảnh/lead'}'),
       isThreeLine:true,
       onTap:sorted[i]['stop_kind']=='customer'
-        ?()=>openCustomerSurvey(sorted[i]):()=>openEvidence(sorted[i]),
+        ?()=>customerWork(sorted[i]):()=>openEvidence(sorted[i]),
       trailing:(!canExecute&& !canEditPlannedStops||
         sorted[i]['missed_code']!=null)
        ?const Icon(Icons.chevron_right):PopupMenuButton<String>(
@@ -688,8 +725,8 @@ class _DayRoutePageState extends State<DayRoutePage>{
      ExpansionTile(
       key:const ValueKey('territory-all-customers'),
       initiallyExpanded:true,
-      title:Text('Tất cả khách thuộc ${route!['scope_kind']=='chain'?'chuỗi':'địa bàn'} (${candidates.length})'),
-      subtitle:const Text('Không cần tích trước khi lập lịch. Khách chưa ưu tiên vẫn được ghé khi đi thực tế.'),
+      title:Text('Khách thuộc ${route!['scope_kind']=='chain'?'chuỗi':'địa bàn'} (${candidates.length})'),
+      subtitle:const Text('Khách trong phạm vi tự hiện, chạm khách để làm việc.'),
       children:[
        if(candidates.isEmpty)Padding(padding:const EdgeInsets.all(12),
         child:Text(offline||error!=null
@@ -715,11 +752,11 @@ class _DayRoutePageState extends State<DayRoutePage>{
              .toLowerCase().contains(candidateQuery.toLowerCase())).toList();
          return Column(children:[
           Padding(padding:const EdgeInsets.symmetric(horizontal:12),
-           child:Text('Chưa có trong tuyến: ${filtered.length} · có thể tìm và ghé trực tiếp',
+           child:Text('Khách chưa ghé theo lịch: ${filtered.length}',
             style:Theme.of(context).textTheme.bodySmall)),
           for(final c in filtered.take(70))ListTile(
            dense:true,
-           leading:const Icon(Icons.storefront_outlined),
+           leading:CustomerCategoryAvatar(category:c['category']?.toString()),
            title:Text(c['name']?.toString()??'Khách hàng'),
            subtitle:Text('${c['code']??''} · ${c['district']??''}'),
            trailing:canExecute
@@ -727,7 +764,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
             :const Icon(Icons.info_outline),
            onTap:canExecute
             ?()=>unawaited(addUnplanned(customerId:c['id'].toString()))
-            :()=>notice('Bắt đầu phiên công tác của hôm nay để ghé khách này.'),
+            :()=>notice('Lịch công tác chưa đến ngày hoặc đã kết thúc.'),
           ),
           if(filtered.length>70)Padding(padding:const EdgeInsets.all(10),
            child:Text('Đang hiển thị 70/${filtered.length} khách. Nhập tên để tìm khách khác.')),

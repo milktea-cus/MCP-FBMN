@@ -51,10 +51,15 @@ class SalesTheme {
     // Dark surfaces are derived from the same FBMN purple seed, not a second palette.
     final generated = ColorScheme.fromSeed(seedColor: brand, brightness: brightness);
     final scheme = generated.copyWith(
-      primary: dark ? generated.primary : brand,
-      onPrimary: dark ? generated.onPrimary : Colors.white,
-      surface: dark ? generated.surface : Colors.white,
-      error: dark ? generated.error : const Color(0xFFB42318),
+      primary: dark ? const Color(0xFFB699D1) : brand,
+      onPrimary: dark ? const Color(0xFF24132D) : Colors.white,
+      surface: dark ? const Color(0xFF16171D) : Colors.white,
+      surfaceContainer: dark ? const Color(0xFF202129) : generated.surfaceContainer,
+      surfaceContainerLow: dark ? const Color(0xFF1D1E25) : generated.surfaceContainerLow,
+      primaryContainer: dark ? const Color(0xFF302538) : generated.primaryContainer,
+      onPrimaryContainer: dark ? const Color(0xFFE5D4F1) : generated.onPrimaryContainer,
+      outlineVariant: dark ? const Color(0xFF41404A) : generated.outlineVariant,
+      error: dark ? const Color(0xFFFFB4AB) : const Color(0xFFB42318),
     );
     final surface = dark ? scheme.surfaceContainerLow : Colors.white;
     final outline = dark ? scheme.outlineVariant : border;
