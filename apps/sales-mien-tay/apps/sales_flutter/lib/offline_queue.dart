@@ -297,6 +297,43 @@ class OfflineQueue extends ChangeNotifier {
   await t.completed;
   return true;
  }
+ /// Once the server confirms that an unstarted route was archived, a stale
+ /// iPhone POST for its stop can be dismissed only if it has NO locally saved
+ /// GPS/check-in/survey/photo or dependent operation. Never clear unrelated
+ /// offline work or delete the actual server stop.
+ Future<bool> _discardArchivedStop(Map<String,dynamic> row)async{
+  if(_closed||row['namespace']!=namespace||row['method']!='POST')return false;
+  final ref=(row['payload'] as Map?)?['client_ref']?.toString()??'';
+  if(ref.isEmpty)return false;
+  await reload();
+  final drafts=await cached('survey-drafts');
+  if(drafts.any((d)=>d['day_route_stop_id']==ref||d['route_stop_id']==ref)){
+   return false;
+  }
+  for(final op in pending){
+   if(op['key']==row['key'])continue;
+   final deps=op['depends_on'] as List? ?? [];
+   final payload=op['payload'];
+   if(deps.contains(ref)||
+      op['path']?.toString().contains('/stops/$ref/')==true||
+      payload is Map&&(
+       payload['route_stop_id']==ref||payload['day_route_stop_id']==ref
+      ))return false;
+  }
+  final database=await db;
+  final tx=database.transaction('outbox',idbModeReadWrite);
+  final store=tx.objectStore('outbox');
+  final saved=await store.getObject(row['key'] as String);
+  if(saved is! Map||saved['namespace']!=namespace||
+     saved['path']!=row['path']||saved['method']!='POST'||
+     saved['status']!='blocked'&&saved['status']!='pending'||
+     (saved['payload'] as Map?)?['client_ref']!=ref){
+   await tx.completed;return false;
+  }
+  await store.delete(row['key'] as String);
+  await tx.completed;
+  return true;
+ }
  Future<bool> _resolveDuplicate(Map<String,dynamic> row)async{
   if(_closed||row['namespace']!=namespace||row['method']!='POST')return false;
   final path=row['path']?.toString()??'';
@@ -339,6 +376,12 @@ class OfflineQueue extends ChangeNotifier {
    if(raw is Map&&sameSavedStop(raw,payload,identity,routeId)){
     return _ackMatchedRouteRow(row,raw,isStop:true);
    }
+  }
+  // After an explicitly archived, never-started route, even a differing
+  // unsubmitted stop is obsolete. Preserve it if any local execution exists.
+  final parent=remote['item'] as Map;
+  if(parent['plan_status']=='cancelled'&&parent['status']=='cancelled'){
+   return _discardArchivedStop(row);
   }
   return false;
  }
