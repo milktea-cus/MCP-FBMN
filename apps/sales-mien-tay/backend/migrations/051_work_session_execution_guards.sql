@@ -11,9 +11,11 @@ BEGIN
     WHERE id=NEW.day_route_stop_id;
   event_at:=NEW.checkin_at;
  ELSIF TG_TABLE_NAME='field_area_visits' THEN
-  SELECT coalesce(NEW.day_route_id,s.day_route_id) INTO route_id
-   FROM (SELECT NEW.day_route_id,NEW.day_route_stop_id) x
-   LEFT JOIN public.field_route_stops s ON s.id=x.day_route_stop_id;
+  route_id:=NEW.day_route_id;
+  IF route_id IS NULL THEN
+   SELECT day_route_id INTO route_id FROM public.field_route_stops
+    WHERE id=NEW.day_route_stop_id;
+  END IF;
   event_at:=NEW.checkin_at;
  ELSIF TG_TABLE_NAME='field_survey_sessions' THEN
   IF NEW.day_route_stop_id IS NULL THEN RETURN NEW; END IF;
