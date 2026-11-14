@@ -348,66 +348,9 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
 
   CustomerService get _customerService=>CustomerService(_apiUrl,_accessToken,province:_province,identity:_queue.identity,revision:_queue.revision);
 
-  String _syncTime(Object? value){
-    if(value is! num)return 'Chưa rõ';
-    final dt=DateTime.fromMillisecondsSinceEpoch(value.toInt()).toLocal();
-    return '${dt.day.toString().padLeft(2,'0')}/${dt.month.toString().padLeft(2,'0')} '
-      '${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}';
-  }
-  void _showSyncDetails()=>showDialog<void>(
-   context:context,
-   builder:(dialogContext)=>AlertDialog(
-    title:const Text('Hàng đợi đồng bộ trên máy'),
-    // The iPhone dialog must fit inside the system safe area and keyboard.
-    content:SizedBox(
-     width:(MediaQuery.sizeOf(dialogContext).width-96).clamp(200,420).toDouble(),
-     child:AnimatedBuilder(animation:_queue,
-     builder:(context,_)=>ConstrainedBox(constraints:const BoxConstraints(maxHeight:460),
-      child:ListView(shrinkWrap:true,children:[
-       Text('Tác vụ chờ: ${_queue.pending.length} · Bị từ chối: ${_queue.blockedCount}'
-        ' · Cách ly: ${_queue.quarantined}'),
-       if(_queue.error!=null)Padding(padding:const EdgeInsets.only(top:8),
-        child:SelectableText(_queue.error!)),
-       if(_queue.nextRetryAt!=null&&!_queue.syncing)Padding(
-        padding:const EdgeInsets.only(top:6),
-        child:Text('Thử tự động lúc ${_syncTime(_queue.nextRetryAt!.millisecondsSinceEpoch)}')),
-       if(_queue.pending.isEmpty)const Padding(padding:EdgeInsets.only(top:8),
-        child:Text('Không còn thao tác chờ của tài khoản này.')),
-       for(final job in _queue.pending)Card(child:Padding(
-        padding:const EdgeInsets.all(10),child:Column(
-         crossAxisAlignment:CrossAxisAlignment.start,children:[
-          Text(_queue.describe(job),style:Theme.of(context).textTheme.titleSmall),
-          Text(job['status']=='blocked'?'Máy chủ từ chối · cần xử lý':'Đã lưu trên máy · chờ gửi',
-           style:TextStyle(color:job['status']=='blocked'?
-            Theme.of(context).colorScheme.error:null)),
-          Text('Tạo lúc ${_syncTime(job['created'])} · Đã thử ${job['attempts']??0} lần'),
-          if(job['last_error_at']!=null)
-           Text('Lỗi gần nhất: ${job['last_error_at']}',
-            style:Theme.of(context).textTheme.bodySmall),
-          if(job['error']!=null)SelectableText(job['error'].toString()),
-          if((job['depends_on'] as List? ?? []).isNotEmpty)
-           const Text('Có thao tác cần hoàn tất trước mục này.'),
-          if(job['status']=='blocked')
-           Align(alignment:Alignment.centerRight,child:TextButton.icon(
-            onPressed:_queue.syncing?null:()=>unawaited(
-             _queue.retryBlocked(job['key'].toString())),
-            icon:const Icon(Icons.refresh),label:const Text('Thử gửi lại'))),
-         ]))),
-       const SizedBox(height:8),
-       const Text('Thao tác chưa được gửi không bị tự xóa. '
-        'Nếu gặp lỗi 403/409, xem nguyên nhân trước khi gửi lại.',
-        style:TextStyle(fontSize:12)),
-      ])))),
-    actions:[
-     TextButton(onPressed:()=>Navigator.pop(dialogContext),child:const Text('Đóng')),
-     FilledButton.icon(onPressed:_queue.syncing?null:()=>unawaited(_queue.retryNow()),
-      icon:const Icon(Icons.sync),label:const Text('Thử ngay')),
-    ],
-   ),
-  );
   // Open diagnostics independently of the network/sync state.
   Widget _syncBanner()=>SyncQueueBanner(
-    queue:_queue,onDetails:_showSyncDetails,
+    queue:_queue,onDetails:()=>showSyncQueueDetails(context,_queue),
   );
 
   @override
@@ -472,6 +415,64 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
 
 
 
+
+String _syncTime(Object? value){
+    if(value is! num)return 'Chưa rõ';
+    final dt=DateTime.fromMillisecondsSinceEpoch(value.toInt()).toLocal();
+    return '${dt.day.toString().padLeft(2,'0')}/${dt.month.toString().padLeft(2,'0')} '
+      '${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}';
+  }
+void showSyncQueueDetails(BuildContext context,OfflineQueue queue)=>showDialog<void>(
+   context:context,
+   builder:(dialogContext)=>AlertDialog(
+    title:const Text('Hàng đợi đồng bộ trên máy'),
+    // The iPhone dialog must fit inside the system safe area and keyboard.
+    content:SizedBox(
+     width:(MediaQuery.sizeOf(dialogContext).width-96).clamp(200,420).toDouble(),
+     child:AnimatedBuilder(animation:queue,
+     builder:(context,_)=>ConstrainedBox(constraints:const BoxConstraints(maxHeight:460),
+      child:ListView(shrinkWrap:true,children:[
+       Text('Tác vụ chờ: ${queue.pending.length} · Bị từ chối: ${queue.blockedCount}'
+        ' · Cách ly: ${queue.quarantined}'),
+       if(queue.error!=null)Padding(padding:const EdgeInsets.only(top:8),
+        child:SelectableText(queue.error!)),
+       if(queue.nextRetryAt!=null&&!queue.syncing)Padding(
+        padding:const EdgeInsets.only(top:6),
+        child:Text('Thử tự động lúc ${_syncTime(queue.nextRetryAt!.millisecondsSinceEpoch)}')),
+       if(queue.pending.isEmpty)const Padding(padding:EdgeInsets.only(top:8),
+        child:Text('Không còn thao tác chờ của tài khoản này.')),
+       for(final job in queue.pending)Card(child:Padding(
+        padding:const EdgeInsets.all(10),child:Column(
+         crossAxisAlignment:CrossAxisAlignment.start,children:[
+          Text(queue.describe(job),style:Theme.of(context).textTheme.titleSmall),
+          Text(job['status']=='blocked'?'Máy chủ từ chối · cần xử lý':'Đã lưu trên máy · chờ gửi',
+           style:TextStyle(color:job['status']=='blocked'?
+            Theme.of(context).colorScheme.error:null)),
+          Text('Tạo lúc ${_syncTime(job['created'])} · Đã thử ${job['attempts']??0} lần'),
+          if(job['last_error_at']!=null)
+           Text('Lỗi gần nhất: ${job['last_error_at']}',
+            style:Theme.of(context).textTheme.bodySmall),
+          if(job['error']!=null)SelectableText(job['error'].toString()),
+          if((job['depends_on'] as List? ?? []).isNotEmpty)
+           const Text('Có thao tác cần hoàn tất trước mục này.'),
+          if(job['status']=='blocked')
+           Align(alignment:Alignment.centerRight,child:TextButton.icon(
+            onPressed:queue.syncing?null:()=>unawaited(
+             queue.retryBlocked(job['key'].toString())),
+            icon:const Icon(Icons.refresh),label:const Text('Thử gửi lại'))),
+         ]))),
+       const SizedBox(height:8),
+       const Text('Thao tác chưa được gửi không bị tự xóa. '
+        'Nếu gặp lỗi 403/409, xem nguyên nhân trước khi gửi lại.',
+        style:TextStyle(fontSize:12)),
+      ])))),
+    actions:[
+     TextButton(onPressed:()=>Navigator.pop(dialogContext),child:const Text('Đóng')),
+     FilledButton.icon(onPressed:queue.syncing?null:()=>unawaited(queue.retryNow()),
+      icon:const Icon(Icons.sync),label:const Text('Thử ngay')),
+    ],
+   ),
+  );
 
 /// Sync detail is always accessible, even when an iOS PWA network request
 /// is suspended. The trailing button never starts another write operation.
