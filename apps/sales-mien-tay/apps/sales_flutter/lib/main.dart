@@ -449,7 +449,12 @@ void showSyncQueueDetails(BuildContext context,OfflineQueue queue)=>showDialog<v
         padding:const EdgeInsets.all(10),child:Column(
          crossAxisAlignment:CrossAxisAlignment.start,children:[
           Text(queue.describe(job),style:Theme.of(context).textTheme.titleSmall),
-          Text(job['status']=='blocked'?'Máy chủ từ chối · cần xử lý':'Đã lưu trên máy · chờ gửi',
+          Text(job['status']=='blocked'?'Máy chủ từ chối · cần đối chiếu'
+           :(job['depends_on'] as List? ?? []).any((ref)=>queue.pending.any(
+            (row)=>(row['payload'] as Map?)?['client_ref']==ref))
+             ?'Đang chờ tác vụ trước · dữ liệu vẫn an toàn'
+             :queue.syncing?'Đang đồng bộ · dữ liệu đã lưu máy'
+              :'Đã lưu trên máy · chờ gửi',
            style:TextStyle(color:job['status']=='blocked'?
             Theme.of(context).colorScheme.error:null)),
           Text('Tạo lúc ${_syncTime(job['created'])} · Đã thử ${job['attempts']??0} lần'),
@@ -461,8 +466,12 @@ void showSyncQueueDetails(BuildContext context,OfflineQueue queue)=>showDialog<v
            const Text('Có thao tác cần hoàn tất trước mục này.'),
           if(job['status']=='blocked')
            Align(alignment:Alignment.centerRight,child:TextButton.icon(
-            onPressed:queue.syncing?null:()=>unawaited(
-             queue.retryBlocked(job['key'].toString())),
+            onPressed:(){
+             if(queue.syncing||queue.reconciling){
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+               content:Text('Đang xử lý một lượt đồng bộ. Mở lại chi tiết để đối chiếu sau khi lượt hiện tại kết thúc.')));
+             }else{unawaited(queue.retryBlocked(job['key'].toString()));}
+            },
             icon:const Icon(Icons.refresh),label:Text(queue.isRouteDuplicateConflict(job)
              ?'Đối chiếu tuyến đã lưu':'Thử gửi lại'))),
          ]))),
@@ -474,7 +483,14 @@ void showSyncQueueDetails(BuildContext context,OfflineQueue queue)=>showDialog<v
       ])))),
     actions:[
      TextButton(onPressed:()=>Navigator.pop(dialogContext),child:const Text('Đóng')),
-     FilledButton.icon(onPressed:queue.syncing?null:()=>unawaited(queue.retryNow()),
+     FilledButton.icon(onPressed:(){
+       if(queue.syncing||queue.reconciling){
+        ScaffoldMessenger.of(dialogContext).showSnackBar(SnackBar(
+         content:Text(queue.isStalled
+          ?'Lượt đồng bộ đang bị iOS giữ lại. Dữ liệu vẫn lưu máy; mở lại ứng dụng để tiếp tục an toàn.'
+          :'Đang gửi một lượt đồng bộ. Không tạo thêm lần gửi trùng.')));
+       }else{unawaited(queue.retryNow());}
+      },
       icon:const Icon(Icons.sync),label:const Text('Thử ngay')),
     ],
    ),
