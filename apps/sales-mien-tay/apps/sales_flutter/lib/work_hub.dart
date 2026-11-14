@@ -50,7 +50,8 @@ class _WorkHubPageState extends State<WorkHubPage>{
  bool busy=false,offline=false;
  String? error;
  int lastPending=0;
- String get key=>'day-routes:${monthKey(day)}';
+ String get key=>'day-routes:${dayKey(day)}';
+ String get monthCache=>'day-routes:${monthKey(day)}';
  @override void initState(){
   super.initState();
   lastPending=widget.queue.pending.length;
@@ -69,10 +70,16 @@ class _WorkHubPageState extends State<WorkHubPage>{
   setState((){busy=true;error=null;});
   try{
    final cache=await widget.queue.cached(key);
-   if(mounted)setState((){routes=cache;offline=true;});
-   final res=decodeApi(await http.get(
-    widget.service.uri('/api/v1/day-routes',{'month':monthKey(day)}),
-    headers:widget.service.headers).timeout(const Duration(seconds:18)));
+   // Older builds cache the entire month; show it while a slow endpoint
+   // reconnects, rather than declaring the user's plan missing.
+   final old=cache.isNotEmpty?cache:await widget.queue.cached(monthCache);
+   if(mounted)setState((){routes=old;offline=true;});
+   final uri=widget.service.uri('/api/v1/day-routes',{
+    'month':monthKey(day),'day':dayKey(day)});
+   final res=decodeApi(await (
+    widget.service.client?.get(uri,headers:widget.service.headers)??
+    http.get(uri,headers:widget.service.headers))
+      .timeout(const Duration(seconds:25)));
    final fresh=(res['items'] as List)
      .map((v)=>Map<String,dynamic>.from(v as Map)).toList();
    await widget.queue.cache(key,fresh);
@@ -81,7 +88,9 @@ class _WorkHubPageState extends State<WorkHubPage>{
    if(e is ApiFailure&&(e.status==401||e.status==403)){
     if(mounted)setState(()=>routes=[]);
    }
-   if(mounted)setState(()=>error=e.toString());
+   if(mounted)setState(()=>error=e is TimeoutException
+    ?'Máy chủ phản hồi chậm. Dữ liệu đã lưu trên máy vẫn còn; nhấn Làm mới hoặc kiểm tra hàng đợi đồng bộ.'
+    :e.toString());
   }finally{if(mounted)setState(()=>busy=false);}
  }
  Future<void> chooseDay()async{
@@ -171,9 +180,16 @@ class _WorkHubPageState extends State<WorkHubPage>{
       if(offline)Text('Dữ liệu đã lưu trên máy · chờ đồng bộ.',
        style:Theme.of(context).textTheme.bodySmall),
       if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
-      if(dayRoutes.isEmpty&&!busy)
-       const Padding(padding:EdgeInsets.all(18),child:Text(
-        'Chưa có công tác trong ngày. Mở Kế hoạch để lập lịch.')),
+      if(dayRoutes.isEmpty&&!busy)...[
+       Padding(padding:const EdgeInsets.all(12),child:Text(
+        error!=null||offline
+          ?'Chưa xác nhận được tuyến ngày từ máy chủ. Không có nghĩa là lịch bị mất. '
+           'Bấm Làm mới hoặc mở Kế hoạch để kiểm tra lịch chờ đồng bộ.'
+          :'Chưa có tuyến cho ngày này. Nếu đã lập lịch, mở Kế hoạch để kiểm tra tuyến ngày.')),
+       TextButton.icon(onPressed:()=>setState(()=>tab=0),
+        icon:const Icon(Icons.calendar_month_outlined),
+        label:const Text('Mở Kế hoạch')),
+      ],
       if(tab==2&&dayRoutes.isNotEmpty)Card(child:Padding(
        padding:const EdgeInsets.all(12),child:Column(
         crossAxisAlignment:CrossAxisAlignment.start,children:[
