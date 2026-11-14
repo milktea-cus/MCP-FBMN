@@ -418,13 +418,21 @@ class _DayRoutePageState extends State<DayRoutePage>{
    }));
   if(selected==null||!mounted)return;
   try{
+   final addedStopId=const Uuid().v4();
    await widget.queue.enqueue('/api/v1/day-routes/${widget.routeId}/unplanned-stops',{
-    'client_ref':const Uuid().v4(),'stop_kind':'customer',
+    'client_ref':addedStopId,'stop_kind':'customer',
     'customer_id':selected,'sequence':nextOrder,'purpose':'Ghé khách phát sinh',
     'captured_at':DateTime.now().toUtc().toIso8601String(),
    },dependsOn:_routeDependencies());
-   notice('Đã thêm khách phát sinh trên máy · chờ đồng bộ.');
+   notice('Khách đã sẵn sàng trên máy · chờ đồng bộ.');
    if(mounted)await load();
+   if(mounted&&customerId!=null){
+    final entry=candidates.where((c)=>c['id'].toString()==selected).firstOrNull;
+    await customerWork({'id':addedStopId,'stop_kind':'customer',
+     'customer_id':selected,'customer_name':entry?['name']??'Khách hàng',
+     'category':entry?['category'],'customer_district':entry?['district'],
+     'customer_province':entry?['province'],'visit_count':0,'session_count':0});
+   }
   }catch(e){notice('Không thêm được khách phát sinh: $e');}
  }
  /// For scheduled customer stops, open the existing survey linked by
@@ -640,7 +648,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
      Text('${route!['route_date']?.toString().substring(0,10)} · ${route!['purpose']}',
        style:Theme.of(context).textTheme.titleMedium),
      Text('${route!['scope_kind']=='chain'?'Chuỗi':route!['scope_kind']=='customer'?'Khách cụ thể':'Địa bàn'}: ${route!['scope_key']} · Đã ghé $count/${sorted.length} khách · GPS thị trường ${route!['market_visit_count']??0}'),
-     Text('Phiên: ${switch(workState){'ongoing'=>'Đang đi','done'=>'Đã kết thúc','cancelled'=>'Đã hủy',_=>'Chưa bắt đầu'}}',
+     Text('Phiên: ${switch(workState){'ongoing'=>'Đang đi','done'=>'Đã kết thúc','cancelled'=>'Đã hủy',_=>'Trong lịch'}}',
       style:Theme.of(context).textTheme.bodyMedium),
      const SizedBox(height:8),
      Wrap(spacing:8,runSpacing:6,children:[
@@ -689,36 +697,11 @@ class _DayRoutePageState extends State<DayRoutePage>{
        'survey_completed'=>'Hoàn thành khảo sát',
        'missed'=>'Không ghé · ${missedReasonLabel(sorted[i]['missed_code'])}',
        _=>'Chưa đi',
-      }}${sorted[i]['stop_kind']=='customer'?' · Chạm khảo sát':' · Ảnh/lead'}'),
+      }}${sorted[i]['stop_kind']=='customer'?' · Chạm để làm việc':' · Lịch sử thực địa'}'),
       isThreeLine:true,
       onTap:sorted[i]['stop_kind']=='customer'
         ?()=>customerWork(sorted[i]):()=>openEvidence(sorted[i]),
-      trailing:(!canExecute&& !canEditPlannedStops||
-        sorted[i]['missed_code']!=null)
-       ?const Icon(Icons.chevron_right):PopupMenuButton<String>(
-       tooltip:'Thao tác điểm ghé',
-       icon:const Icon(Icons.more_vert),
-       onSelected:(action){
-        if(action=='gps')unawaited(visit(sorted[i]));
-        if(action=='missed')unawaited(recordMissed(sorted[i]));
-        if(action=='up')unawaited(shift(sorted[i],-1));
-        if(action=='down')unawaited(shift(sorted[i],1));
-       },
-       itemBuilder:(ctx)=>[
-        if(canExecute&&sorted[i]['missed_code']==null&&
-          !missedPending(sorted[i]['id'].toString())&&
-          !activityPending(sorted[i]['id'].toString())&&
-          ((sorted[i]['visit_count'] as num?)?.toInt()??0)==0)...[
-         const PopupMenuItem(value:'gps',child:Text('Check-in GPS')),
-         if(((sorted[i]['session_count'] as num?)?.toInt()??0)==0)
-          const PopupMenuItem(value:'missed',child:Text('Không ghé · ghi lý do')),
-        ],
-        if(canEditPlannedStops&&pending.isEmpty)...[
-         if(i>0)const PopupMenuItem(value:'up',child:Text('Chuyển lên')),
-         if(i<sorted.length-1)const PopupMenuItem(value:'down',child:Text('Chuyển xuống')),
-        ],
-       ],
-      ),
+      trailing:const Icon(Icons.chevron_right),
      )),
     if(route!=null&&scopeSupportsExtra(route!))...[
      const SizedBox(height:12),

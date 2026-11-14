@@ -3,6 +3,22 @@ import 'package:sales_mien_tay/work_hub.dart';
 import 'package:sales_mien_tay/day_route.dart';
 
 void main(){
+ test('Hôm nay shows a locally queued trip without a server echo',(){
+  final owner='sales-one',routeId='11111111-1111-4111-8111-111111111111',
+   planId='22222222-2222-4222-8222-222222222222';
+  final records=mergePendingDayRoutes([], [
+   {'namespace':'sales-one:1','path':'/api/v1/monthly-plans',
+    'method':'POST','payload':{'client_ref':planId,'scope_kind':'territory',
+    'scope_key':'Bến Tre|Bình Đại','status':'planned'}},
+   {'namespace':'sales-one:1','path':'/api/v1/day-routes',
+    'method':'POST','payload':{'client_ref':routeId,
+    'monthly_plan_id':planId,'route_date':'2026-11-14','status':'ready'}},
+  ],owner);
+  expect(records,singleton);
+  expect(records.single['scope_kind'],'territory');
+  expect(records.single['pending_route'],isTrue);
+  expect(records.single['owner_sub'],owner);
+ });
  test('plan vs actual does not count check-in as completed survey',(){
   final result=WorkCounts.fromRoutes([
    {'stop_count':5,'visited_count':2,'missed_count':1,

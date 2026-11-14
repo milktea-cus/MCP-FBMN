@@ -35,6 +35,35 @@ class WorkCounts {
  }
 }
 
+/// Preserve dated plans waiting in IndexedDB even before a slow server GET.
+/// Never synthesize a stop: customers on a scope are loaded by /candidates.
+List<Map<String,dynamic>> mergePendingDayRoutes(
+ List<Map<String,dynamic>> server,List<Map<String,dynamic>> pending,String owner){
+ final ids=<String>{for(final r in server)r['id'].toString()};
+ final all=<Map<String,dynamic>>[...server];
+ for(final op in pending){
+  if(op['method']!='POST'||op['path']!='/api/v1/day-routes'||op['payload'] is! Map)continue;
+  final route=Map<String,dynamic>.from(op['payload'] as Map);
+  final id=route['client_ref']?.toString()??'';
+  if(id.isEmpty||!ids.add(id))continue;
+  final plans=pending.where((p)=>p['method']=='POST'&&
+   p['path']=='/api/v1/monthly-plans'&&p['payload'] is Map&&
+   (p['payload'] as Map)['client_ref']==route['monthly_plan_id']);
+  if(plans.isEmpty)continue;
+  final plan=plans.first['payload'] as Map;
+  if(op['namespace']?.toString().startsWith('$owner:')!=true)continue;
+  all.add({...route,'id':id,'owner_sub':owner,
+   'plan_status':plan['status']??'planned',
+   'scope_kind':plan['scope_kind'],'scope_key':plan['scope_key'],
+   'province':plan['province'],'district':plan['district'],
+   'stop_count':pending.where((p)=>p['path']=='/api/v1/day-routes/$id/stops'&&
+    (p['payload'] as Map?)?['stop_kind']=='customer').length,
+   'visited_count':0,'survey_count':0,'lead_count':0,
+   'work_session_state':'open','pending_route':true});
+ }
+ return all;
+}
+
 /// Single Sales entry: plan, execute, compare. The legacy route screen stays
 /// readable through old records but is no longer a second route editor.
 class WorkHubPage extends StatefulWidget {
@@ -75,7 +104,7 @@ class _WorkHubPageState extends State<WorkHubPage>{
    final old=cache.isNotEmpty?cache:await widget.queue.cached(monthCache);
    if(mounted)setState((){routes=old;offline=true;});
    final uri=widget.service.uri('/api/v1/day-routes',{
-    'month':monthKey(day),'day':dayKey(day)});
+    'month':monthKey(day)});
    final res=decodeApi(await (
     widget.service.client?.get(uri,headers:widget.service.headers)??
     http.get(uri,headers:widget.service.headers))
@@ -147,7 +176,8 @@ class _WorkHubPageState extends State<WorkHubPage>{
    queue:widget.queue,service:widget.service,routeId:id,cachedRoute:route)));
   if(mounted)await load();
  }
- List<Map<String,dynamic>> get dayRoutes=>routes
+ List<Map<String,dynamic>> get dayRoutes=>mergePendingDayRoutes(routes,
+    widget.queue.pending,widget.queue.identity)
   .map((r)=>effectiveRouteDate(r,widget.queue.pending,widget.queue.identity))
   .where((r)=>r['route_date'].toString().startsWith(dayKey(day))
     &&r['status']=='ready'&&r['plan_status']!='cancelled').toList();
@@ -214,7 +244,9 @@ class _WorkHubPageState extends State<WorkHubPage>{
        final start=state=='open'&&own&&route['route_date'].toString().startsWith(today);
        final action=start?'Làm việc tại khách':state=='ongoing'?'Tiếp tục công tác'
         :state=='done'||state=='cancelled'?'Xem lịch sử':'Xem lịch';
-       final status=route['pending_route_date']==true
+       final status=route['pending_route']==true
+        ?'Lịch đã lưu trên máy · chờ đồng bộ'
+        :route['pending_route_date']==true
         ?'Ngày mới đã lưu máy · chờ máy chủ xác nhận'
         :state=='ongoing'?'Đang đi':state=='done'?'Đã kết thúc'
         :state=='cancelled'?'Đã hủy':'Trong lịch công tác';
