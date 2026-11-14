@@ -29,3 +29,11 @@
 - Worker API phiên bản production có archive + duplicate reconciliation + header compatibility, deployment 100% (binding/secrets được giữ).
 
 **Lưu ý nghiệm thu:** Không thể truy cập bản ghi IndexedDB riêng của iPhone Owner hoặc thực hiện thao tác người dùng có đăng nhập trên thiết bị thật từ API quản trị. Sau khi bản web mới READY, cần xác nhận PWA tải mã mới và outbox trên máy giảm, nếu trước đó có operation đã được server ghi. Không khuyến nghị xóa cache/site data hoặc gỡ PWA. Không hứa hết mọi lỗi tương lai: guard bảo vệ đúng các nguyên nhân đã tái hiện ở đây.
+
+## Bản triển khai production đã nghiệm thu kỹ thuật
+
+- **Vercel READY:** `dpl_FSWXkr2urc3L6rpLhDQ3UW1pEgKN`, source commit `20615bffc06f589daa48b06413dc384b99d8d7bb`, domain production `https://sales-mien-tay.vercel.app`. Vercel API xác nhận cả target production và alias thực tế.
+- **Backend typecheck PASS**; **DB audit contract 6/6 PASS**; **Flutter analyze --no-fatal-infos PASS**, **203/203 Flutter tests PASS**; Flutter Web release PASS, PWA offline shell 42 assets PASS.
+- **Cloudflare Worker deployment** `c63c0a15-ea38-41cc-920f-02c850dc5f20` ở **100%**. Đã kiểm chứng bundle triển khai chứa archive, route/stop idempotent, protocol v2 gate, CORS cho protocol header; 7 bindings/secrets giữ nguyên.
+- **Neon production:** `field_route_audit_action_check` chứa `cancel`; thực tế gọi archive success, lần gọi lại `already_archived=true`; 0 lịch active/1 lịch archived; cả 2 bảng audit có event `cancel`, dữ liệu khách/lượt ghé/khảo sát không đổi.
+- **Giới hạn còn mở:** chưa có thao tác đăng nhập trên đúng iPhone của Owner; không thể khẳng định 1 outbox row trên thiết bị đã tự biến mất. Không yêu cầu xóa IndexedDB/Safari/cache hay cài lại PWA.
