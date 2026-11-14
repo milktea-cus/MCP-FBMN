@@ -127,11 +127,27 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
        ${actor.sub},m.scope_kind,m.scope_key,m.province,m.district)
     LIMIT 1`;
   if(existing.length){
+   const saved=existing[0];
+   // A planned stop or different purpose/order is NOT an exact duplicate.
+   // Never remap an offline photo/survey onto an unrelated canonical stop.
+   if(saved.is_unplanned!==true||saved.stop_kind!=='customer'||
+      Number(saved.sequence)!==Number(v.sequence)||
+      String(saved.purpose)!==String(v.purpose??'')){
+    return reply({code:'STOP_ALREADY_EXISTS_DIFFERENT_CONTENT',
+      error:'Khách đã có trong tuyến với nội dung khác. Bản chờ trên máy được giữ để đối chiếu.'},409);
+   }
    if(req.headers.get('X-Sync-Protocol')!=='2'&&
-     String(existing[0].id)!==String(v.client_ref))
+     String(saved.id)!==String(v.client_ref))
      return fail('Khách đã có trên tuyến; cần cập nhật PWA để đồng bộ an toàn',409);
-   return reply({item:existing[0],already_saved:true},200);
+   return reply({item:saved,already_saved:true},200);
   }
+  // Reject rogue clients which bypass the WorkHub start/continue flow.
+  const active=await db`SELECT s.id FROM public.field_work_sessions s
+   WHERE s.day_route_id=${extra[1]}::uuid AND s.owner_sub=${actor.sub}
+     AND s.state='ongoing' LIMIT 1`;
+  if(!active.length)
+   return reply({code:'WORK_SESSION_NOT_ACTIVE',
+    error:'Hãy bắt đầu hoặc tiếp tục phiên công tác trước khi thêm khách phát sinh.'},409);
   try{
    const rows=await db`SELECT public.sales_add_unplanned_route_stop(
     ${actor.sub},${String(v.client_ref)}::uuid,${String(v.client_ref)}::uuid,
