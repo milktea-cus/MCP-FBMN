@@ -47,28 +47,67 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
   if(busy)return;
   setState((){busy=true;error=null;});
   try{
-   final localItems=await widget.queue.cached(monthCache);
-   final localScopes=await widget.queue.cached(optionsCache);
-    final localRoutes=await widget.queue.cached(routeCache);
-   if(mounted)setState((){items=localItems;scopes=localScopes;dayRoutes=localRoutes;cached=true;});
-   final results=await Future.wait([
-     _get(widget.service.uri('/api/v1/monthly-plans',{'month':monthKey(month)})),
-     _get(widget.service.uri('/api/v1/monthly-plans/options')),
-     _get(widget.service.uri('/api/v1/day-routes',{'month':monthKey(month)})),
-    ]);
-   final plans=decodeApi(results[0]),options=decodeApi(results[1]),routesData=decodeApi(results[2]);
-   final fresh=(plans['items'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
-   final allowed=(options['scopes'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
-   final freshRoutes=(routesData['items'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
-   await widget.queue.cache(monthCache,fresh);
-   await widget.queue.cache(routeCache,freshRoutes);
-   await widget.queue.cache(optionsCache,allowed);
-   if(mounted)setState((){items=fresh;scopes=allowed;dayRoutes=freshRoutes;cached=false;});
+   final saved=await Future.wait([
+    widget.queue.cached(monthCache),
+    widget.queue.cached(optionsCache),
+    widget.queue.cached(routeCache),
+   ]);
+   if(mounted)setState((){
+    items=saved[0];scopes=saved[1];dayRoutes=saved[2];cached=true;
+   });
+   final problems=<String>[];
+   // One stalled endpoint must not prevent loading scope/plan data.
+   // In particular day-routes cannot disable "Thêm công tác".
+   await Future.wait([
+    ()async{
+     try{
+      final res=decodeApi(await _get(widget.service.uri(
+       '/api/v1/monthly-plans',{'month':monthKey(month)})));
+      final next=(res['items'] as List).map((v)=>
+       Map<String,dynamic>.from(v as Map)).toList();
+      await widget.queue.cache(monthCache,next);
+      if(mounted)setState(()=>items=next);
+     }catch(e){
+      problems.add('Kế hoạch: $e');
+      if(e is ApiFailure&&(e.status==401||e.status==403)&&mounted)
+       setState(()=>items=[]);
+     }
+    }(),
+    ()async{
+     try{
+      final res=decodeApi(await _get(widget.service.uri(
+       '/api/v1/monthly-plans/options')));
+      final next=(res['scopes'] as List).map((v)=>
+       Map<String,dynamic>.from(v as Map)).toList();
+      await widget.queue.cache(optionsCache,next);
+      if(mounted)setState(()=>scopes=next);
+     }catch(e){
+      problems.add('Quyền địa bàn: $e');
+      if(e is ApiFailure&&(e.status==401||e.status==403)&&mounted)
+       setState(()=>scopes=[]);
+     }
+    }(),
+    ()async{
+     try{
+      final res=decodeApi(await _get(widget.service.uri(
+       '/api/v1/day-routes',{'month':monthKey(month)})));
+      final next=(res['items'] as List).map((v)=>
+       Map<String,dynamic>.from(v as Map)).toList();
+      await widget.queue.cache(routeCache,next);
+      if(mounted)setState(()=>dayRoutes=next);
+     }catch(e){
+      problems.add('Tuyến ngày: $e');
+      if(e is ApiFailure&&(e.status==401||e.status==403)&&mounted)
+       setState(()=>dayRoutes=[]);
+     }
+    }(),
+   ]);
+   if(mounted)setState((){
+    cached=problems.isNotEmpty;
+    if(problems.isNotEmpty)error=problems.join(' · ');
+   });
   }catch(e){
-   if(e is ApiFailure&&(e.status==401||e.status==403)){
-    if(mounted)setState((){items=[];scopes=[];cached=false;});
-   }
-   if(mounted)setState(()=>error=e.toString());
+   if(mounted)setState(()=>error='Không mở được dữ liệu đã lưu: $e');
   }finally{if(mounted)setState(()=>busy=false);}
  }
  void _changeMonth(int delta){
@@ -214,7 +253,7 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
      &&(period==0||DateTime.tryParse(v['work_date'].toString())?.day != null
        &&planningPeriod(DateTime.parse(v['work_date'].toString()))==period);
   }).toList();
-  final canCreate=scopes.isNotEmpty&&!busy;
+  final canCreate=scopes.isNotEmpty;
   return Scaffold(
    appBar:AppBar(title:const Text('Kế hoạch tháng'),actions:[
     IconButton(key:const ValueKey('monthly-archived-toggle'),
