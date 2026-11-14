@@ -12,6 +12,32 @@ bool isWorkVisitOfflineOperation(String path)=>
  RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}/unplanned-stops$').hasMatch(path)||
  RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}/stops/[a-f0-9-]{36}/missed$').hasMatch(path);
 
+bool _sameRouteDate(Object? remote,Object? local) =>
+ remote is String&&local is String&&remote.length>=10&&
+ remote.substring(0,10)==local;
+
+bool _sameDayRoute(Map<String,dynamic> server,Map<String,dynamic> local,String owner) =>
+ server['owner_sub']==owner&&
+ server['monthly_plan_id']==local['monthly_plan_id']&&
+ _sameRouteDate(server['route_date'],local['route_date'])&&
+ server['purpose']==local['purpose'].toString().trim()&&
+ (server['note']??'')==(local['note']??'')&&
+ server['status']==(local['status']??'ready');
+
+bool _sameRouteStop(Map<String,dynamic> remote,Map<String,dynamic> payload,
+ String owner,String routeId){
+ if(remote['owner_sub']!=owner||remote['day_route_id']!=routeId||
+    remote['stop_kind']!=payload['stop_kind']||remote['is_unplanned']==true||
+    remote['sequence']!=payload['sequence']||
+    (remote['purpose']??'')!=(payload['purpose']??''))return false;
+ final kind=payload['stop_kind'];
+ if(kind=='customer')return remote['customer_id']==payload['customer_id'];
+ if(kind=='chain')return remote['chain_id']==payload['chain_id'];
+ if(kind=='area')return remote['province']==payload['province']&&
+  remote['district']==payload['district'];
+ return false;
+}
+
 /// A draft and its outbox operation are the same durable row. No credentials
 /// are stored. Every queue read/write is scoped to identity + scope revision.
 Future<Database>? _sharedDatabase;
