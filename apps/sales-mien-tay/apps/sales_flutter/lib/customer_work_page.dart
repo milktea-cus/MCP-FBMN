@@ -183,7 +183,7 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
    await widget.queue.enqueue('/api/v1/day-routes/$routeId/customer-work',{
     'client_ref':const Uuid().v4(),'kind':kind,'customer_id':cid,
     'route_stop_id':stop['id'],
-    'template_id':kind=='form'?template?['id']:null,
+    'template_id':kind=='form'&&template!=null?template!['id']:null,
     'answers':form??<String,dynamic>{},
     'market_brands':brands,'note':noteText,
     'captured_at':DateTime.now().toUtc().toIso8601String(),
