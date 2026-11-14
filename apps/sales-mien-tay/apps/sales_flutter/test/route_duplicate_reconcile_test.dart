@@ -134,6 +134,47 @@ void main(){
   q.dispose();net.close();
  });
 
+ test('blocked 409 stop maps dependent area visit and survey draft atomically',()async{
+  final factory=newIdbFactoryMemory();
+  var posts=0;
+  final net=MockClient((req)async{
+   if(req.method!='GET'){posts++;return send({'error':'Unexpected write'},500);}
+   expect(req.url.path,'/api/v1/day-routes/'+serverRoute);
+   return send({'item':{'id':serverRoute,'owner_sub':owner},'stops':[{
+    'id':existingStop,'day_route_id':serverRoute,'owner_sub':owner,
+    'stop_kind':'area','province':'Bến Tre','district':'Huyện Bình Đại',
+    'sequence':1,'purpose':'Tìm điểm bán mới','is_unplanned':false,
+   }]},200);
+  });
+  final q=OfflineQueue(Authorized(),owner,'8',factory:factory,networkClient:net);
+  await q.enqueue('/api/v1/day-routes/'+serverRoute+'/stops',{
+   'client_ref':stop,'stop_kind':'area','province':'Bến Tre',
+   'district':'Huyện Bình Đại','sequence':1,'purpose':'Tìm điểm bán mới'});
+  await q.enqueue('/api/v1/area-visits',{
+   'client_ref':'66666666-6666-4666-8666-666666666666',
+   'day_route_stop_id':stop,
+  },dependsOn:[stop]);
+  await q.saveSurveyDraft({
+   'id':'77777777-7777-4777-8777-777777777777',
+   'day_route_stop_id':stop,'status':'in_progress',
+   'answers':{'verified':true},'photos':[],
+  });
+  final d=await q.db,t=d.transaction('outbox',idbModeReadWrite);
+  final raw=q.pending.first;
+  await t.objectStore('outbox').put({...raw,'status':'blocked',
+   'error':'HTTP 409: Tuyến hoặc điểm ghé bị trùng'});
+  await t.completed;await q.reload();
+  await q.reconcileBlockedRoutes();
+  expect(posts,0);
+  expect(q.pending.length,1);
+  final child=q.pending.single;
+  expect((child['payload'] as Map)['day_route_stop_id'],existingStop);
+  expect(child['depends_on'],isEmpty);
+  expect((await q.cached('survey-drafts')).single['day_route_stop_id'],
+   existingStop);
+  q.dispose();net.close();
+ });
+
  test('409 with GET permission denied keeps full local payload',()async{
   final factory=newIdbFactoryMemory();
   var posts=0;
