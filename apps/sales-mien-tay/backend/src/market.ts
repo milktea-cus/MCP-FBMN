@@ -20,16 +20,23 @@ export async function marketRoutes(
  if(path==='/api/v1/market/brands'){
   // Brand vocabulary can be shared among sales, but counts only include
   // customers the actor may view. Never expose other-region customer names.
-  const items=await db`SELECT b.id::text AS id,b.name,
-    count(DISTINCT c.id)::integer AS customers
+  const items=await db`WITH observations AS (
+    SELECT customer_id,brand_id,present,last_seen_at,1 AS priority
+      FROM public.market_customer_brands
+    UNION ALL
+    SELECT customer_id,brand_id,present,last_seen_at,2 AS priority
+      FROM public.market_customer_work_brands
+   ), latest AS (
+    SELECT DISTINCT ON(customer_id,brand_id)
+      customer_id,brand_id,present
+    FROM observations
+    ORDER BY customer_id,brand_id,last_seen_at DESC,priority DESC
+   )
+   SELECT b.id::text AS id,b.name,count(DISTINCT c.id)::integer AS customers
    FROM public.market_brands b
-   LEFT JOIN (
-     SELECT customer_id,brand_id FROM public.market_customer_brands WHERE present
-     UNION SELECT customer_id,brand_id FROM public.market_customer_work_brands WHERE present
-   ) m ON m.brand_id=b.id
-   LEFT JOIN public.customers c
-     ON c.id=m.customer_id
-    AND public.sales_customer_allowed(${actor.sub},c.id,'view')
+   LEFT JOIN latest m ON m.brand_id=b.id AND m.present
+   LEFT JOIN public.customers c ON c.id=m.customer_id
+     AND public.sales_customer_allowed(${actor.sub},c.id,'view')
    GROUP BY b.id,b.name ORDER BY b.name LIMIT 500`;
   return response({items,semantics:'Nhãn quan sát tại điểm bán, độc lập SKU Futurebook'});
  }
@@ -38,19 +45,24 @@ export async function marketRoutes(
   const district=(url.searchParams.get('district')??'').trim();
   if(province.length>120||district.length>120)return bad('Địa bàn không hợp lệ');
   const [items,totals]=await Promise.all([
-   db`WITH pairs AS (
-      SELECT customer_id,brand_id,last_seen_at
-       FROM public.market_customer_brands WHERE present
+   db`WITH observations AS (
+      SELECT customer_id,brand_id,present,last_seen_at,1 AS priority
+       FROM public.market_customer_brands
       UNION ALL
-      SELECT customer_id,brand_id,last_seen_at
-       FROM public.market_customer_work_brands WHERE present
+      SELECT customer_id,brand_id,present,last_seen_at,2 AS priority
+       FROM public.market_customer_work_brands
+    ), latest AS (
+      SELECT DISTINCT ON(customer_id,brand_id)
+        customer_id,brand_id,present,last_seen_at
+      FROM observations
+      ORDER BY customer_id,brand_id,last_seen_at DESC,priority DESC
     )
     SELECT c.province,c.district,b.id::text AS brand_id,b.name AS brand,
      count(DISTINCT c.id)::integer AS customers,max(m.last_seen_at) AS last_seen_at
-    FROM pairs m
+    FROM latest m
     JOIN public.market_brands b ON b.id=m.brand_id
     JOIN public.customers c ON c.id=m.customer_id
-    WHERE public.sales_customer_allowed(${actor.sub},c.id,'view')
+    WHERE m.present AND public.sales_customer_allowed(${actor.sub},c.id,'view')
      AND (${province}='' OR c.province=${province})
      AND (${district}='' OR c.district=${district})
     GROUP BY c.province,c.district,b.id,b.name
@@ -76,37 +88,38 @@ export async function marketRoutes(
      q.length>120||province.length>120||district.length>120||
      !Number.isInteger(limit)||limit<1||limit>200)
    return bad('Bộ lọc tìm kiếm nhãn hàng không hợp lệ');
-  const rows=await db`WITH pairs AS (
-     SELECT customer_id,brand_id,first_seen_at,last_seen_at,
-       last_session_id,NULL::uuid AS last_work_action_id
-      FROM public.market_customer_brands WHERE present
+  const rows=await db`WITH observations AS (
+     SELECT customer_id,brand_id,present,first_seen_at,last_seen_at,
+       last_session_id,NULL::uuid AS last_work_action_id,1 AS priority
+       FROM public.market_customer_brands
      UNION ALL
-     SELECT customer_id,brand_id,first_seen_at,last_seen_at,
-       NULL::uuid AS last_session_id,last_action_id AS last_work_action_id
-      FROM public.market_customer_work_brands WHERE present
-    ), combined AS (
-     SELECT customer_id,brand_id,min(first_seen_at) AS first_seen_at,
-       max(last_seen_at) AS last_seen_at,
-       (array_agg(last_session_id ORDER BY last_seen_at DESC))[1] AS last_session_id,
-       (array_agg(last_work_action_id ORDER BY last_seen_at DESC))[1] AS last_work_action_id
-      FROM pairs GROUP BY customer_id,brand_id
+     SELECT customer_id,brand_id,present,first_seen_at,last_seen_at,
+       NULL::uuid AS last_session_id,last_action_id AS last_work_action_id,2 AS priority
+       FROM public.market_customer_work_brands
+    ), latest AS (
+     SELECT DISTINCT ON(customer_id,brand_id)
+       customer_id,brand_id,present,last_seen_at,
+       min(first_seen_at) OVER (PARTITION BY customer_id,brand_id) AS first_seen_at,
+       last_session_id,last_work_action_id
+     FROM observations
+     ORDER BY customer_id,brand_id,last_seen_at DESC,priority DESC
     )
     SELECT c.id::text AS customer_id,c.name AS customer_name,
-    c.field_code,c.province,c.district,b.id::text AS brand_id,b.name AS brand,
-    m.first_seen_at,m.last_seen_at,m.last_session_id::text AS last_session_id,
-    m.last_work_action_id::text AS last_work_action_id
-   FROM combined m
-   JOIN public.market_brands b ON b.id=m.brand_id
-   JOIN public.customers c ON c.id=m.customer_id
-   WHERE public.sales_customer_allowed(${actor.sub},c.id,'view')
-    AND (${brandId}='' OR m.brand_id::text=${brandId})
-    AND (${customerId}='' OR c.id::text=${customerId})
-    AND (${province}='' OR c.province=${province})
-    AND (${district}='' OR c.district=${district})
-    AND (${q}='' OR c.name ILIKE '%'||${q}||'%'
-      OR coalesce(c.field_code,'') ILIKE '%'||${q}||'%'
-      OR b.name ILIKE '%'||${q}||'%')
-   ORDER BY c.province,c.district,c.name,b.name LIMIT ${limit+1}`;
+     c.field_code,c.province,c.district,b.id::text AS brand_id,b.name AS brand,
+     m.first_seen_at,m.last_seen_at,m.last_session_id::text AS last_session_id,
+     m.last_work_action_id::text AS last_work_action_id
+    FROM latest m
+    JOIN public.market_brands b ON b.id=m.brand_id
+    JOIN public.customers c ON c.id=m.customer_id
+    WHERE m.present AND public.sales_customer_allowed(${actor.sub},c.id,'view')
+     AND (${brandId}='' OR m.brand_id::text=${brandId})
+     AND (${customerId}='' OR c.id::text=${customerId})
+     AND (${province}='' OR c.province=${province})
+     AND (${district}='' OR c.district=${district})
+     AND (${q}='' OR c.name ILIKE '%'||${q}||'%'
+       OR coalesce(c.field_code,'') ILIKE '%'||${q}||'%'
+       OR b.name ILIKE '%'||${q}||'%')
+    ORDER BY c.province,c.district,c.name,b.name LIMIT ${limit+1}`;
   return response({items:rows.slice(0,limit),truncated:rows.length>limit});
  }
  return bad('Endpoint không tồn tại',404);
