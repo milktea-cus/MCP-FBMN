@@ -27,10 +27,7 @@ void main(){
      queue:queue,
      onDetails:(){
       opened++;
-      showDialog<void>(context:context,builder:(_)=>const AlertDialog(
-       title:Text('Hàng đợi đồng bộ trên máy'),
-       content:Text('Lỗi đang được giữ trong IndexedDB'),
-      ));
+      showSyncQueueDetails(context,queue);
      },
     )))));
    expect(find.textContaining('Chờ đồng bộ: 1'),findsOneWidget);
@@ -44,6 +41,10 @@ void main(){
    await tester.pumpAndSettle();
    expect(opened,1);
    expect(find.text('Hàng đợi đồng bộ trên máy'),findsOneWidget);
+   expect(find.textContaining('Tác vụ chờ: 1'),findsOneWidget);
+   expect(find.text('Hoàn tất phiên khảo sát'),findsOneWidget);
+   expect(find.text('Thử ngay'),findsOneWidget);
+   expect(tester.takeException(),isNull);
    await tester.pageBack();
    await tester.pumpAndSettle();
    await tester.tap(find.byKey(const ValueKey('sync-banner-tap')));
