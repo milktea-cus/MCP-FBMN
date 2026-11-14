@@ -313,7 +313,18 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
   final customer=profile;
   final name=customer?['name']?.toString()??widget.customer['customer_name']?.toString()??'Khách hàng';
   final phone=customer?['phone']?.toString()??widget.customer['phone']?.toString();
-  final location=customer==null?null:FieldCustomer.fromJson(customer);
+  // The local roster is enough for safe navigation/calls offline. Never
+  // dereference a missing server profile or expose actions after 403.
+  final FieldCustomer? location=denied?null:FieldCustomer.fromJson(
+   customer??{
+    'id':cid,'owner_sub':widget.customer['owner_sub'],
+    'name':name,'address_line':widget.customer['address_line']??'',
+    'province':province,'district':district,
+    'category':widget.customer['category']??'khac',
+    'status':'active','phone':phone,
+    'latitude':widget.customer['latitude'],
+    'longitude':widget.customer['longitude'],
+   });
   final activities=[...history,...pendingCustomerWork(widget.queue,routeId)
    .where((e)=>e['customer_id']?.toString()==cid)];
   final hasGps=widget.queue.pending.any((p)=>
@@ -337,11 +348,13 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
      if(location!=null)IconButton.outlined(
       tooltip:'Chỉ đường',onPressed:()=>openCustomerDirections(context,location),
       icon:const Icon(Icons.directions_outlined)),
-     IconButton.outlined(tooltip:'Gọi điện',onPressed:customerCallUri(phone)==null?
-      null:()=>openCustomerCall(context,location!),
+     IconButton.outlined(tooltip:'Gọi điện',
+      onPressed:location==null||customerCallUri(phone)==null
+       ?null:()=>openCustomerCall(context,location),
       icon:const Icon(Icons.call_outlined)),
-     IconButton.outlined(tooltip:'Zalo',onPressed:customerZaloUri(phone)==null?
-      null:()=>openCustomerZalo(context,location!),
+     IconButton.outlined(tooltip:'Zalo',
+      onPressed:location==null||customerZaloUri(phone)==null
+       ?null:()=>openCustomerZalo(context,location),
       icon:const CustomerZaloMark()),
     ]),
     const SizedBox(height:12),
