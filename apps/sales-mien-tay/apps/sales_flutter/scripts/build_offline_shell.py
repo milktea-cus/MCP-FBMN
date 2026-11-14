@@ -15,7 +15,11 @@ html = root / "index.html"
 markup = html.read_text()
 markup = markup.replace("</body>", """<script src="/fieldwork-push.js"></script><script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/filed-sw.js').catch(console.error);
+  // Installed iPhone PWAs may keep the previous worker across app launches.
+  // Check for an updated shell without clearing IndexedDB or forcing reloads
+  // while the user is editing an offline draft.
+  navigator.serviceWorker.register('/filed-sw.js')
+    .then(reg => reg.update()).catch(() => {});
 }
 </script></body>""")
 html.write_text(markup)
@@ -29,10 +33,24 @@ self.addEventListener('fetch', e => {
   const u = new URL(e.request.url);
   if (e.request.method !== 'GET' || u.origin !== self.location.origin || u.pathname.startsWith('/api/')) return;
   if (e.request.mode === 'navigate') {
-    e.respondWith(fetch(e.request).catch(() => caches.open(CACHE).then(c => c.match('/index.html')))); return;
+    // Always check live index.html first. Offline retains the previous shell.
+    e.respondWith(fetch(e.request, {cache:'no-store'})
+      .catch(() => caches.open(CACHE).then(c => c.match('/index.html')))); return;
   }
   if (ASSETS.includes(u.pathname)) {
-    e.respondWith(caches.open(CACHE).then(c => c.match(u.pathname)).then(r => r || fetch(e.request)));
+    // Bootstrap and executable code must not stay pinned forever in an old
+    // iOS Home Screen PWA. Cache remains an offline fallback.
+    const activeCode = new Set(['/index.html','/flutter_bootstrap.js',
+      '/flutter.js','/main.dart.js']);
+    e.respondWith(caches.open(CACHE).then(async c => {
+      if (activeCode.has(u.pathname)) {
+        try {
+          const response = await fetch(e.request, {cache:'no-store'});
+          if (response.ok) return response;
+        } catch (_) {}
+      }
+      return await c.match(u.pathname) || fetch(e.request);
+    }));
   }
 });
 self.addEventListener('push', event => {
