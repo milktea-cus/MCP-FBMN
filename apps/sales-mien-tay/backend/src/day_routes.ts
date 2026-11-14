@@ -73,8 +73,11 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
       LEFT JOIN public.field_route_stops stop ON stop.id=area.day_route_stop_id
       WHERE coalesce(area.day_route_id,stop.day_route_id)=r.id) AS lead_count,
     (SELECT count(*)::integer FROM public.field_area_visits area
-      WHERE area.day_route_id=r.id) AS market_visit_count
+      WHERE area.day_route_id=r.id) AS market_visit_count,
+    coalesce(w.state,'open') AS work_session_state,
+    w.id AS work_session_id,w.version AS work_session_version
    FROM public.field_day_routes r JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id
+   LEFT JOIN public.field_work_sessions w ON w.day_route_id=r.id
    WHERE p.period_ym=${month} AND
     (r.owner_sub=${actor.sub} OR ${actor.admin} OR
      (${actor.manager} AND public.sales_staff_in_subtree(${actor.sub},r.owner_sub)))
@@ -143,8 +146,11 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
  const routeId=path?.[1]??'';
  if(path&&(req.method==='GET')){
   const routes=await db`SELECT r.*,p.period_ym,p.scope_kind,p.scope_key,p.province,p.district,p.status AS plan_status,
-    (SELECT count(*)::integer FROM public.field_area_visits v WHERE v.day_route_id=r.id) AS market_visit_count
+    (SELECT count(*)::integer FROM public.field_area_visits v WHERE v.day_route_id=r.id) AS market_visit_count,
+    coalesce(w.state,'open') AS work_session_state,
+    w.id AS work_session_id,w.version AS work_session_version
    FROM public.field_day_routes r JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id
+   LEFT JOIN public.field_work_sessions w ON w.day_route_id=r.id
    WHERE r.id=${routeId}::uuid AND
     (r.owner_sub=${actor.sub} OR ${actor.admin} OR
       (${actor.manager} AND public.sales_staff_in_subtree(${actor.sub},r.owner_sub))) LIMIT 1`;
