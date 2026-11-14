@@ -101,6 +101,22 @@ export async function monthlyPlanRoutes(req:Request,env:AuthEnv,actor:Actor,url:
   return json({items});
  }
  const match=/^\/([0-9a-f-]{36})$/i.exec(suffix);
+ if(match&&req.method==='DELETE'){
+  if(!uuid.test(match[1]))return fail('ID lịch không hợp lệ');
+  const version=Number(url.searchParams.get('version'));
+  if(!Number.isInteger(version)||version<1)return fail('Thiếu phiên bản lịch cần xóa');
+  try{
+   const rows=await db`SELECT public.sales_archive_monthly_plan(
+    ${actor.sub},${match[1]}::uuid,${version}) AS result`;
+   return json(rows[0].result);
+  }catch(e){
+   const message=(e as {message?:string}).message??'';
+   if(message.includes('archive_forbidden'))return fail('Chỉ người phụ trách có quyền xóa lịch này',403);
+   if(message.includes('archive_not_found'))return fail('Không tìm thấy lịch đã chọn',404);
+   if(message.includes('archive_stale'))return fail('Lịch đã thay đổi; tải lại trước khi xóa',409);
+   return fail('Không xóa được lịch; dữ liệu cũ vẫn được giữ nguyên',503);
+  }
+ }
  if(!((suffix===''&&req.method==='POST')||(match&&req.method==='PATCH')))return fail('Method not allowed',405);
  let v:Record<string,unknown>;try{v=await parseBody(req);}catch{return fail('JSON không hợp lệ');}
  const editing=!!match;
