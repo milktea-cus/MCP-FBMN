@@ -23,6 +23,49 @@ String missedReasonLabel(Object? value)=>switch(value){
  _=>'Chưa rõ',
 };
 
+/// Combine planned, queued and assigned-scope customers without
+/// creating fake area stops or requiring selection in the monthly plan.
+/// The customer ID is the deduplication key across all three sources.
+List<Map<String,dynamic>> dayRouteCustomerCards(
+ List<Map<String,dynamic>> stops,List<Map<String,dynamic>> assigned,
+ List<Map<String,dynamic>> pending,{String query='',
+ Map<String,Map<String,dynamic>> localCustomers=const {}}){
+ final seen=<String>{};
+ final rows=<Map<String,dynamic>>[];
+ void append(Map<String,dynamic> row,String source){
+  final customerId=row['customer_id']?.toString()??row['id']?.toString()??'';
+  if(customerId.isEmpty||!seen.add(customerId))return;
+  final local=localCustomers[customerId];
+  final assignedRow=assigned.where((c)=>c['id'].toString()==customerId).firstOrNull;
+  final customerName=(row['customer_name']??row['name']??assignedRow?['name']??local?['name']??'Khách hàng').toString();
+  final district=(row['customer_district']??row['district']??assignedRow?['district']??local?['district']??'').toString();
+  final province=(row['customer_province']??row['province']??assignedRow?['province']??local?['province']??'').toString();
+  final category=(row['category']??assignedRow?['category']??local?['category'])?.toString();
+  rows.add({...row,'customer_id':customerId,'customer_name':customerName,
+   'customer_district':district,'customer_province':province,
+   'customer_code':row['customer_code']??row['code']??assignedRow?['code']??local?['code']??'',
+   'category':category,'source':source,'stop_kind':'customer'});
+ }
+ for(final stop in stops)if(stop['stop_kind']=='customer')append(stop,'planned');
+ for(final job in pending){
+  final v=job['payload'];
+  if(v is Map&&v['stop_kind']=='customer'){
+   final item=Map<String,dynamic>.from(v);
+   item['id']=item['client_ref'];
+   item['sync_status']=job['status'];
+   item['sync_error']=job['error'];
+   item['sync_key']=job['key'];
+   append(item,'pending');
+  }
+ }
+ for(final customer in assigned)append(customer,'scope');
+ final needle=query.trim().toLowerCase();
+ if(needle.isEmpty)return rows;
+ return rows.where((c)=>
+  ('${c['customer_name']} ${c['customer_code']} ${c['customer_district']}')
+   .toLowerCase().contains(needle)).toList();
+}
+
 /// A day route may be a customer route or a market-development trip with no customers.
 class DayRoutePage extends StatefulWidget {
  final OfflineQueue queue;
@@ -638,7 +681,18 @@ class _DayRoutePageState extends State<DayRoutePage>{
  @override Widget build(BuildContext context){
   final pending=pendingStops;
   final sorted=[...stops]..sort((a,b)=>(a['sequence'] as num).compareTo(b['sequence'] as num));
-  final count=sorted.where((s)=>s['stop_kind']=='customer'&&((s['visit_count'] as num?)?.toInt()??0)>0).length;
+  final legacyStops=sorted.where((s)=>s['stop_kind']!='customer').toList();
+  final localCustomers=<String,Map<String,dynamic>>{
+   for(final op in widget.queue.pending)
+    if(op['path']=='/api/v1/customers'&&op['payload'] is Map&&
+      (op['payload'] as Map)['client_ref']!=null)
+     (op['payload'] as Map)['client_ref'].toString():
+      Map<String,dynamic>.from(op['payload'] as Map),
+  };
+  final customerRows=dayRouteCustomerCards(stops,candidates,pending,
+   query:candidateQuery,localCustomers:localCustomers);
+  final count=sorted.where((s)=>s['stop_kind']=='customer'&&
+   ((s['visit_count'] as num?)?.toInt()??0)>0).length;
   return Scaffold(
    appBar:AppBar(title:const Text('Công tác tại khách'),actions:[
     IconButton(tooltip:'Làm mới',onPressed:busy?null:load,icon:const Icon(Icons.sync)),
@@ -647,7 +701,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
     if(route!=null)...[
      Text('${route!['route_date']?.toString().substring(0,10)} · ${route!['purpose']}',
        style:Theme.of(context).textTheme.titleMedium),
-     Text('${route!['scope_kind']=='chain'?'Chuỗi':route!['scope_kind']=='customer'?'Khách cụ thể':'Địa bàn'}: ${route!['scope_key']} · Đã ghé $count/${sorted.length} khách · GPS thị trường ${route!['market_visit_count']??0}'),
+     Text('${route!['scope_kind']=='chain'?'Chuỗi':route!['scope_kind']=='customer'?'Khách cụ thể':'Địa bàn'}: ${route!['scope_key']} · Đã ghé $count/${customerRows.length} khách · GPS thị trường ${route!['market_visit_count']??0}'),
      Text('Phiên: ${switch(workState){'ongoing'=>'Đang đi','done'=>'Đã kết thúc','cancelled'=>'Đã hủy',_=>'Trong lịch'}}',
       style:Theme.of(context).textTheme.bodyMedium),
      const SizedBox(height:8),
@@ -670,96 +724,64 @@ class _DayRoutePageState extends State<DayRoutePage>{
     if(busy)const LinearProgressIndicator(),
     if(offline)const Text('Đang hiển thị dữ liệu offline.'),
     if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
-    for(final p in pending)Card(child:ListTile(
-     leading:const Icon(Icons.cloud_upload_outlined),
-     title:Text((p['payload'] as Map)['stop_kind']=='customer'
-       ? (candidates.where((c)=>c['id']==(p['payload'] as Map)['customer_id'])
-            .map((c)=>c['name']?.toString()??'Điểm bán').firstOrNull??'Khách đã chọn')
-       : (p['payload'] as Map)['stop_kind']=='area'?'Tìm khách mới · địa bàn'
-         :'Công tác chuỗi'),
-     subtitle:Text('${p['path'].toString().endsWith('/unplanned-stops')?'Ngoài kế hoạch · ':''}${p['error']?.toString()??'Đã lưu máy · chờ đồng bộ'}'),
-     trailing:p['status']=='blocked'?IconButton(tooltip:'Đồng bộ lại',
-      icon:const Icon(Icons.refresh),onPressed:()=>widget.queue.retryBlocked(p['key'].toString())):null,
-    )),
-    for(var i=0;i<sorted.length;i++)
-     Card(child:ListTile(
-      leading:sorted[i]['stop_kind']=='customer'
-       ?CustomerCategoryAvatar(category:sorted[i]['category']?.toString())
-       :const Icon(Icons.location_on_outlined),
-      title:Text(sorted[i]['stop_kind']=='customer'
-       ?sorted[i]['customer_name']?.toString()??'Điểm bán'
-       :sorted[i]['stop_kind']=='chain'
-        ?sorted[i]['chain_name']?.toString()??'Công tác chuỗi'
-        :'Tìm khách mới · ${sorted[i]['district']==''?sorted[i]['province']:sorted[i]['district']}'),
-      subtitle:Text('${sorted[i]['is_unplanned']==true?'Ngoài kế hoạch · ':''}${sorted[i]['purpose']??''}\n${missedPending(sorted[i]['id'].toString())?'Đã ghi lý do · chờ đồng bộ':switch(sorted[i]['activity_status']){
-       'visited'=>'Đã ghé',
-       'survey_started'=>'Đang khảo sát',
-       'survey_completed'=>'Hoàn thành khảo sát',
-       'missed'=>'Không ghé · ${missedReasonLabel(sorted[i]['missed_code'])}',
-       _=>'Chưa đi',
-      }}${sorted[i]['stop_kind']=='customer'?' · Chạm để làm việc':' · Lịch sử thực địa'}'),
-      isThreeLine:true,
-      onTap:sorted[i]['stop_kind']=='customer'
-        ?()=>customerWork(sorted[i]):()=>openEvidence(sorted[i]),
-      trailing:const Icon(Icons.chevron_right),
-     )),
-    if(route!=null&&scopeSupportsExtra(route!))...[
-     const SizedBox(height:12),
-     ExpansionTile(
-      key:const ValueKey('territory-all-customers'),
-      initiallyExpanded:true,
-      title:Text('Khách thuộc ${route!['scope_kind']=='chain'?'chuỗi':'địa bàn'} (${candidates.length})'),
-      subtitle:const Text('Khách trong phạm vi tự hiện, chạm khách để làm việc.'),
-      children:[
-       if(candidates.isEmpty)Padding(padding:const EdgeInsets.all(12),
-        child:Text(offline||error!=null
-         ?'Chưa tải được danh sách khách. Bấm Làm mới khi có mạng.'
-         :'Chưa có khách trong phạm vi. Vẫn có thể đi tìm lead mới.')),
-       if(candidates.isNotEmpty)...[
-        Padding(padding:const EdgeInsets.all(8),
-         child:TextField(onChanged:(value)=>setState(()=>candidateQuery=value),
-          decoration:const InputDecoration(
-           prefixIcon:Icon(Icons.search),
-           hintText:'Tìm khách trong địa bàn / chuỗi'))),
-        Builder(builder:(context){
-         final occupied=<String>{
-          for(final stop in stops)if(stop['customer_id']!=null)
-           stop['customer_id'].toString(),
-          for(final op in pendingStops)
-           if((op['payload'] as Map)['customer_id']!=null)
-            (op['payload'] as Map)['customer_id'].toString(),
-         };
-         final filtered=candidates.where((c)=>
-           !occupied.contains(c['id'].toString())&&
-           ('${c['name']} ${c['code']??''} ${c['district']??''}')
-             .toLowerCase().contains(candidateQuery.toLowerCase())).toList();
-         return Column(children:[
-          Padding(padding:const EdgeInsets.symmetric(horizontal:12),
-           child:Text('Khách chưa ghé theo lịch: ${filtered.length}',
-            style:Theme.of(context).textTheme.bodySmall)),
-          for(final c in filtered.take(70))ListTile(
-           dense:true,
-           leading:CustomerCategoryAvatar(category:c['category']?.toString()),
-           title:Text(c['name']?.toString()??'Khách hàng'),
-           subtitle:Text('${c['code']??''} · ${c['district']??''}'),
-           trailing:canExecute
-            ?const Icon(Icons.add_circle_outline)
-            :const Icon(Icons.info_outline),
-           onTap:canExecute
-            ?()=>unawaited(addUnplanned(customerId:c['id'].toString()))
-            :()=>notice('Lịch công tác chưa đến ngày hoặc đã kết thúc.'),
-          ),
-          if(filtered.length>70)Padding(padding:const EdgeInsets.all(10),
-           child:Text('Đang hiển thị 70/${filtered.length} khách. Nhập tên để tìm khách khác.')),
-         ]);
-        }),
-       ],
-      ],
-     ),
+    if(route!=null)...[
+     const SizedBox(height:10),
+     TextField(onChanged:(value)=>setState(()=>candidateQuery=value),
+      decoration:const InputDecoration(prefixIcon:Icon(Icons.search),
+       hintText:'Tìm tên, mã khách hoặc huyện')),
+     const SizedBox(height:10),
+     Text('Khách trong phạm vi công tác (${customerRows.length})',
+      style:Theme.of(context).textTheme.titleMedium),
+     const SizedBox(height:4),
+     Text('Danh sách tự lấy theo địa bàn, chuỗi hoặc khách được giao. '
+      'Chạm vào khách để ghi nhận, không cần tích chọn trước.',
+      style:Theme.of(context).textTheme.bodySmall),
     ],
+    for(final c in customerRows.take(100))Card(child:ListTile(
+     dense:true,
+     key:ValueKey('work-customer:${c['customer_id']}'),
+     leading:CustomerCategoryAvatar(category:c['category']?.toString()),
+     title:Text(c['customer_name']?.toString()??'Khách hàng',
+      maxLines:1,overflow:TextOverflow.ellipsis),
+     subtitle:Text(
+      '${c['customer_code']??''} · ${c['customer_district']??''}'
+      '\\n${switch(c['source']){
+       'scope'=>'Trong phạm vi · Chưa ghé theo lịch',
+       'pending'=>'Đã lưu máy · ${c['sync_status']=='blocked'?'Cần xử lý đồng bộ':'Chờ đồng bộ'}',
+       _=>switch(c['activity_status']){
+        'visited'=>'Đã ghé',
+        'survey_started'=>'Đang ghi thông tin',
+        'survey_completed'=>'Đã lưu thông tin',
+        'missed'=>'Không ghé · ${missedReasonLabel(c['missed_code'])}',
+        _=>'Chưa ghé',
+       },
+      }}',
+      maxLines:2,overflow:TextOverflow.ellipsis),
+     trailing:c['sync_status']=='blocked'
+      ?IconButton(icon:const Icon(Icons.warning_amber_outlined),
+       tooltip:'Xem lỗi đồng bộ',onPressed:()=>notice(
+        c['sync_error']?.toString()??'Cần xử lý đồng bộ.'))
+      :const Icon(Icons.chevron_right),
+     onTap:c['source']=='scope'
+      ?(canExecute?()=>unawaited(addUnplanned(customerId:c['customer_id'].toString()))
+       :()=>notice('Đến ngày công tác, mở Hôm nay để làm việc tại khách.'))
+      :()=>unawaited(customerWork(c)),
+    )),
+    if(customerRows.length>100)Padding(padding:const EdgeInsets.all(8),
+     child:Text('Hiển thị 100/${customerRows.length} khách. '
+      'Dùng ô tìm kiếm để mở khách khác.')),
+    if(legacyStops.isNotEmpty)ExpansionTile(
+     title:Text('Điểm tìm khách trong dữ liệu cũ (${legacyStops.length})'),
+     subtitle:const Text('Chỉ xem lịch sử, không tạo thêm điểm địa bàn trùng'),
+     children:[for(final stop in legacyStops)ListTile(
+      leading:const Icon(Icons.history),
+      title:Text(stop['stop_kind']=='area'?'Địa bàn · ${stop['district']??stop['province']??''}':'Chuỗi'),
+      onTap:()=>openEvidence(stop),
+     )],
+    ),
     if(!busy&&sorted.isEmpty&&pending.isEmpty&&candidates.isEmpty)
      Padding(padding:const EdgeInsets.all(18),
-      child:Text('Không có khách hẹn trước. ${scopeSupportsExtra(route??{})?'Bắt đầu phiên và bấm Tìm khách mới để ghi GPS/lead.':'Mở kế hoạch để thêm khách cụ thể.'}')),
+      child:const Text('Chưa có khách trong phạm vi. Chọn Thêm khách để tạo điểm bán thực tế.')),
    ]),
   );
  }
