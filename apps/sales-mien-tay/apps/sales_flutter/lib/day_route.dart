@@ -62,6 +62,17 @@ class _DayRoutePageState extends State<DayRoutePage>{
   if(busy)return;
   setState((){busy=true;error=null;});
   try{
+   // The monthly editor may have cached this territory's full customer list
+   // even when the route-detail GET is temporarily offline/slow.
+   final previous=await widget.queue.cached(candidateKey);
+   if(previous.isNotEmpty&&mounted)setState(()=>candidates=previous);
+   final areaRoute=route;
+   if(previous.isEmpty&&areaRoute!=null&&
+      areaRoute['scope_kind']!=null&&areaRoute['scope_key']!=null){
+    final scope='${areaRoute['scope_kind']}:${areaRoute['scope_key']}';
+    final saved=await widget.queue.cached('monthly-plan-candidates:$scope');
+    if(saved.isNotEmpty&&mounted)setState(()=>candidates=saved);
+   }
    final cached=await widget.queue.cached(key);
    if(cached.isNotEmpty&&mounted)setState((){
     route=Map<String,dynamic>.from(cached.first['route'] as Map);
@@ -81,13 +92,15 @@ class _DayRoutePageState extends State<DayRoutePage>{
     await widget.queue.cache(candidateKey,candidates);
    }catch(e){
     if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;
-    candidates=await widget.queue.cached(candidateKey);
+    final cached=await widget.queue.cached(candidateKey);
+    if(cached.isNotEmpty)candidates=cached;
    }
   }catch(e){
    if(e is ApiFailure&&(e.status==401||e.status==403)){
     if(mounted)setState((){route=null;stops=[];candidates=[];offline=false;});
    }else{
-    candidates=await widget.queue.cached(candidateKey);
+    final cached=await widget.queue.cached(candidateKey);
+    if(cached.isNotEmpty)candidates=cached;
    }
    if(mounted)setState(()=>error=e.toString());
   }finally{if(mounted)setState(()=>busy=false);}
