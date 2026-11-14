@@ -99,6 +99,20 @@ export async function areaVisitRoutes(req:Request,env:AuthEnv,actor:Actor,url:UR
  ||(p as Record<string,unknown>).address_line!.toString().length>500))
  return bad('Lead phải có tên và địa chỉ điểm bán thực tế');
  const prospect=p as {name:string;address_line:string}|null|undefined;
+ if(typeof route==='string'){
+  // Only an ongoing, owner-scoped work session can collect NEW market data.
+  const active=await db`SELECT w.id FROM public.field_work_sessions w
+   JOIN public.field_day_routes r ON r.id=w.day_route_id
+   JOIN public.field_monthly_plans m ON m.id=r.monthly_plan_id
+   WHERE w.day_route_id=${route}::uuid AND w.owner_sub=${actor.sub}
+    AND w.state='ongoing' AND
+    public.sales_monthly_plan_scope_allowed(
+      ${actor.sub},m.scope_kind,m.scope_key,m.province,m.district)
+   LIMIT 1`;
+  if(!active.length)return json({
+    code:'WORK_SESSION_NOT_ACTIVE',
+    error:'Phiên chưa bắt đầu hoặc đã kết thúc. Không ghi GPS mới ngoài phiên.'},409);
+ }
  try{
   const values=typeof route==='string'
    ?await db`SELECT public.sales_save_route_market_visit(
