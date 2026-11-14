@@ -14,7 +14,7 @@ void main(){
     'method':'POST','payload':{'client_ref':routeId,
     'monthly_plan_id':planId,'route_date':'2026-11-14','status':'ready'}},
   ],owner);
-  expect(records,singleton);
+  expect(records,hasLength(1));
   expect(records.single['scope_kind'],'territory');
   expect(records.single['pending_route'],isTrue);
   expect(records.single['owner_sub'],owner);
