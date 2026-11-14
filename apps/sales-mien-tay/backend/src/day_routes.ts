@@ -170,6 +170,29 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
   let v:Record<string,unknown>;try{v=await parse(req);}catch{return fail('JSON không hợp lệ');}
   const editing=req.method==='PATCH',error=validRoute(v,editing);if(error)return fail(error);
   const id=editing?routeId:String(v.client_ref);
+  if(!editing){
+   // An identical route from a second offline UUID is not a new trip.
+   const existing=await db`SELECT r.*,p.status AS plan_status
+    FROM public.field_day_routes r JOIN public.field_monthly_plans p
+      ON p.id=r.monthly_plan_id
+    WHERE r.monthly_plan_id=${String(v.monthly_plan_id)}::uuid
+      AND r.owner_sub=${actor.sub} AND
+      public.sales_monthly_plan_scope_allowed(
+        ${actor.sub},p.scope_kind,p.scope_key,p.province,p.district)
+    LIMIT 1`;
+   if(existing.length){
+    const saved=existing[0];
+    if(saved.plan_status==='cancelled')
+     return fail('Kế hoạch đã xóa, không thể tạo tuyến',409);
+    if(String(saved.route_date).slice(0,10)===String(v.route_date)&&
+       saved.purpose===String(v.purpose).trim()&&
+       saved.note===String(v.note??'')&&
+       saved.status===String(v.status??'ready')){
+     return reply({item:saved,already_saved:true},200);
+    }
+    return fail('Kế hoạch này đã có tuyến khác nội dung; mở tuyến hiện tại để sửa',409);
+   }
+  }
   try{
    const rows=await db`SELECT public.sales_save_day_route(
      ${actor.sub},${id}::uuid,${String(v.client_ref)}::uuid,${editing?Number(v.version):0},
@@ -191,11 +214,34 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
        EXISTS(SELECT 1 FROM public.field_area_visits a WHERE a.day_route_stop_id=s.id) OR
        EXISTS(SELECT 1 FROM public.field_survey_sessions se WHERE se.day_route_stop_id=s.id))
    ) AS started`;
-  if(started[0]?.started===true)return fail('Tuyến đã thực hiện. Hãy thêm điểm phát sinh thay vì sửa kế hoạch.',409);
+  const routeAlreadyStarted=started[0]?.started===true;
   const customer=v.stop_kind==='customer'?String(v.customer_id):null;
   const chain=v.stop_kind==='chain'?String(v.chain_id):null;
   const province=v.stop_kind==='area'?String(v.province):null;
   const district=v.stop_kind==='area'?String(v.district):null;
+  if(!editing){
+   // Duplicate STOP after a visit must still acknowledge the first write,
+   // rather than keep a second iPhone outbox item blocked with 409.
+   const duplicate=await db`SELECT s.*
+    FROM public.field_route_stops s
+    JOIN public.field_day_routes r ON r.id=s.day_route_id
+    JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id
+    WHERE s.day_route_id=${routeId}::uuid AND s.owner_sub=${actor.sub}
+      AND s.is_unplanned=false
+      AND s.stop_kind=${String(v.stop_kind)}
+      AND s.customer_id IS NOT DISTINCT FROM ${customer}::uuid
+      AND s.chain_id IS NOT DISTINCT FROM ${chain}::uuid
+      AND s.province IS NOT DISTINCT FROM ${province}
+      AND s.district IS NOT DISTINCT FROM ${district}
+      AND s.sequence=${Number(v.sequence)}
+      AND s.purpose=${String(v.purpose??'')}
+      AND public.sales_monthly_plan_scope_allowed(
+        ${actor.sub},p.scope_kind,p.scope_key,p.province,p.district)
+    LIMIT 1`;
+   if(duplicate.length)return reply({item:duplicate[0],already_saved:true},200);
+  }
+  if(routeAlreadyStarted)
+   return fail('Tuyến đã thực hiện; chỉ được bổ sung điểm phát sinh',409);
   try{
    const rows=await db`SELECT public.sales_save_route_stop(
      ${actor.sub},${id}::uuid,${String(v.client_ref)}::uuid,${editing?Number(v.version):0},
