@@ -87,7 +87,8 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
     setState((){
      note.text=drafts.first['note']?.toString()??'';
      if(a is Map)answers=Map<String,dynamic>.from(a);
-     brandsChecked=drafts.first['brands_checked']==true || answers['brands'] is List;
+     brandsChecked=drafts.first.containsKey('brands_checked')
+      ?drafts.first['brands_checked']==true:answers['brands'] is List;
     });
    }
    final cached=await cache('customer-work-profile:$cid');
@@ -379,7 +380,10 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
         subtitle:const Text('Chỉ cập nhật danh sách nhãn khi đã đánh dấu kiểm tra.'),
         value:brandsChecked,
         onChanged:!writable||saving?null:(checked){
-         setState(()=>brandsChecked=checked==true);
+         setState((){
+          brandsChecked=checked==true;
+          if(!brandsChecked)answers.remove(q['id']?.toString());
+         });
          unawaited(persistDraft());
         }),
        if(brandsChecked)question(q),
