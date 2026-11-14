@@ -45,7 +45,7 @@ void main(){
    expect(find.text('Hoàn tất phiên khảo sát'),findsOneWidget);
    expect(find.text('Thử ngay'),findsOneWidget);
    expect(tester.takeException(),isNull);
-   await tester.pageBack();
+   await tester.tap(find.text('Đóng'));
    await tester.pumpAndSettle();
    await tester.tap(find.byKey(const ValueKey('sync-banner-tap')));
    await tester.pumpAndSettle();
