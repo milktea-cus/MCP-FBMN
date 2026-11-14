@@ -57,6 +57,10 @@ BEGIN
   OR (p_kind='form' AND length(btrim(coalesce(p_note,'')))=0 AND
    p_answers='{}'::jsonb AND coalesce(jsonb_array_length(p_brands),0)=0)
  THEN RAISE EXCEPTION 'CUSTOMER_WORK_INVALID'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM public.staff_members s WHERE s.user_sub=p_actor AND s.active
+  AND public.sales_identity_exists(s.user_sub))
+  OR NOT public.sales_customer_fieldwork_allowed(p_actor,p_customer)
+ THEN RAISE EXCEPTION 'CUSTOMER_WORK_FORBIDDEN'; END IF;
  SELECT a.* INTO existing FROM public.field_customer_work_actions a WHERE a.id=p_ref;
  IF FOUND THEN
   IF existing.owner_sub=p_actor AND existing.day_route_id=p_route
@@ -71,9 +75,9 @@ BEGIN
   p.province,p.district INTO area
  FROM public.field_day_routes r
  JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id
- JOIN public.field_work_sessions w ON w.day_route_id=r.id
  WHERE r.id=p_route AND r.owner_sub=p_actor
-  AND r.status='ready' AND p.status='planned' AND w.state='ongoing'
+  AND r.status='ready' AND p.status='planned'
+  AND public.sales_work_session_write_allowed(p_actor,r.id,p_at)
   AND public.sales_monthly_plan_scope_allowed(p_actor,p.scope_kind,p.scope_key,p.province,p.district)
   AND public.sales_customer_fieldwork_allowed(p_actor,p_customer)
   AND (p_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date=r.route_date
@@ -87,6 +91,130 @@ BEGIN
    JOIN public.customers c ON c.id=p_customer
    WHERE t.id=p_template AND t.province=c.province)
  THEN RAISE EXCEPTION 'CUSTOMER_WORK_INVALID'; END IF;
+ IF p_kind='form' AND p_template IS NULL AND p_answers<>'{}'::jsonb
+ THEN RAISE EXCEPTION 'CUSTOMER_WORK_INVALID'; END IF;
+ IF p_kind='photo' THEN
+  IF coalesce(p_answers->>'photo_id','') !~*
+      '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} THEN RAISE EXCEPTION 'CUSTOMER_WORK_INVALID'; END IF;
+  FOR item IN SELECT value FROM jsonb_array_elements(p_brands) LOOP
+   IF jsonb_typeof(item)<>'string' THEN RAISE EXCEPTION 'CUSTOMER_WORK_INVALID'; END IF;
+   normalized=regexp_replace(btrim(item #>> '{}'),'[[:space:]]+',' ','g');
+   IF length(normalized) NOT BETWEEN 1 AND 100 OR normalized ~ '[[:cntrl:]]'
+   THEN RAISE EXCEPTION 'CUSTOMER_WORK_INVALID'; END IF;
+   IF NOT EXISTS(SELECT 1 FROM public.field_survey_templates t
+     WHERE t.id=p_template AND EXISTS(
+      SELECT 1 FROM jsonb_array_elements(t.questions) q
+       WHERE q->>'catalog_source'='brands' AND
+        (q->'options') ? normalized
+     ))
+   THEN RAISE EXCEPTION 'CUSTOMER_WORK_INVALID'; END IF;
+  END LOOP;
+ END IF;
+ INSERT INTO public.field_customer_work_actions(
+  id,day_route_id,route_stop_id,customer_id,owner_sub,kind,template_id,
+  answers,market_brand_names,note,captured_at)
+ VALUES(p_ref,p_route,p_stop,p_customer,p_actor,p_kind,p_template,
+  p_answers,p_brands,coalesce(p_note,''),p_at)
+ RETURNING * INTO saved;
+ IF p_brands IS NOT NULL THEN
+  FOR item IN SELECT DISTINCT value FROM jsonb_array_elements(p_brands) LOOP
+   normalized=regexp_replace(btrim(item #>> '{}'),'[[:space:]]+',' ','g');
+   INSERT INTO public.market_brands(name) VALUES(normalized)
+    ON CONFLICT(normalized_name) DO NOTHING;
+   SELECT id INTO brand FROM public.market_brands
+    WHERE normalized_name=lower(normalized);
+   IF brand IS NULL THEN
+    RAISE EXCEPTION 'CUSTOMER_WORK_INVALID';
+   END IF;
+   INSERT INTO public.market_customer_work_brands(
+    customer_id,brand_id,present,first_seen_at,last_seen_at,last_action_id,updated_by)
+   VALUES(p_customer,brand,true,p_at,p_at,p_ref,p_actor)
+   ON CONFLICT(customer_id,brand_id) DO UPDATE SET
+    present=true,last_seen_at=EXCLUDED.last_seen_at,
+    last_action_id=EXCLUDED.last_action_id,updated_by=EXCLUDED.updated_by
+   WHERE public.market_customer_work_brands.last_seen_at<=EXCLUDED.last_seen_at;
+  END LOOP;
+  UPDATE public.market_customer_work_brands current SET
+   present=false,last_seen_at=p_at,last_action_id=p_ref,updated_by=p_actor
+  WHERE current.customer_id=p_customer AND current.present
+   AND current.last_seen_at<=p_at
+   AND NOT EXISTS(
+     SELECT 1 FROM jsonb_array_elements_text(p_brands) chosen
+     JOIN public.market_brands b ON b.normalized_name=lower(
+       regexp_replace(btrim(chosen.value),'[[:space:]]+',' ','g'))
+     WHERE b.id=current.brand_id);
+ END IF;
+ RETURN to_jsonb(saved);
+END $fbmn$;
+REVOKE ALL ON FUNCTION public.sales_save_customer_work(
+ text,uuid,uuid,uuid,uuid,text,uuid,jsonb,jsonb,text,timestamptz) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.sales_save_customer_work(
+ text,uuid,uuid,uuid,uuid,text,uuid,jsonb,jsonb,text,timestamptz) TO sales_api;
+REVOKE ALL ON public.field_customer_work_actions,public.market_customer_work_brands FROM PUBLIC;
+GRANT SELECT ON public.field_customer_work_actions,public.market_customer_work_brands TO sales_api;
+REVOKE INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER ON
+ public.field_customer_work_actions,public.market_customer_work_brands FROM sales_api;
+
+   OR NOT EXISTS(SELECT 1 FROM public.customer_photos ph
+    WHERE ph.id=(p_answers->>'photo_id')::uuid AND ph.customer_id=p_customer)
+  THEN RAISE EXCEPTION 'CUSTOMER_WORK_INVALID'; END IF;
+ END IF;
+ IF p_kind='order' THEN
+  IF coalesce(p_answers->>'order_id','') !~*
+      '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} THEN RAISE EXCEPTION 'CUSTOMER_WORK_INVALID'; END IF;
+  FOR item IN SELECT value FROM jsonb_array_elements(p_brands) LOOP
+   IF jsonb_typeof(item)<>'string' THEN RAISE EXCEPTION 'CUSTOMER_WORK_INVALID'; END IF;
+   normalized=regexp_replace(btrim(item #>> '{}'),'[[:space:]]+',' ','g');
+   IF length(normalized) NOT BETWEEN 1 AND 100 OR normalized ~ '[[:cntrl:]]'
+   THEN RAISE EXCEPTION 'CUSTOMER_WORK_INVALID'; END IF;
+   IF NOT EXISTS(SELECT 1 FROM public.field_survey_templates t
+     WHERE t.id=p_template AND EXISTS(
+      SELECT 1 FROM jsonb_array_elements(t.questions) q
+       WHERE q->>'catalog_source'='brands' AND
+        (q->'options') ? normalized
+     ))
+   THEN RAISE EXCEPTION 'CUSTOMER_WORK_INVALID'; END IF;
+  END LOOP;
+ END IF;
+ INSERT INTO public.field_customer_work_actions(
+  id,day_route_id,route_stop_id,customer_id,owner_sub,kind,template_id,
+  answers,market_brand_names,note,captured_at)
+ VALUES(p_ref,p_route,p_stop,p_customer,p_actor,p_kind,p_template,
+  p_answers,p_brands,coalesce(p_note,''),p_at)
+ RETURNING * INTO saved;
+ IF p_brands IS NOT NULL THEN
+  FOR item IN SELECT DISTINCT value FROM jsonb_array_elements(p_brands) LOOP
+   normalized=regexp_replace(btrim(item #>> '{}'),'[[:space:]]+',' ','g');
+   SELECT id INTO brand FROM public.market_brands
+    WHERE normalized_name=lower(normalized);
+   IF brand IS NULL THEN
+    RAISE EXCEPTION 'CUSTOMER_WORK_INVALID';
+   END IF;
+   INSERT INTO public.market_customer_work_brands(
+    customer_id,brand_id,present,first_seen_at,last_seen_at,last_action_id,updated_by)
+   VALUES(p_customer,brand,true,p_at,p_at,p_ref,p_actor)
+   ON CONFLICT(customer_id,brand_id) DO UPDATE SET
+    present=true,last_seen_at=EXCLUDED.last_seen_at,
+    last_action_id=EXCLUDED.last_action_id,updated_by=EXCLUDED.updated_by
+   WHERE public.market_customer_work_brands.last_seen_at<=EXCLUDED.last_seen_at;
+  END LOOP;
+ END IF;
+ RETURN to_jsonb(saved);
+END $fbmn$;
+REVOKE ALL ON FUNCTION public.sales_save_customer_work(
+ text,uuid,uuid,uuid,uuid,text,uuid,jsonb,jsonb,text,timestamptz) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.sales_save_customer_work(
+ text,uuid,uuid,uuid,uuid,text,uuid,jsonb,jsonb,text,timestamptz) TO sales_api;
+REVOKE ALL ON public.field_customer_work_actions,public.market_customer_work_brands FROM PUBLIC;
+GRANT SELECT ON public.field_customer_work_actions,public.market_customer_work_brands TO sales_api;
+REVOKE INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER ON
+ public.field_customer_work_actions,public.market_customer_work_brands FROM sales_api;
+
+   OR NOT EXISTS(SELECT 1 FROM public.field_orders o
+    WHERE o.id=(p_answers->>'order_id')::uuid AND o.customer_id=p_customer
+      AND o.owner_sub=p_actor AND o.status NOT IN ('cancelled','superseded'))
+  THEN RAISE EXCEPTION 'CUSTOMER_WORK_INVALID'; END IF;
+ END IF;
  IF p_brands IS NOT NULL THEN
   IF p_template IS NULL THEN RAISE EXCEPTION 'CUSTOMER_WORK_INVALID'; END IF;
   FOR item IN SELECT value FROM jsonb_array_elements(p_brands) LOOP
