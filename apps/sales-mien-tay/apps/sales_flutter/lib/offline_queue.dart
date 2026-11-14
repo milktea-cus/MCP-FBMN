@@ -225,8 +225,33 @@ class OfflineQueue extends ChangeNotifier {
    (path=='/api/v1/day-routes'||
     RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}/stops
  Future<void> retryBlocked(String key)async{
-  if(_closed||syncing||!key.startsWith('$namespace:'))return;
-  final d=await db,t=d.transaction('outbox',idbModeReadWrite),store=t.objectStore('outbox');
+  if(_closed||syncing||_reconciling||!key.startsWith('$namespace:'))return;
+  // A blocked 409 must never be resubmitted before comparing server data.
+  final d=await db;
+  final read=d.transaction('outbox',idbModeReadOnly);
+  final entry=await read.objectStore('outbox').getObject(key);
+  await read.completed;
+  if(entry is Map){
+   final row=Map<String,dynamic>.from(entry);
+   if(row['namespace']!=namespace)return;
+   if(isRouteDuplicateConflict(row)){
+    try{
+     final matched=await _resolveRouteDuplicate(row);
+     await reload();
+     if(matched){error=null;await retryNow();}
+     else{
+      error='409: Tuyến/điểm ghé đã tồn tại nhưng nội dung không khớp. '
+       'Giữ bản ghi trên máy để tránh ghi đè.';
+      _notify();
+     }
+    }catch(e){
+     error='Không đối chiếu được tuyến đã lưu: '+describeFailure(e);
+     _notify();
+    }
+    return;
+   }
+  }
+  final t=d.transaction('outbox',idbModeReadWrite),store=t.objectStore('outbox');
   final raw=await store.getObject(key);
   if(raw is Map&&raw['namespace']==namespace&&raw['status']=='blocked'){
    await store.put({...Map<String,dynamic>.from(raw),'status':'pending','error':null});
@@ -237,10 +262,13 @@ class OfflineQueue extends ChangeNotifier {
   try{await reload();}catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
   if(_closed)return;
   _timer=Timer.periodic(const Duration(seconds:30),(_)=>unawaited(sync()));
-  unawaited(sync());
+  // Read-only repair of 409 rows left on the device from a prior build.
+  unawaited(reconcileBlockedRoutes().then((_)=>sync()).catchError((Object e){
+   error='Không thể đối chiếu hàng đợi: '+describeFailure(e);_notify();
+  }));
  }
  Future<void> sync({bool manual=false}) async{
-  if(_closed)return;
+  if(_closed||_reconciling)return;
   if(syncing){
    // iOS may suspend an in-flight IndexedDB/network Future when PWA sleeps.
    // Do not start a concurrent write: tell the user how to resume safely.
@@ -260,6 +288,7 @@ class OfflineQueue extends ChangeNotifier {
    _notify();return;
   }
   syncing=true;error=null;activePath=null;lastAttemptAt=now;_notify();
+  var recoveredDuplicate=false;
   try{
    await reload();
    if(pending.isEmpty){nextRetryAt=null;transientFailures=0;return;}
@@ -317,6 +346,21 @@ class OfflineQueue extends ChangeNotifier {
      if(row['session_id']!=null){await _ackSurvey(row,item);}else{await _remove(row['key'] as String);}
      lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;
     }catch(e){
+     final path=row['path']?.toString()??'';
+     if(e is ApiFailure&&e.status==409&&row['method']=='POST'&&
+       (path=='/api/v1/day-routes'||
+        RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}/stops$',
+         caseSensitive:false).hasMatch(path))){
+      try{
+       if(await _resolveRouteDuplicate(row)){
+        recoveredDuplicate=true;
+        lastSuccessAt=DateTime.now();error=null;
+        break; // Re-read remapped children before sending.
+       }
+      }catch(_){
+       // A failed read is not proof that the write was saved.
+      }
+     }
      final blocked=e is ApiFailure&&[400,401,403,404,409,413,415,422].contains(e.status);
      await _updateIfPresent({...row,
       'status':blocked?'blocked':'pending',
@@ -344,10 +388,16 @@ class OfflineQueue extends ChangeNotifier {
    activePath=null;
    try{await reload();}catch(e){error='Không đọc được hàng đợi lưu máy: $e';}
    syncing=false;_notify();
+   if(recoveredDuplicate&&!_closed&&readyCount>0){
+    unawaited(sync(manual:true));
+   }
   }
  }
- /// Explicit retry bypasses the background cooldown, without deleting rows.
- Future<void> retryNow()=>sync(manual:true);
+ /// Explicit user retry first attempts read-only matching of blocked routes.
+ Future<void> retryNow()async{
+  if(!_closed&&!syncing)await reconcileBlockedRoutes();
+  await sync(manual:true);
+ }
  @override void dispose(){_closed=true;_timer?.cancel();super.dispose();}
 }
 class OfflineLease {
