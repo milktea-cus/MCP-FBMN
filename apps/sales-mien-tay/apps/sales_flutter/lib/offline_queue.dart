@@ -666,6 +666,9 @@ class OfflineLease {
         isStop:row['path']!='/api/v1/day-routes')){
        throw StateError('Không đối chiếu được mã tuyến đã lưu');
       }
+      matchedDuplicate=true;
+      lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;
+      break; // Child references changed; re-read the durable queue first.
      }else if(row['session_id']!=null){
       await _ackSurvey(row,item);
      }else{
