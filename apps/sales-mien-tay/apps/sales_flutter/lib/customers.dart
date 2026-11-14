@@ -272,7 +272,8 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
   Future<void> _openDirectory() async {
     if(widget.queue!=null){
       try{
-        final cached=await widget.queue!.cached(cacheKey);
+        final cached=await widget.queue!.cached(cacheKey)
+          .timeout(const Duration(seconds:4));
         if(mounted){
           final snapshot=cached.map(FieldCustomer.fromJson).toList();
           completeSnapshot=snapshot;

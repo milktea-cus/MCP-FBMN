@@ -39,6 +39,10 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
  @override void dispose(){widget.queue.removeListener(_changed);super.dispose();}
  void _changed(){if(mounted)setState((){});}
  void _toast(String msg){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(msg)));}
+ Future<List<Map<String,dynamic>>> _cachedOrEmpty(String key)async{
+  try{return await widget.queue.cached(key).timeout(const Duration(seconds:4));}
+  catch(_){return <Map<String,dynamic>>[];}
+ }
  Future<http.Response> _get(Uri uri)=>(
   widget.service.client?.get(uri,headers:widget.service.headers)??
   http.get(uri,headers:widget.service.headers))
@@ -48,9 +52,9 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
   setState((){busy=true;error=null;});
   try{
    final saved=await Future.wait([
-    widget.queue.cached(monthCache),
-    widget.queue.cached(optionsCache),
-    widget.queue.cached(routeCache),
+    _cachedOrEmpty(monthCache),
+    _cachedOrEmpty(optionsCache),
+    _cachedOrEmpty(routeCache),
    ]);
    if(mounted)setState((){
     items=saved[0];scopes=saved[1];dayRoutes=saved[2];cached=true;

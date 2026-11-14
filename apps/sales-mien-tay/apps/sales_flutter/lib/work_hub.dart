@@ -98,11 +98,15 @@ class _WorkHubPageState extends State<WorkHubPage>{
   if(busy)return;
   setState((){busy=true;error=null;});
   try{
-   final cache=await widget.queue.cached(key);
-   // Older builds cache the entire month; show it while a slow endpoint
-   // reconnects, rather than declaring the user's plan missing.
-   final old=cache.isNotEmpty?cache:await widget.queue.cached(monthCache);
-   if(mounted)setState((){routes=old;offline=true;});
+   // A stalled IndexedDB read must not prevent the server request.
+   List<Map<String,dynamic>> old=[];
+   try{
+    final cache=await widget.queue.cached(key)
+     .timeout(const Duration(seconds:4));
+    old=cache.isNotEmpty?cache:await widget.queue.cached(monthCache)
+     .timeout(const Duration(seconds:4));
+   }catch(_){}
+   if(mounted)setState((){routes=old;offline=old.isNotEmpty;});
    final uri=widget.service.uri('/api/v1/day-routes',{
     'month':monthKey(day)});
    final res=decodeApi(await (

@@ -108,16 +108,19 @@ class _DayRoutePageState extends State<DayRoutePage>{
   try{
    // The monthly editor may have cached this territory's full customer list
    // even when the route-detail GET is temporarily offline/slow.
-   final previous=await widget.queue.cached(candidateKey);
+   final previous=await widget.queue.cached(candidateKey)
+    .timeout(const Duration(seconds:4),onTimeout:()=>[]);
    if(previous.isNotEmpty&&mounted)setState(()=>candidates=previous);
    final areaRoute=route;
    if(previous.isEmpty&&areaRoute!=null&&
       areaRoute['scope_kind']!=null&&areaRoute['scope_key']!=null){
     final scope='${areaRoute['scope_kind']}:${areaRoute['scope_key']}';
-    final saved=await widget.queue.cached('monthly-plan-candidates:$scope');
+    final saved=await widget.queue.cached('monthly-plan-candidates:$scope')
+     .timeout(const Duration(seconds:4),onTimeout:()=>[]);
     if(saved.isNotEmpty&&mounted)setState(()=>candidates=saved);
    }
-   final cached=await widget.queue.cached(key);
+   final cached=await widget.queue.cached(key)
+    .timeout(const Duration(seconds:4),onTimeout:()=>[]);
    if(cached.isNotEmpty&&mounted)setState((){
     route=effectiveRouteDate(Map<String,dynamic>.from(cached.first['route'] as Map),widget.queue.pending,widget.queue.identity);
     stops=(cached.first['stops'] as List).map((x)=>Map<String,dynamic>.from(x as Map)).toList();

@@ -35,7 +35,8 @@ class _CatalogPageState extends State<CatalogPage>{
   // should not leave the Products tab visually empty for 20 seconds.
   if(!more){
    try{
-    final saved=await widget.queue.cached(key);
+    final saved=await widget.queue.cached(key)
+     .timeout(const Duration(seconds:4));
     if(mounted&&gen==generation&&saved.isNotEmpty&&saved.first['items'] is List){
      setState((){
       rows=(saved.first['items'] as List).map(map).toList();
@@ -65,7 +66,8 @@ class _CatalogPageState extends State<CatalogPage>{
    if(e is ApiFailure&&(e.status==401||e.status==403)){setState((){rows=[];cursor=null;error='Không còn quyền truy cập danh mục';});}
    else{
     try{
-     final saved=await widget.queue.cached(key);
+     final saved=await widget.queue.cached(key)
+      .timeout(const Duration(seconds:4));
      if(mounted&&gen==generation)setState((){
       offline=true;cursor=null;
       if(saved.isNotEmpty&&saved.first['items'] is List)
