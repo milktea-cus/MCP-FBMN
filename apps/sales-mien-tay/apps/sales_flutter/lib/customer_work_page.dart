@@ -1,10 +1,10 @@
 import 'dart:async';
-import 'dart:convert';
-import 'package:flutter/material.dart';
+ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import 'customers.dart';
+import 'models.dart';
 import 'customer_categories.dart';
 import 'offline_queue.dart';
 import 'session.dart';

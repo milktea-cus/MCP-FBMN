@@ -75,7 +75,10 @@ class OrdersPage extends StatefulWidget{
  final OfflineQueue queue;
  final bool admin;
  final ActualClient? client;
- const OrdersPage({super.key,required this.queue,required this.admin,this.client});
+ final Map<String,dynamic>? initialCustomer;
+ final Future<void> Function(String orderId)? onOrderSaved;
+ const OrdersPage({super.key,required this.queue,required this.admin,this.client,
+  this.initialCustomer,this.onOrderSaved});
  @override State<OrdersPage> createState()=>_OrdersPageState();
 }
 class _OrdersPageState extends State<OrdersPage>{
@@ -99,7 +102,20 @@ class _OrdersPageState extends State<OrdersPage>{
  bool get canEdit=>selected!=null&&orderCanEdit(selected!['status']?.toString()??'local');
  bool get hasServerVersion=>(selected?['version'] as int? ?? 0)>0;
  String get draftKey=>'order-drafts-v1';
- @override void initState(){super.initState();load();}
+ @override void initState(){
+  super.initState();
+  unawaited(load());
+  if(widget.initialCustomer!=null){
+   WidgetsBinding.instance.addPostFrameCallback((_){
+    if(!mounted)return;
+    create();
+    customer=Map<String,dynamic>.from(widget.initialCustomer!);
+    selected!['customer_id']=customer!['id'];
+    selected!['owner_sub']=customer!['owner_sub'];
+    localChanged();
+   });
+  }
+ }
  @override void dispose(){searchDebounce?.cancel();search.dispose();note.dispose();super.dispose();}
  Map<String,dynamic> snapshot(){
   final base=Map<String,dynamic>.from(selected??{});
@@ -214,7 +230,7 @@ class _OrdersPageState extends State<OrdersPage>{
   if(mounted)setState(()=>selected=Map<String,dynamic>.from(source));
  }
  Future<void> chooseCustomer()async{
-  if(!canEdit||busy)return;
+  if(!canEdit||busy||widget.initialCustomer!=null)return;
   final item=await showDialog<Map<String,dynamic>>(context:context,
    builder:(_)=>OrderPicker(client:client,queue:widget.queue,type:'customers'));
   if(item==null||!mounted)return;
@@ -325,6 +341,13 @@ class _OrdersPageState extends State<OrdersPage>{
    if(mounted){
     setState((){});
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Đã lưu đơn trên hệ thống.')));
+   }
+   if(widget.onOrderSaved!=null){
+    try{await widget.onOrderSaved!(item['id'].toString());}
+    catch(e){
+     if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content:Text('Đơn đã lưu nhưng nhật ký công tác chưa lưu: $e')));
+    }
    }
    return true;
   }catch(e){
@@ -515,7 +538,7 @@ class _OrdersPageState extends State<OrdersPage>{
    if(inCart)...[
     Row(children:[Expanded(child:Text('Đơn ${selected!['id'].toString().substring(0,8)} · ${orderStatus(selected!['status']?.toString()??'local')}')),
      IconButton(tooltip:'Đóng giỏ',onPressed:busy?null:()=>setState(()=>selected=null),icon:const Icon(Icons.close))]),
-    OutlinedButton.icon(onPressed:canEdit&&!busy?chooseCustomer:null,icon:const Icon(Icons.storefront_outlined),
+    OutlinedButton.icon(onPressed:canEdit&&!busy&&widget.initialCustomer==null?chooseCustomer:null,icon:const Icon(Icons.storefront_outlined),
      label:Text(customer?['name']?.toString().isNotEmpty==true?
       '${customer!['name']} · FW: ${customer!['field_code']??'Đang cấp'}':'Chọn khách hàng')),
     if(selected!['replaces_order_id']!=null)
