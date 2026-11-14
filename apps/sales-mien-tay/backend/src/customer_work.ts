@@ -27,7 +27,7 @@ export function validateCustomerWorkInput(v:Body):string|null{
     v.kind==='order'&&!isUuid((v.answers as Body).order_id))
   return 'Thiếu mã ảnh hoặc đơn hàng được xác nhận';
  if(v.kind==='form'&&!String(v.note??'').trim()&&
-  !Object.keys(v.answers as Body).length&&!(names as string[]|null|undefined)?.length)
+  !Object.keys(v.answers as Body).length&&names==null)
   return 'Hãy nhập ghi chú, chọn nhãn hàng hoặc một hạng mục công việc';
  return null;
 }
