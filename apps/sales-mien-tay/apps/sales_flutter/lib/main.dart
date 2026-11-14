@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'app_update_page.dart';
+import 'pwa_update_page.dart';
 import 'api.dart';
 import 'customers.dart';
 import 'editor.dart';
@@ -375,10 +376,13 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
         onRefresh:(){unawaited(_queue.sync());_refresh();},
         onStaff:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>StaffPage(session:widget.session))),
         onProfile:_profile,
-        onUpdate:!kIsWeb&&defaultTargetPlatform==TargetPlatform.android
+        onUpdate:kIsWeb
           ?()=>Navigator.push(context,MaterialPageRoute(
-            builder:(_)=>AppUpdatePage(session:widget.session)))
-          :null,
+            builder:(_)=>const PwaUpdatePage()))
+          :defaultTargetPlatform==TargetPlatform.android
+           ?()=>Navigator.push(context,MaterialPageRoute(
+             builder:(_)=>AppUpdatePage(session:widget.session)))
+           :null,
         themeMode: SalesThemePreference.mode.value,
         onThemeModeChanged: (value) => unawaited(SalesThemePreference.select(value)),
       ),
