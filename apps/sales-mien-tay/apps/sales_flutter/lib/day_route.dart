@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 import 'customers.dart';
+import 'customer_work_page.dart';
 import 'customer_categories.dart';
 import 'models.dart';
 import 'offline_queue.dart';
@@ -44,7 +45,13 @@ List<Map<String,dynamic>> dayRouteCustomerCards(
   rows.add({...row,'customer_id':customerId,'customer_name':customerName,
    'customer_district':district,'customer_province':province,
    'customer_code':row['customer_code']??row['code']??assignedRow?['code']??local?['code']??'',
-   'category':category,'source':source,'stop_kind':'customer'});
+   'category':category,'source':source,'stop_kind':'customer',
+   'phone':row['phone']??assignedRow?['phone']??local?['phone'],
+   'address_line':row['address_line']??assignedRow?['address_line']??local?['address_line']??'',
+   'latitude':row['latitude']??assignedRow?['latitude']??local?['latitude'],
+   'longitude':row['longitude']??assignedRow?['longitude']??local?['longitude'],
+   'owner_sub':row['owner_sub']??assignedRow?['owner_sub']??local?['owner_sub'],
+   'location_consent':row['location_consent']??assignedRow?['location_consent']??local?['location_consent']});
  }
  for(final stop in stops)if(stop['stop_kind']=='customer')append(stop,'planned');
  for(final job in pending){
@@ -77,7 +84,7 @@ class DayRoutePage extends StatefulWidget {
 }
 class _DayRoutePageState extends State<DayRoutePage>{
  Map<String,dynamic>? route;
- List<Map<String,dynamic>> stops=[],candidates=[];
+ List<Map<String,dynamic>> stops=[],candidates=[],workActions=[];
  String candidateQuery='';
  bool busy=false,offline=false;
  String? error;
@@ -121,6 +128,8 @@ class _DayRoutePageState extends State<DayRoutePage>{
     final saved=await safeCached('monthly-plan-candidates:$scope');
     if(saved.isNotEmpty&&mounted)setState(()=>candidates=saved);
    }
+   final savedWork=await safeCached('customer-work-actions:${widget.routeId}');
+   if(mounted&&savedWork.isNotEmpty)setState(()=>workActions=savedWork);
    final cached=await safeCached(key);
    if(cached.isNotEmpty&&mounted)setState((){
     route=effectiveRouteDate(Map<String,dynamic>.from(cached.first['route'] as Map),widget.queue.pending,widget.queue.identity);
@@ -142,6 +151,19 @@ class _DayRoutePageState extends State<DayRoutePage>{
     if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;
     final cached=await safeCached(candidateKey);
     if(cached.isNotEmpty)candidates=cached;
+   }
+   try{
+    final response=decodeApi(await http.get(widget.service.uri(
+      '/api/v1/day-routes/${widget.routeId}/customer-work'),
+      headers:widget.service.headers).timeout(const Duration(seconds:12)));
+    final rows=(response['items'] as List)
+     .map((x)=>Map<String,dynamic>.from(x as Map)).toList();
+    if(mounted)setState(()=>workActions=rows);
+    try{await widget.queue.cache('customer-work-actions:${widget.routeId}',rows);}catch(_){}
+   }catch(e){
+    if(e is ApiFailure&&(e.status==401||e.status==403)){
+     if(mounted)setState(()=>workActions=[]);
+    }
    }
   }catch(e){
    if(e is ApiFailure&&(e.status==401||e.status==403)){
@@ -166,6 +188,8 @@ class _DayRoutePageState extends State<DayRoutePage>{
  }
  bool get hasRecordedActivity=>
   ((route?['market_visit_count'] as num?)?.toInt()??0)>0||
+  workActions.isNotEmpty||
+  pendingCustomerWork(widget.queue,widget.routeId).isNotEmpty||
   widget.queue.pending.any((op)=>op['path']=='/api/v1/area-visits'&&
     (op['payload'] as Map?)?['day_route_id']==widget.routeId)||
   stops.any((stop)=>
@@ -258,39 +282,28 @@ class _DayRoutePageState extends State<DayRoutePage>{
    return null;
   }
  }
- Future<void> customerWork(Map<String,dynamic> stop)async{
-  if(stop['stop_kind']!='customer')return;
-  final action=await showModalBottomSheet<String>(context:context,
-   showDragHandle:true,isScrollControlled:true,builder:(sheet)=>SafeArea(
-    child:Padding(padding:const EdgeInsets.fromLTRB(12,4,12,16),child:
-     Column(mainAxisSize:MainAxisSize.min,children:[
-      CustomerCategoryLabel(category:stop['category']?.toString()),
-      ListTile(title:Text(stop['customer_name']?.toString()??'Khách hàng',
-       style:Theme.of(context).textTheme.titleMedium),
-       subtitle:Text('${stop['customer_district']??''} · ${stop['customer_province']??''}')),
-      const Divider(),
-      ListTile(leading:const Icon(Icons.location_on_outlined),
-       title:const Text('Check-in GPS'),
-       enabled:canExecute&&stop['missed_code']==null,
-       onTap:()=>Navigator.pop(sheet,'gps')),
-      ListTile(leading:const Icon(Icons.checklist_outlined),
-       title:const Text('Thông tin khách · Tick nhãn hàng'),
-       subtitle:const Text('Khảo sát, ảnh và ghi chú theo lần ghé'),
-       enabled:sessionActive&&isOwner&&isTodayRoute,
-       onTap:()=>Navigator.pop(sheet,'survey')),
-      ListTile(leading:const Icon(Icons.event_busy_outlined),
-       title:const Text('Không ghé · Ghi lý do'),
-       enabled:canExecute&&stop['missed_code']==null,
-       onTap:()=>Navigator.pop(sheet,'missed')),
-     ]))));
-  if(!mounted)return;
-  if(action==null)return;
-  final recorded=await ensureCustomerStop(stop);
-  if(recorded==null)return;
-  if(action=='gps')await visit(recorded);
-  if(action=='survey')await openCustomerSurvey(recorded);
-  if(action=='missed')await recordMissed(recorded);
+ Future<void> customerWork(Map<String,dynamic> selected)async{
+  if(selected['stop_kind']!='customer'||route==null)return;
+  await Navigator.push(context,MaterialPageRoute(builder:(_)=>CustomerWorkPage(
+   service:widget.service,queue:widget.queue,
+   route:{...route!,'id':widget.routeId},
+   customer:selected,
+   ensureStop:ensureCustomerStop,
+   dependencies:_routeDependencies,
+   editable:canModify,
+   onSaved:(){if(mounted)setState((){});},
+  )));
+  if(mounted)await load();
  }
+ FieldCustomer rosterCustomer(Map<String,dynamic> item)=>FieldCustomer.fromJson({
+  'id':item['customer_id'],'owner_sub':item['owner_sub']??widget.queue.identity,
+  'name':item['customer_name']??'Khách hàng','category':item['category']??'khac',
+  'address_line':item['address_line']??'','province':item['customer_province']??'',
+  'district':item['customer_district']??'','phone':item['phone'],
+  'code':item['customer_code'],'status':'active',
+  'latitude':item['latitude'],'longitude':item['longitude'],
+  'location_consent':item['location_consent'],
+ });
  Future<void> addCustomers()async{
   if(!canEditPlannedStops)return;
   if(candidates.isEmpty){
@@ -728,8 +741,15 @@ class _DayRoutePageState extends State<DayRoutePage>{
   };
   final customerRows=dayRouteCustomerCards(stops,candidates,pending,
    query:candidateQuery,localCustomers:localCustomers);
-  final count=sorted.where((s)=>s['stop_kind']=='customer'&&
-   ((s['visit_count'] as num?)?.toInt()??0)>0).length;
+  final workList=[...workActions,...pendingCustomerWork(widget.queue,widget.routeId)];
+  bool visited(Map<String,dynamic> item){
+   final cid=item['customer_id']?.toString()??'';
+   return ((item['visit_count'] as num?)?.toInt()??0)>0||
+    ((item['session_count'] as num?)?.toInt()??0)>0||
+    customerWorkRecorded(workList,cid)||
+    widget.queue.pending.any((p)=>p['path']=='/api/v1/customers/$cid/visits');
+  }
+  final count=customerRows.where(visited).length;
   return Scaffold(
    appBar:AppBar(title:const Text('Công tác tại khách'),actions:[
     IconButton(tooltip:'Làm mới',onPressed:busy?null:load,icon:const Icon(Icons.sync)),
@@ -782,7 +802,8 @@ class _DayRoutePageState extends State<DayRoutePage>{
       maxLines:1,overflow:TextOverflow.ellipsis),
      subtitle:Text(
       '${c['customer_code']??''} · ${c['customer_district']??''}'
-      '\n${switch(c['source']){
+      '\n${visited(c)?'Đã ghé · có hoạt động':
+       switch(c['source']){
        'scope'=>'Trong phạm vi · Chưa ghé theo lịch',
        'pending'=>'Đã lưu máy · ${c['sync_status']=='blocked'?'Cần xử lý đồng bộ':'Chờ đồng bộ'}',
        _=>switch(c['activity_status']){
@@ -794,11 +815,25 @@ class _DayRoutePageState extends State<DayRoutePage>{
        },
       }}',
       maxLines:2,overflow:TextOverflow.ellipsis),
-     trailing:c['sync_status']=='blocked'
-      ?IconButton(icon:const Icon(Icons.warning_amber_outlined),
-       tooltip:'Xem lỗi đồng bộ',onPressed:()=>notice(
-        c['sync_error']?.toString()??'Cần xử lý đồng bộ.'))
-      :const Icon(Icons.chevron_right),
+     trailing:Row(mainAxisSize:MainAxisSize.min,children:[
+      if(c['sync_status']=='blocked')IconButton(
+       constraints:const BoxConstraints(minWidth:36,minHeight:36),
+       icon:const Icon(Icons.warning_amber_outlined),
+       tooltip:'Lỗi đồng bộ',onPressed:()=>notice(
+        c['sync_error']?.toString()??'Cần xử lý đồng bộ.')),
+      IconButton(
+       constraints:const BoxConstraints(minWidth:36,minHeight:36),
+       tooltip:'Chỉ đường',icon:const Icon(Icons.directions_outlined,size:20),
+       onPressed:()=>openCustomerDirections(context,rosterCustomer(c))),
+      if(customerCallUri(c['phone']?.toString())!=null)IconButton(
+       constraints:const BoxConstraints(minWidth:36,minHeight:36),
+       tooltip:'Gọi điện',icon:const Icon(Icons.call_outlined,size:20),
+       onPressed:()=>openCustomerCall(context,rosterCustomer(c))),
+      if(customerZaloUri(c['phone']?.toString())!=null)IconButton(
+       constraints:const BoxConstraints(minWidth:36,minHeight:36),
+       tooltip:'Zalo',icon:const CustomerZaloMark(),
+       onPressed:()=>openCustomerZalo(context,rosterCustomer(c))),
+     ]),
      onTap:()=>unawaited(customerWork(c)),
     )),
     if(customerRows.length>100)Padding(padding:const EdgeInsets.all(8),
