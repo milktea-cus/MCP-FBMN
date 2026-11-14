@@ -402,34 +402,9 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
     ],
    ),
   );
-  Widget _syncBanner()=>AnimatedBuilder(
-    animation:_queue,
-    builder:(context,_){
-      if(_queue.pending.isEmpty&&_queue.quarantined==0&&_queue.error==null){
-        return const SizedBox.shrink();
-      }
-      final blocked=_queue.blockedCount;
-      final detail=_queue.isStalled
-       ?_queue.error??'Đồng bộ quá lâu không phản hồi; đóng và mở lại app.'
-       :_queue.syncing
-        ?'Đang gửi: ${_queue.activePath??'kiểm tra phiên đăng nhập'}'
-        :_queue.error??(blocked>0
-         ?'$blocked thao tác bị từ chối · chạm để xem lỗi'
-         :_queue.nextRetryAt!=null
-          ?'Tạm nghỉ sau lỗi mạng · chạm để thử lại'
-          :'Đã lưu trên máy · chạm để xem chi tiết');
-      return Material(color:Theme.of(context).colorScheme.primaryContainer,
-       child:ListTile(
-        leading:Icon(blocked>0?Icons.error_outline:Icons.cloud_upload_outlined,
-         color:Theme.of(context).colorScheme.onPrimaryContainer),
-        title:Text('Chờ đồng bộ: ${_queue.pending.length} · Cách ly: ${_queue.quarantined}'),
-        subtitle:Text(detail,maxLines:2,overflow:TextOverflow.ellipsis),
-        trailing:IconButton(tooltip:'Đồng bộ ngay',
-         onPressed:_queue.syncing?null:()=>unawaited(_queue.retryNow()),
-         icon:const Icon(Icons.sync)),
-        onTap:_showSyncDetails,
-       ));
-    },
+  // Open diagnostics independently of the network/sync state.
+  Widget _syncBanner()=>SyncQueueBanner(
+    queue:_queue,onDetails:_showSyncDetails,
   );
 
   @override
@@ -494,6 +469,68 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
 
 
 
+
+/// Sync detail is always accessible, even when an iOS PWA network request
+/// is suspended. The trailing button never starts another write operation.
+class SyncQueueBanner extends StatelessWidget{
+ final OfflineQueue queue;
+ final VoidCallback onDetails;
+ const SyncQueueBanner({super.key,required this.queue,required this.onDetails});
+ @override Widget build(BuildContext context)=>AnimatedBuilder(
+  animation:queue,
+  builder:(context,_){
+   if(queue.pending.isEmpty&&queue.quarantined==0&&queue.error==null){
+    return const SizedBox.shrink();
+   }
+   final blocked=queue.blockedCount;
+   final subtitle=queue.isStalled
+    ?queue.error??'Đồng bộ đã treo · mở chi tiết để xử lý'
+    :queue.syncing
+     ?'Đang gửi: ${queue.activePath??'kiểm tra phiên đăng nhập'}'
+     :queue.error??(blocked>0
+      ?'$blocked thao tác bị từ chối'
+      :queue.nextRetryAt!=null
+       ?'Đang tạm nghỉ sau lỗi mạng'
+       :'Đã lưu trên máy, chưa gửi');
+   final colors=Theme.of(context).colorScheme;
+   return Material(color:colors.primaryContainer,
+    child:InkWell(
+     key:const ValueKey('sync-banner-tap'),
+     onTap:onDetails,
+     child:Padding(
+      padding:const EdgeInsets.symmetric(horizontal:12,vertical:8),
+      child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+       Row(children:[
+        Icon(blocked>0?Icons.error_outline:Icons.cloud_upload_outlined,
+         color:colors.onPrimaryContainer,size:24),
+        const SizedBox(width:10),
+        Expanded(child:Text(
+         'Chờ đồng bộ: ${queue.pending.length} · Cách ly: ${queue.quarantined}',
+         maxLines:2,style:TextStyle(color:colors.onPrimaryContainer,
+          fontWeight:FontWeight.w600))),
+        const SizedBox(width:6),
+        OutlinedButton.icon(
+         key:const ValueKey('sync-details-button'),
+         onPressed:onDetails,
+         icon:const Icon(Icons.info_outline,size:18),
+         label:const Text('Chi tiết'),
+         style:OutlinedButton.styleFrom(
+          foregroundColor:colors.onPrimaryContainer,
+          padding:const EdgeInsets.symmetric(horizontal:9,vertical:6),
+          visualDensity:VisualDensity.compact,
+         ),
+        ),
+       ]),
+       const SizedBox(height:4),
+       Text(subtitle,maxLines:3,overflow:TextOverflow.ellipsis,
+        style:TextStyle(color:colors.onPrimaryContainer)),
+      ]),
+     ),
+    ),
+   );
+  },
+ );
+}
 
 /// Compact KPI tiles; fixed row extents prevent giant single-column cards on phones.
 class SalesOverviewKpis extends StatelessWidget {
