@@ -8,6 +8,7 @@ import 'offline_queue.dart';
 import 'session.dart';
 import 'surveys.dart';
 import 'route_workflow.dart';
+import 'schedule_archive.dart';
 
 bool scopeSupportsExtra(Map<String,dynamic> route)=>
  route['scope_kind']=='territory'||route['scope_kind']=='chain';
@@ -405,6 +406,30 @@ class _DayRoutePageState extends State<DayRoutePage>{
    queue:widget.queue,service:widget.service,route:route!,stop:stop)));
   if(mounted)await load();
  }
+ Future<void> deleteSchedule()async{
+  final current=route;
+  if(current==null||current['owner_sub']!=widget.queue.identity||
+     current['plan_status']=='cancelled')return;
+  final id=current['monthly_plan_id']?.toString()??'';
+  final date=current['route_date']?.toString()??'';
+  if(id.isEmpty||date.length<7)return;
+  try{
+   final res=decodeApi(await http.get(
+    widget.service.uri('/api/v1/monthly-plans',{'month':date.substring(0,7)}),
+    headers:widget.service.headers).timeout(const Duration(seconds:18)));
+   final items=(res['items'] as List).whereType<Map>();
+   final plan=items.where((p)=>p['id'].toString()==id).firstOrNull;
+   if(plan==null){
+    notice('Chưa tìm thấy lịch đã đồng bộ. Hãy về Kế hoạch để quản lý bản chờ.');
+    return;
+   }
+   if(!mounted)return;
+   final archived=await confirmArchiveWorkSchedule(context,
+    service:widget.service,queue:widget.queue,
+    plan:Map<String,dynamic>.from(plan));
+   if(archived&&mounted)Navigator.pop(context,true);
+  }catch(e){notice('Không kiểm tra được lịch để xóa: $e');}
+ }
  @override Widget build(BuildContext context){
   final pending=pendingStops;
   final sorted=[...stops]..sort((a,b)=>(a['sequence'] as num).compareTo(b['sequence'] as num));
@@ -428,6 +453,10 @@ class _DayRoutePageState extends State<DayRoutePage>{
        onPressed:canModify&&isTodayRoute?addUnplanned:null,
        icon:const Icon(Icons.add_circle_outline),label:const Text('Điểm phát sinh')),
       OutlinedButton.icon(onPressed:openTemplates,icon:const Icon(Icons.bookmark_outline),label:const Text('Mẫu tuyến')),
+      if(isOwner&&route!['plan_status']!='cancelled')OutlinedButton.icon(
+       key:const ValueKey('day-route-delete-schedule'),
+       onPressed:busy?null:deleteSchedule,
+       icon:const Icon(Icons.delete_outline),label:const Text('Xóa lịch')),
      ]),
     ],
     if(busy)const LinearProgressIndicator(),
