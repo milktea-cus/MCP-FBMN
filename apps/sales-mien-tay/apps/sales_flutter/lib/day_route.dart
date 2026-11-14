@@ -100,10 +100,14 @@ class _DayRoutePageState extends State<DayRoutePage>{
   final today=DateTime.now().toUtc().add(const Duration(hours:7));
   return date!=null&&date.year==today.year&&date.month==today.month&&date.day==today.day;
  }
- bool get hasRecordedActivity=>stops.any((stop)=>
-  ((stop['visit_count'] as num?)?.toInt()??0)>0||
-  ((stop['session_count'] as num?)?.toInt()??0)>0||
-  stop['missed_code']!=null);
+ bool get hasRecordedActivity=>
+  ((route?['market_visit_count'] as num?)?.toInt()??0)>0||
+  widget.queue.pending.any((op)=>op['path']=='/api/v1/area-visits'&&
+    (op['payload'] as Map?)?['day_route_id']==widget.routeId)||
+  stops.any((stop)=>
+    ((stop['visit_count'] as num?)?.toInt()??0)>0||
+    ((stop['session_count'] as num?)?.toInt()??0)>0||
+    stop['missed_code']!=null);
  bool get canEditPlannedStops=>canModify&&!hasRecordedActivity;
  bool missedPending(String id)=>widget.queue.pending.any((op)=>
   op['path']=='/api/v1/day-routes/${widget.routeId}/stops/$id/missed');
@@ -367,6 +371,62 @@ class _DayRoutePageState extends State<DayRoutePage>{
    queue:widget.queue,service:widget.service,route:route!,stops:stops)));
   if(mounted)await load();
  }
+ /// Real market discovery lives at route level. No fake area/chain stop.
+ Future<void> recordMarketVisit()async{
+  if(!canModify||!isTodayRoute||!scopeSupportsExtra(route!))return;
+  try{
+   final pos=await captureGps(context);
+   if(!mounted)return;
+   if(!pos.accuracy.isFinite||pos.accuracy<0||pos.accuracy>100){
+    notice('GPS chưa đủ chính xác (yêu cầu ≤100 m).');return;
+   }
+   final summary=TextEditingController(),name=TextEditingController(),
+    address=TextEditingController();
+   final accepted=await showDialog<bool>(context:context,builder:(dialog)=>AlertDialog(
+    title:const Text('Ghi nhận tìm khách mới'),
+    content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
+     Text('Đã đo GPS · sai số ${pos.accuracy.toStringAsFixed(0)} m'),
+     TextField(controller:summary,maxLength:2000,maxLines:2,
+      decoration:const InputDecoration(labelText:'Kết quả đi thực tế')),
+     TextField(controller:name,maxLength:240,
+      decoration:const InputDecoration(labelText:'Tên lead tìm được (tùy chọn)')),
+     TextField(controller:address,maxLength:500,
+      decoration:const InputDecoration(labelText:'Địa chỉ lead (nếu có)')),
+    ])),
+    actions:[
+     TextButton(onPressed:()=>Navigator.pop(dialog,false),child:const Text('Hủy')),
+     FilledButton(onPressed:()=>Navigator.pop(dialog,true),
+      child:const Text('Lưu GPS công tác')),
+    ],
+   ));
+   final summaryText=summary.text.trim(),leadName=name.text.trim(),
+    leadAddress=address.text.trim();
+   summary.dispose();name.dispose();address.dispose();
+   if(accepted!=true)return;
+   if((leadName.isEmpty&&leadAddress.isNotEmpty)||
+     (leadName.isNotEmpty&&(leadName.length<2||leadAddress.length<3))){
+    notice('Nếu có lead, nhập tên (từ 2 ký tự) và địa chỉ (từ 3 ký tự).');return;
+   }
+   final ref=const Uuid().v4();
+   await widget.queue.enqueue('/api/v1/area-visits',{
+    'client_ref':ref,'day_route_id':widget.routeId,
+    'latitude':pos.latitude,'longitude':pos.longitude,
+    'accuracy_m':pos.accuracy,
+    'captured_at':pos.timestamp.toUtc().toIso8601String(),
+    'note':summaryText,
+    if(leadName.isNotEmpty)'prospect':{
+     'name':leadName,'address_line':leadAddress},
+   },dependsOn:_routeDependencies());
+   notice('GPS và kết quả công tác đã lưu trên máy · chờ đồng bộ.');
+   if(mounted)await openMarketEvidence();
+  }catch(e){notice('Không lưu được GPS thị trường: $e');}
+ }
+ Future<void> openMarketEvidence()async{
+  if(route==null)return;
+  await Navigator.push(context,MaterialPageRoute(builder:(_)=>AreaEvidencePage(
+   queue:widget.queue,service:widget.service,route:route!)));
+  if(mounted)await load();
+ }
  Future<void> openEvidence(Map<String,dynamic> stop)async{
   if(route==null)return;
   await Navigator.push(context,MaterialPageRoute(builder:(_)=>AreaEvidencePage(
@@ -409,9 +469,18 @@ class _DayRoutePageState extends State<DayRoutePage>{
     if(route!=null)...[
      Text('${route!['route_date']?.toString().substring(0,10)} · ${route!['purpose']}',
        style:Theme.of(context).textTheme.titleMedium),
-     Text('${route!['scope_kind']=='chain'?'Chuỗi':route!['scope_kind']=='customer'?'Khách cụ thể':'Địa bàn'}: ${route!['scope_key']} · Đã ghé ${count}/${sorted.length} điểm'),
+     Text('${route!['scope_kind']=='chain'?'Chuỗi':route!['scope_kind']=='customer'?'Khách cụ thể':'Địa bàn'}: ${route!['scope_key']} · Đã ghé $count/${sorted.length} khách · GPS thị trường ${route!['market_visit_count']??0}'),
      const SizedBox(height:8),
      Wrap(spacing:8,runSpacing:6,children:[
+      if(scopeSupportsExtra(route!))FilledButton.icon(
+       key:const ValueKey('route-find-new-lead'),
+       onPressed:canModify&&isTodayRoute?recordMarketVisit:null,
+       icon:const Icon(Icons.add_location_alt_outlined),
+       label:const Text('Tìm khách mới')),
+      if(scopeSupportsExtra(route!))OutlinedButton.icon(
+       key:const ValueKey('route-market-evidence'),
+       onPressed:openMarketEvidence,
+       icon:const Icon(Icons.map_outlined),label:const Text('GPS / lead')),
       OutlinedButton.icon(onPressed:canEditPlannedStops?addCustomers:null,
        icon:const Icon(Icons.group_add_outlined),label:const Text('Chọn nhiều khách')),
       if(scopeSupportsExtra(route!))OutlinedButton.icon(
@@ -485,7 +554,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
      )),
     if(!busy&&sorted.isEmpty&&pending.isEmpty)
      const Padding(padding:EdgeInsets.all(18),
-      child:Text('Chưa có điểm ghé. Có thể đi tìm khách ở địa bàn trống; không cần tạo khách giả.')),
+      child:Text('Không có khách hẹn trước. Bấm Tìm khách mới để ghi GPS/lead tại địa bàn; không tạo khách giả.')),
    ]),
   );
  }
