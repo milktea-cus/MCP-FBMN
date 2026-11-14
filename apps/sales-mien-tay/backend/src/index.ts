@@ -59,7 +59,7 @@ function cors(res: Response, origin: string | null, env: Env): Response {
   if (!allowedOrigin(origin, env)) return res;
   const h = new Headers(res.headers);
   h.set('Access-Control-Allow-Origin', origin!);
-  h.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Upload-Id, X-Photo-Kind, X-Captured-At, X-Sync-Identity, X-Sync-Revision');
+  h.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Upload-Id, X-Photo-Kind, X-Captured-At, X-Sync-Identity, X-Sync-Revision, X-Sync-Protocol');
   h.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   h.set('Vary', 'Origin');
   return new Response(res.body, {status: res.status, headers: h});
