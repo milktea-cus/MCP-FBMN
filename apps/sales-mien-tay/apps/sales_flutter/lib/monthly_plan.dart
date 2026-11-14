@@ -7,6 +7,7 @@ import 'offline_queue.dart';
 import 'planning_periods.dart';
 import 'session.dart';
 import 'day_route.dart';
+import 'schedule_archive.dart';
 
 /// A plan is a dated business assignment, not a customer or a survey session.
 /// Multiple territories/chains can be selected without requiring any customer.
@@ -20,7 +21,7 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
  DateTime month=DateTime(DateTime.now().year,DateTime.now().month);
  int period=0;
  List<Map<String,dynamic>> items=[],scopes=[],dayRoutes=[];
- bool busy=false,cached=false;
+ bool busy=false,cached=false,showDeleted=false;
  String? error;
  String get monthCache=>'monthly-plans:${monthKey(month)}';
  String get optionsCache=>'monthly-plan-scopes';
@@ -127,6 +128,20 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
    if(mounted)await _reload();
   }catch(e){_toast('Không lưu được kế hoạch/tuyến: $e');}
  }
+ Future<void> deletePlan(Map<String,dynamic> plan)async{
+  if(busy)return;
+  final deleted=await confirmArchiveWorkSchedule(context,
+   service:widget.service,queue:widget.queue,plan:plan);
+  if(!mounted||!deleted)return;
+  setState((){
+   items=[for(final r in items)
+    if(r['id']==plan['id']){...r,'status':'cancelled'} else r];
+   dayRoutes=[for(final r in dayRoutes)
+    if(r['monthly_plan_id']==plan['id']){...r,'plan_status':'cancelled'}
+    else r];
+  });
+  await _reload();
+ }
  Future<void> createRoute(Map<String,dynamic> plan)async{
   final id=const Uuid().v4();
   final payload=<String,dynamic>{'client_ref':id,'monthly_plan_id':plan['id'],
@@ -166,7 +181,8 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
  @override Widget build(BuildContext context){
   final visible=items.where((r){
    final date=DateTime.tryParse(r['work_date']?.toString()??'');
-   return period==0||date!=null&&planningPeriod(date)==period;
+   return (showDeleted?(r['status']=='cancelled'):(r['status']!='cancelled'))&&
+    (period==0||date!=null&&planningPeriod(date)==period);
   }).toList();
   final pending=widget.queue.pending.where((r){
    final path=r['path']?.toString()??'';
@@ -178,6 +194,10 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
   final canCreate=scopes.isNotEmpty&&!busy;
   return Scaffold(
    appBar:AppBar(title:const Text('Kế hoạch tháng'),actions:[
+    IconButton(key:const ValueKey('monthly-archived-toggle'),
+     tooltip:showDeleted?'Xem lịch đang hoạt động':'Xem lịch đã xóa',
+     onPressed:()=>setState(()=>showDeleted=!showDeleted),
+     icon:Icon(showDeleted?Icons.event_available:Icons.delete_sweep_outlined)),
     IconButton(tooltip:'Tải lại',onPressed:busy?null:_reload,icon:const Icon(Icons.sync)),
    ]),
    body:ListView(padding:const EdgeInsets.all(12),children:[
@@ -194,6 +214,9 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
      onAdd:()=>_edit(),canAdd:canCreate,
     ),
     const SizedBox(height:10),
+    if(showDeleted)const Padding(
+     padding:EdgeInsets.symmetric(horizontal:4,vertical:6),
+     child:Text('Đã xóa · chỉ xem lịch sử, không mất khảo sát hoặc lượt ghé')),
     if(busy)const LinearProgressIndicator(),
     if(error!=null)Padding(padding:const EdgeInsets.symmetric(vertical:8),child:
       Text(cached?'Dữ liệu đã lưu trên máy · chưa tải mới: ${error!}':error!,
@@ -232,12 +255,17 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
        final assigned=r['owner_sub']==widget.queue.identity&&scopes.any(
          (s)=>s['scope_key']==r['scope_key']&&s['scope_kind']==r['scope_kind']);
        return Wrap(spacing:0,children:[
-        if(assigned)IconButton(tooltip:'Sửa kế hoạch',icon:const Icon(Icons.edit_outlined),onPressed:()=>_edit(original:r)),
+        if(assigned&&r['status']=='planned')...[
+         IconButton(tooltip:'Sửa kế hoạch',icon:const Icon(Icons.edit_outlined),onPressed:()=>_edit(original:r)),
+         IconButton(key:ValueKey('delete-plan:${r['id']}'),
+          tooltip:'Xóa lịch',icon:const Icon(Icons.delete_outline),
+          onPressed:()=>deletePlan(r)),
+        ],
         if(assigned&&route==null&&queued.isEmpty&&r['status']=='planned')
          IconButton(tooltip:'Tạo tuyến ngày',icon:const Icon(Icons.add_road),onPressed:()=>createRoute(r)),
         if(route!=null)...[
          IconButton(tooltip:'Mở tuyến ngày',icon:const Icon(Icons.route),onPressed:()=>openRoute(route)),
-         if(assigned&&route['status']=='ready')IconButton(tooltip:'Dời ngày tuyến',
+         if(assigned&&r['status']=='planned'&&route['status']=='ready')IconButton(tooltip:'Dời ngày tuyến',
           icon:const Icon(Icons.event_repeat),onPressed:()=>moveRoute(route)),
         ],
         for(final op in queued)IconButton(tooltip:'Mở tuyến chờ đồng bộ',icon:const Icon(Icons.cloud_upload_outlined),
