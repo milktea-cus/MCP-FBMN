@@ -2,17 +2,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sales_mien_tay/route_workflow.dart';
 
 void main(){
- test('route template serializes area without fake customer IDs',(){
+ test('legacy area scope stays in history, never in customer route template',(){
   final stops=<Map<String,dynamic>>[
    {'stop_kind':'area','province':'An Giang','district':'','sequence':3,
     'purpose':'Phát triển đại lý','id':'server-1','visit_count':0},
   ];
   final items=routeTemplateStops(stops,[]);
-  expect(items,hasLength(1));
-  expect(items.single['stop_kind'],'area');
-  expect(items.single.containsKey('customer_id'),false);
-  expect(items.single.containsKey('id'),false);
-  expect(items.single['sequence'],3);
+  expect(items,isEmpty);
+  // The original stop is not removed: it is only excluded from new templates.
+  expect(stops.single['stop_kind'],'area');
  });
  test('route template keeps real customer and unsynced stops in order',(){
   final saved=<Map<String,dynamic>>[
@@ -25,9 +23,8 @@ void main(){
     'payload':{'stop_kind':'customer','customer_id':'c-1','sequence':99}},
   ];
   final result=routeTemplateStops(saved,pending);
-  expect(result.map((x)=>x['stop_kind']).toList(),['chain','customer']);
-  expect(result.first['sequence'],1);
-  expect(result.last['sequence'],2);
+  expect(result.map((x)=>x['stop_kind']).toList(),['customer']);
+  expect(result.single['sequence'],2);
  });
  test('duplicate stop identity identifies area, chain and customer separately',(){
   expect(routeStopIdentity({'stop_kind':'area','province':'An Giang','district':''}),
