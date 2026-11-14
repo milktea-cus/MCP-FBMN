@@ -370,8 +370,8 @@ class MonthlyPeriodActions extends StatelessWidget {
   required this.onPeriodChanged,required this.onAdd,required this.canAdd});
  @override Widget build(BuildContext context){
   final periods=[for(var p=1;p<=5;p++)if(periodDays(month,p).isNotEmpty)p];
-  return Row(children:[
-   Expanded(child:DropdownButtonFormField<int>(
+  return LayoutBuilder(builder:(context,constraints){
+   final dropdown=DropdownButtonFormField<int>(
     key:ValueKey('period-${monthKey(month)}-$period'),
     initialValue:period,isExpanded:true,
     decoration:const InputDecoration(labelText:'Lọc kỳ',isDense:true),
@@ -380,11 +380,17 @@ class MonthlyPeriodActions extends StatelessWidget {
      for(final p in periods)DropdownMenuItem(value:p,child:Text('Kỳ $p')),
     ],
     onChanged:(value){if(value!=null)onPeriodChanged(value);},
-   )),
-   const SizedBox(width:8),
-   FilledButton.icon(onPressed:canAdd?onAdd:null,
-    icon:const Icon(Icons.add),label:const Text('Thêm công tác')),
-  ]);
+   );
+   final add=FilledButton.icon(onPressed:canAdd?onAdd:null,
+    icon:const Icon(Icons.add),label:const Text('Thêm công tác'));
+   // 320–390dp phones must never clip the actual action off the right edge.
+   if(constraints.maxWidth<440)return Column(
+    crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+     dropdown,const SizedBox(height:8),add,
+    ]);
+   return Row(children:[Expanded(child:dropdown),
+    const SizedBox(width:8),add]);
+  });
  }
 }
 
