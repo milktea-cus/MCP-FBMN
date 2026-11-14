@@ -10,7 +10,9 @@ import 'session.dart';
 /// Route execution uses the account-scoped outbox, just like planned stops.
 bool isWorkVisitOfflineOperation(String path)=>
  RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}/unplanned-stops$').hasMatch(path)||
- RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}/stops/[a-f0-9-]{36}/missed$').hasMatch(path);
+ RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}/stops/[a-f0-9-]{36}/missed$').hasMatch(path)||
+ RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}/work-session$').hasMatch(path)||
+ RegExp(r'^/api/v1/work-sessions/[a-f0-9-]{36}/close$').hasMatch(path);
 
 
 bool sameSavedRoute(Map server,Map local,String owner){
@@ -81,7 +83,9 @@ class OfflineQueue extends ChangeNotifier {
    return 'Hoàn tất phiên khảo sát';
   }
   if(path=='/api/v1/sessions')return 'Bắt đầu phiên khảo sát';
-  if(path.contains('/unplanned-stops'))return 'Điểm đến ngoài kế hoạch';
+  if(path.contains('/work-session')&&path.endsWith('/work-session'))return 'Bắt đầu phiên công tác';
+  if(path.contains('/work-sessions/')&&path.endsWith('/close'))return 'Kết thúc phiên công tác';
+  if(path.contains('/unplanned-stops'))return 'Khách phát sinh ngoài kế hoạch';
   if(path.endsWith('/missed'))return 'Lý do chưa ghé điểm bán';
   if(path.startsWith('/api/v1/day-routes'))return 'Lịch trình trong ngày';
   if(path.startsWith('/api/v1/monthly-plans'))return 'Kế hoạch tháng';
