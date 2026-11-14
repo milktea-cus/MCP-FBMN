@@ -120,6 +120,11 @@ class _WorkHubPageState extends State<WorkHubPage>{
      if(op['path']=='/api/v1/day-routes'&&
        (op['payload'] as Map?)?['client_ref']==id)id,
     for(final op in widget.queue.pending)
+     if(op['path']=='/api/v1/day-routes/$id'&&
+       op['method']=='PATCH'&&
+       (op['payload'] as Map?)?['client_ref']!=null)
+      (op['payload'] as Map)['client_ref'].toString(),
+    for(final op in widget.queue.pending)
      if(op['path']=='/api/v1/day-routes/$id/stops'&&
        op['method']=='POST'&&
        (op['payload'] as Map?)?['client_ref']!=null)
@@ -142,8 +147,9 @@ class _WorkHubPageState extends State<WorkHubPage>{
    queue:widget.queue,service:widget.service,routeId:id,cachedRoute:route)));
   if(mounted)await load();
  }
- List<Map<String,dynamic>> get dayRoutes=>
-  routes.where((r)=>r['route_date'].toString().startsWith(dayKey(day))
+ List<Map<String,dynamic>> get dayRoutes=>routes
+  .map((r)=>effectiveRouteDate(r,widget.queue.pending,widget.queue.identity))
+  .where((r)=>r['route_date'].toString().startsWith(dayKey(day))
     &&r['status']=='ready'&&r['plan_status']!='cancelled').toList();
  @override Widget build(BuildContext context){
   final today=dayKey(DateTime.now().toUtc().add(const Duration(hours:7)));
@@ -208,7 +214,9 @@ class _WorkHubPageState extends State<WorkHubPage>{
        final start=state=='open'&&own&&route['route_date'].toString().startsWith(today);
        final action=start?'Bắt đầu phiên':state=='ongoing'?'Tiếp tục phiên'
         :state=='done'||state=='cancelled'?'Xem lịch sử':'Xem lịch';
-       final status=state=='ongoing'?'Đang đi':state=='done'?'Đã kết thúc'
+       final status=route['pending_route_date']==true
+        ?'Ngày mới đã lưu máy · chờ máy chủ xác nhận'
+        :state=='ongoing'?'Đang đi':state=='done'?'Đã kết thúc'
         :state=='cancelled'?'Đã hủy':'Chưa bắt đầu';
        return Card(child:Column(children:[
         ListTile(
