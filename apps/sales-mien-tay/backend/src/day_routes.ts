@@ -52,7 +52,7 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
  if(suffix===''&&req.method==='GET'){
   const month=url.searchParams.get('month')??'';
   if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))return fail('Tháng không hợp lệ');
-  const items=await db`SELECT r.*,p.period_ym,p.scope_kind,p.scope_key,p.province,p.district,
+  const items=await db`SELECT r.*,p.period_ym,p.scope_kind,p.scope_key,p.province,p.district,p.status AS plan_status,
     (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id AND NOT s.is_unplanned)::integer AS stop_count,
     (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id AND s.is_unplanned)::integer AS unplanned_count,
     (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id AND NOT s.is_unplanned
