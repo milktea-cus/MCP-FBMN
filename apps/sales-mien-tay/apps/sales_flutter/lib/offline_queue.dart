@@ -66,6 +66,7 @@ class OfflineQueue extends ChangeNotifier {
  String? activePath;
  int transientFailures=0;
  int get blockedCount=>pending.where((r)=>r['status']=='blocked').length;
+ bool get reconciling=>_reconciling;
  int get readyCount=>pending.length-blockedCount;
  bool get isStalled=>syncing&&lastAttemptAt!=null&&
   DateTime.now().difference(lastAttemptAt!)>const Duration(minutes:2);
@@ -92,7 +93,7 @@ class OfflineQueue extends ChangeNotifier {
   if(path.startsWith('/api/v1/records'))return 'Biểu mẫu / kế hoạch';
   if(path.startsWith('/api/v1/customers'))return 'Cập nhật khách hàng';
   if(path.startsWith('/api/v1/notifications'))return 'Đánh dấu thông báo';
-  if(path.startsWith('/api/v1/area-visits'))return 'Ghi nhận công tác';
+  if(path.startsWith('/api/v1/area-visits'))return 'GPS / lead tìm khách mới';
   return 'Thao tác lưu trên máy';
  }
 
@@ -122,6 +123,9 @@ class OfflineQueue extends ChangeNotifier {
   final all=await rows();
   pending=all.where((r)=>r['namespace']==namespace).toList()..sort((a,b)=>(a['created'] as int).compareTo(b['created'] as int));
   quarantined=all.length-pending.length;
+  // Once every durable operation has been acknowledged, an old HTTP error
+  // cannot leave a permanent purple banner on the next screen.
+  if(pending.isEmpty&&quarantined==0)error=null;
   _notify();
  }
  Future<void> _updateIfPresent(Map<String,dynamic> row) async{
