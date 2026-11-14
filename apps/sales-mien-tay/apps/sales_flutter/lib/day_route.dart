@@ -42,7 +42,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
  String get candidateKey=>'day-route-candidates:${widget.routeId}';
  @override void initState(){
   super.initState();
-  route=widget.cachedRoute;
+  route=widget.cachedRoute==null?null:effectiveRouteDate(widget.cachedRoute!,widget.queue.pending,widget.queue.identity);
   previousPending=widget.queue.pending.length;
   widget.queue.addListener(_changed);
   unawaited(load());
@@ -75,7 +75,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
    }
    final cached=await widget.queue.cached(key);
    if(cached.isNotEmpty&&mounted)setState((){
-    route=Map<String,dynamic>.from(cached.first['route'] as Map);
+    route=effectiveRouteDate(Map<String,dynamic>.from(cached.first['route'] as Map),widget.queue.pending,widget.queue.identity);
     stops=(cached.first['stops'] as List).map((x)=>Map<String,dynamic>.from(x as Map)).toList();
     offline=true;
    });
@@ -84,7 +84,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
    final item=Map<String,dynamic>.from(res['item'] as Map);
    final list=(res['stops'] as List).map((x)=>Map<String,dynamic>.from(x as Map)).toList();
    await widget.queue.cache(key,[{'route':item,'stops':list}]);
-   if(mounted)setState((){route=item;stops=list;offline=false;});
+   if(mounted)setState((){route=effectiveRouteDate(item,widget.queue.pending,widget.queue.identity);stops=list;offline=false;});
    try{
     final r=decodeApi(await http.get(widget.service.uri('/api/v1/day-routes/${widget.routeId}/candidates'),
       headers:widget.service.headers).timeout(const Duration(seconds:20)));
