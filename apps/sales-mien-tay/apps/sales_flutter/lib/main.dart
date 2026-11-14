@@ -400,8 +400,13 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
         Expanded(child: Column(children: [
           if(_selectedIndex!=3&&_selectedIndex!=5&&_selectedIndex!=10&&_selectedIndex!=11&&_selectedIndex!=12)Padding(padding:const EdgeInsets.all(12),child:DropdownButtonFormField<String>(initialValue:_province,isExpanded:true,decoration:const InputDecoration(labelText:'Địa bàn'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả địa bàn của tôi')),for(final p in _catalog.provinces)DropdownMenuItem(value:p,child:Text(p))],onChanged:(p)=>setState(()=>_province=p??''))),
           _syncBanner(),
-          if (_message != null) Material(color: const Color(0xFFFBE8E7),
-            child: Padding(padding: const EdgeInsets.all(10), child: Text(_message!))),
+          // This is a records/overview cache warning, not a WorkHub sync
+          // failure. Never place pale-on-pale text over the Công tác screen.
+          if (_message != null && _selectedIndex==0)
+           Material(color:Theme.of(context).colorScheme.errorContainer,
+            child:Padding(padding:const EdgeInsets.all(10),
+             child:Text(_message!,style:TextStyle(
+              color:Theme.of(context).colorScheme.onErrorContainer)))),
           Expanded(child: _selectedIndex == 0 ? _overview() : _selectedIndex == 1
               ? CustomerDirectoryPage(key:ValueKey('customers:${_queue.namespace}:$_province'),service:CustomerService(_apiUrl,_accessToken,province:_province,identity:_queue.identity,revision:_queue.revision),regions:_catalog,queue:_queue)
               : _selectedIndex==2?SurveyPage(key:ValueKey('survey:$_province'),queue:_queue,service:_customerService,regions:_catalog,admin:widget.me['role']=='admin',legacy:(_)=>Scaffold(appBar:AppBar(title:const Text('Biểu mẫu khảo sát cũ')),body:_records('survey',readOnly:true)))
