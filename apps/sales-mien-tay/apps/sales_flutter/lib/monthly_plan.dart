@@ -543,7 +543,7 @@ class _MonthlyPlanEditorState extends State<MonthlyPlanEditor>{
    {for(final scope in scopes)scopeId(scope):available[scopeId(scope)]??<Map<String,dynamic>>[]}));
  }
  Future<void> pickDate()async{
-  final d=await showDatePicker(context:context,initialDate:date,firstDate:DateTime(widget.month.year,widget.month.month,1),lastDate:DateTime(2100));
+  final d=await showDatePicker(context:context,initialDate:date,firstDate:DateTime(widget.month.year,widget.month.month,1),lastDate:widget.original==null?DateTime(2100):monthEnd(widget.month));
   if(d!=null&&mounted)setState((){date=d;if(endDate.isBefore(date))endDate=date;});
  }
  @override Widget build(BuildContext context){

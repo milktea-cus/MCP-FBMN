@@ -44,7 +44,7 @@ BEGIN
  OR p_at IS NULL OR p_at>now()+interval '1 minute' OR p_at<now()-interval '30 days'
  THEN RAISE EXCEPTION 'TRIP_INVALID'; END IF;
  SELECT * INTO t FROM public.field_trips WHERE id=p_trip FOR UPDATE;
- IF NOT FOUND OR t.owner_sub<>p_actor OR t.closed_at IS NOT NULL OR
+ IF NOT FOUND OR t.owner_sub<>p_actor OR (t.closed_at IS NOT NULL AND p_at>t.closed_at) OR
  (p_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date NOT BETWEEN t.start_date AND t.end_date OR
  NOT public.sales_trip_customer_allowed(p_actor,t.id,p_customer)
  THEN RAISE EXCEPTION 'TRIP_SCOPE_REVOKED'; END IF;

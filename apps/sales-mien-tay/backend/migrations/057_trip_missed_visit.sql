@@ -31,12 +31,14 @@ BEGIN
   EXISTS(SELECT 1 FROM public.field_survey_sessions s WHERE s.day_route_stop_id=p_stop)
  THEN RAISE EXCEPTION 'conflict visited or already reported'; END IF;
  IF p_at>now()+interval '1 minute' OR p_at<now()-interval '30 days'
-  OR ((p_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date<>route.route_date
-    AND NOT EXISTS(SELECT 1 FROM public.field_trips t
-     WHERE t.day_route_id=p_route AND t.owner_sub=p_actor
-       AND (p_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN t.start_date AND t.end_date
-       AND (t.closed_at IS NULL OR p_at<=t.closed_at)
-       AND (prior.customer_id IS NULL OR public.sales_trip_customer_allowed(p_actor,t.id,prior.customer_id))))
+  OR NOT (
+  (NOT EXISTS(SELECT 1 FROM public.field_trips t WHERE t.day_route_id=p_route)
+    AND (p_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date=route.route_date)
+  OR EXISTS(SELECT 1 FROM public.field_trips t
+   WHERE t.day_route_id=p_route AND t.owner_sub=p_actor
+    AND (p_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN t.start_date AND t.end_date
+    AND (t.closed_at IS NULL OR p_at<=t.closed_at)
+    AND (prior.customer_id IS NULL OR public.sales_trip_customer_allowed(p_actor,t.id,prior.customer_id))))
  THEN RAISE EXCEPTION 'invalid missed stop time'; END IF;
  UPDATE public.field_route_stops SET missed_code=p_code,missed_note=coalesce(p_note,''),
   missed_at=p_at,missed_ref=p_ref,version=version+1,updated_at=now()

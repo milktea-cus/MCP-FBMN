@@ -142,6 +142,18 @@ class _DayRoutePageState extends State<DayRoutePage>{
    final res=decodeApi(await http.get(widget.service.uri('/api/v1/day-routes/${widget.routeId}'),
      headers:widget.service.headers).timeout(const Duration(seconds:20)));
    final item=Map<String,dynamic>.from(res['item'] as Map);
+   // When the route has reached the server but its dependent trip is still
+   // queued, do not hide the trip or reset its multi-day date window.
+   if(item['trip_id']==null&&widget.cachedRoute?['trip_id']!=null&&
+      widget.queue.pending.any((op)=>
+       op['path']=='/api/v1/trips'&&
+       op['namespace']==widget.queue.namespace&&
+       (op['payload'] as Map?)?['client_ref']==widget.cachedRoute!['trip_id'])){
+    for(final key in ['trip_id','trip_start_date','trip_end_date','trip_closed_at',
+      'trip_version','scopes','priority_customer_ids']){
+     item[key]=widget.cachedRoute![key];
+    }
+   }
    final list=(res['stops'] as List).map((x)=>Map<String,dynamic>.from(x as Map)).toList();
    try{await widget.queue.cache(key,[{'route':item,'stops':list}]);}catch(_){}
    if(mounted)setState((){route=effectiveRouteDate(item,widget.queue.pending,widget.queue.identity);stops=list;offline=false;});
@@ -206,7 +218,18 @@ class _DayRoutePageState extends State<DayRoutePage>{
     ((stop['visit_count'] as num?)?.toInt()??0)>0||
     ((stop['session_count'] as num?)?.toInt()??0)>0||
     stop['missed_code']!=null);
- String get workState=>route==null?'open':workSessionState(route!,widget.queue.pending);
+ String get workState{
+  if(route==null)return 'open';
+  final trip=route!['trip_id']?.toString();
+  if(trip!=null&&trip.isNotEmpty){
+   if(route!['trip_closed_at']!=null||
+      widget.queue.pending.any((op)=>
+       op['path']=='/api/v1/trips/${trip}/close'&&
+       op['namespace']==widget.queue.namespace))return 'done';
+   return 'ongoing';
+  }
+  return workSessionState(route!,widget.queue.pending);
+ }
  String get sessionId=>route==null?'':workSessionRouteId(route!,widget.queue.identity);
  bool get sessionActive=>workState=='ongoing';
  bool get canExecute=>canModify&&isTodayRoute&&(route?['trip_id']!=null||sessionActive);
@@ -770,10 +793,10 @@ class _DayRoutePageState extends State<DayRoutePage>{
    ]),
    body:ListView(padding:const EdgeInsets.all(12),children:[
     if(route!=null)...[
-     Text('${route!['trip_id']!=null?'${route!['trip_start_date']} – ${route!['trip_end_date']}':route!['route_date']?.toString().substring(0,10)} · ${route!['purpose']}',
+     Text('${route!['trip_id']!=null?'${route!['trip_start_date']?.toString().substring(0,10)} – ${route!['trip_end_date']?.toString().substring(0,10)}':route!['route_date']?.toString().substring(0,10)} · ${route!['purpose']}',
        style:Theme.of(context).textTheme.titleMedium),
      Text('${route!['scope_kind']=='chain'?'Chuỗi':route!['scope_kind']=='customer'?'Khách cụ thể':'Địa bàn'}: ${route!['scope_key']} · Đã ghé $count/${customerRows.length} khách · GPS thị trường ${route!['market_visit_count']??0}'),
-     Text('Phiên: ${switch(workState){'ongoing'=>'Đang đi','done'=>'Đã kết thúc','cancelled'=>'Đã hủy',_=>'Trong lịch'}}',
+     Text('${route!['trip_id']!=null?'Chuyến':'Phiên'}: ${route!['trip_id']!=null?(route!['trip_closed_at']!=null?'Đã kết thúc':isTodayRoute?'Đang công tác':'Xem lịch sử'):switch(workState){'ongoing'=>'Đang đi','done'=>'Đã kết thúc','cancelled'=>'Đã hủy',_=>'Trong lịch'}}',
       style:Theme.of(context).textTheme.bodyMedium),
      const SizedBox(height:8),
      Wrap(spacing:8,runSpacing:6,children:[

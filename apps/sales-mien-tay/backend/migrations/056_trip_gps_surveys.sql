@@ -30,12 +30,14 @@ BEGIN
   AND public.sales_monthly_plan_scope_allowed(p_actor,m.scope_kind,m.scope_key,m.province,m.district)
  FOR UPDATE OF r;
  IF NOT FOUND THEN RAISE EXCEPTION 'market visit permission denied'; END IF;
- IF (p_when AT TIME ZONE 'Asia/Ho_Chi_Minh')::date<>route.route_date AND
-  NOT EXISTS(SELECT 1 FROM public.field_trips t
-    WHERE t.day_route_id=p_route AND t.owner_sub=p_actor
-     AND (p_when AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN t.start_date AND t.end_date
-     AND (t.closed_at IS NULL OR p_when<=t.closed_at))
- THEN RAISE EXCEPTION 'invalid market visit date'; END IF;
+ IF NOT (
+  (NOT EXISTS(SELECT 1 FROM public.field_trips t WHERE t.day_route_id=p_route)
+   AND (p_when AT TIME ZONE 'Asia/Ho_Chi_Minh')::date=route.route_date)
+  OR EXISTS(SELECT 1 FROM public.field_trips t
+   WHERE t.day_route_id=p_route AND t.owner_sub=p_actor
+    AND (p_when AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN t.start_date AND t.end_date
+    AND (t.closed_at IS NULL OR p_when<=t.closed_at))
+ ) THEN RAISE EXCEPTION 'invalid market visit date'; END IF;
  SELECT * INTO prior FROM public.field_area_visits WHERE id=p_ref FOR UPDATE;
  IF prior.id IS NOT NULL THEN
   SELECT * INTO lead FROM public.field_prospects WHERE area_visit_id=p_ref;
