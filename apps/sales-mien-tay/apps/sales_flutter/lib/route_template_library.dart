@@ -20,7 +20,9 @@ bool routeTemplateMatchesRoute(Map<String,dynamic> template,
 class RouteTemplateLibraryPage extends StatefulWidget{
  final CustomerService service;
  final OfflineQueue queue;
- const RouteTemplateLibraryPage({super.key,required this.service,required this.queue});
+ final bool embedded;
+ const RouteTemplateLibraryPage({super.key,required this.service,required this.queue,
+  this.embedded=false});
  @override State<RouteTemplateLibraryPage> createState()=>_RouteTemplateLibraryPageState();
 }
 class _RouteTemplateLibraryPageState extends State<RouteTemplateLibraryPage>{
@@ -95,10 +97,13 @@ class _RouteTemplateLibraryPageState extends State<RouteTemplateLibraryPage>{
   finally{if(mounted)setState(()=>busy=false);}
  }
  @override Widget build(BuildContext context)=>Scaffold(
-  appBar:AppBar(title:const Text('Mẫu tuyến'),actions:[
+  appBar:widget.embedded?null:AppBar(title:const Text('Mẫu tuyến'),actions:[
    IconButton(onPressed:busy?null:load,tooltip:'Tải lại mẫu',icon:const Icon(Icons.sync)),
   ]),
   body:ListView(padding:const EdgeInsets.all(12),children:[
+   if(widget.embedded)Align(alignment:Alignment.centerRight,
+    child:TextButton.icon(onPressed:busy?null:load,
+     icon:const Icon(Icons.sync),label:const Text('Đồng bộ mẫu tuyến'))),
    const Text('Mẫu tuyến chỉ lưu khách ưu tiên và thứ tự; '
     'không sao chép GPS, khảo sát hay kết quả công tác.'),
    const SizedBox(height:8),

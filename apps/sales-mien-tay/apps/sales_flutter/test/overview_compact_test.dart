@@ -47,7 +47,8 @@ void main() {
     expect((table.rows.single.cells[1].child as Text).data,'5');
     expect((table.rows.single.cells[2].child as Text).data,'1');
     expect((table.rows.single.cells[3].child as Text).data,'1');
-    expect(find.textContaining('không cộng dồn lượt'),findsOneWidget);
+    expect(find.textContaining('không cộng dồn lượt'),findsNothing);
+    expect(find.byType(DropdownButtonFormField<String>),findsNothing);
     expect(find.textContaining('Đã đặt'),findsNothing);
   });
 }

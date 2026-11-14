@@ -13,7 +13,7 @@ import 'staff_page.dart';
 import 'offline_queue.dart';
 import 'notifications.dart';
 import 'work_hub.dart';
-import 'route_template_library.dart';
+import 'sales_settings_page.dart';
 import 'package:http/http.dart' as http;
 import 'performance.dart';
 import 'orders.dart';
@@ -377,12 +377,9 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
         onRefresh:(){unawaited(_queue.sync());_refresh();},
         onStaff:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>StaffPage(session:widget.session))),
         onProfile:_profile,
-        onRouteTemplates:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>
-          RouteTemplateLibraryPage(service:_customerService,queue:_queue))),
-        onSurveyTemplate:widget.me['role']=='admin'
-          ?()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>
-            SurveyTemplateAdmin(service:_customerService,regions:_catalog)))
-          :null,
+        onSettings:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>
+          SalesSettingsPage(service:_customerService,queue:_queue,
+           regions:_catalog,admin:widget.me['role']=='admin'))),
         onUpdate:kIsWeb
           ?()=>Navigator.push(context,MaterialPageRoute(
             builder:(_)=>const PwaUpdatePage()))
@@ -728,46 +725,12 @@ class _SalesBrandCoverageTableState extends State<SalesBrandCoverageTable>{
   }).toList();
   return Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(
    crossAxisAlignment:CrossAxisAlignment.start,children:[
-    Text('Nhãn hàng thị trường theo khách và khu vực',
-     style:Theme.of(context).textTheme.titleMedium),
-    const SizedBox(height:5),
-    const Text('Một khách có MGP hoặc Thành Đạt được tính 1 lần cho mỗi nhãn '
-      'trong khu vực. Khảo sát lại chỉ cập nhật ghi nhận, không cộng dồn lượt. '
-      'Dữ liệu từ phiên công tác, không từ SKU Futurebook.',
-      style:TextStyle(fontSize:12)),
-    const SizedBox(height:10),
-    Wrap(spacing:8,runSpacing:8,children:[
-     SizedBox(width:230,child:DropdownButtonFormField<String>(
-      key:ValueKey('market-brand:$brand'),initialValue:allNames.contains(brand)?brand:'',
-      isExpanded:true,decoration:const InputDecoration(labelText:'Nhãn hàng',isDense:true),
-      items:[const DropdownMenuItem(value:'',child:Text('Tất cả nhãn hàng')),
-       for(final name in allNames)DropdownMenuItem(value:name,
-        child:Text(name,overflow:TextOverflow.ellipsis))],
-      onChanged:(v)=>setState(()=>brand=v??''))),
-     SizedBox(width:230,child:DropdownButtonFormField<String>(
-      key:ValueKey('market-area:$activeArea'),initialValue:activeArea,
-      isExpanded:true,decoration:const InputDecoration(labelText:'Địa bàn',isDense:true),
-      items:[const DropdownMenuItem(value:'',child:Text('Tất cả huyện')),
-       for(final key in availableAreas)DropdownMenuItem(value:key,
-        child:Text('${key.split('||').last} · ${key.split('||').first}',
-         overflow:TextOverflow.ellipsis))],
-      onChanged:(v)=>setState(()=>area=v??''))),
-    ]),
-    const SizedBox(height:7),
-    Row(children:[
-     Expanded(child:TextField(controller:search,
-      decoration:const InputDecoration(prefixIcon:Icon(Icons.search),
-       isDense:true,labelText:'Tên khách / mã khách / nhãn hàng'),
-      onSubmitted:(_)=>findCustomers())),
-     const SizedBox(width:6),
-     FilledButton.icon(onPressed:searching||widget.service==null?null:()=>findCustomers(),
-      icon:const Icon(Icons.search),label:const Text('Tìm')),
-    ]),
+    Text('Nhãn hàng tại điểm bán',style:Theme.of(context).textTheme.titleMedium),
+    const SizedBox(height:8),
     if(!widget.verifiedData)const Padding(padding:EdgeInsets.all(8),
      child:Text('Chưa cập nhật được thống kê thị trường; đang dùng dữ liệu lưu trên máy.')),
     if(allNames.isEmpty)const Padding(padding:EdgeInsets.all(8),
-     child:Text('Chưa có nhãn hàng thị trường. Ghi MGP, Thành Đạt hoặc nhãn khác '
-      'tại phiên khảo sát khách; sau khi đồng bộ sẽ hiện ở đây.')),
+     child:Text('Chưa có dữ liệu nhãn hàng trong phạm vi đang xem.')),
     SingleChildScrollView(scrollDirection:Axis.horizontal,child:DataTable(
      columnSpacing:20,columns:[
       const DataColumn(label:Text('Tỉnh / Huyện')),
@@ -905,13 +868,13 @@ class SalesHomeDrawer extends StatelessWidget {
   final List<IconData> icons;
   final ValueChanged<int> onSection;
   final VoidCallback onRefresh,onStaff,onProfile;
-  final VoidCallback? onUpdate,onSurveyTemplate,onRouteTemplates;
+  final VoidCallback? onUpdate,onSettings;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
   const SalesHomeDrawer({super.key,required this.admin,required this.loading,
     required this.selectedIndex,required this.sections,required this.icons,
     required this.onSection,required this.onRefresh,required this.onStaff,required this.onProfile,
-    this.onUpdate,this.onSurveyTemplate,this.onRouteTemplates,
+    this.onUpdate,this.onSettings,
     this.themeMode = ThemeMode.light, this.onThemeModeChanged});
   @override Widget build(BuildContext context){
     void run(VoidCallback action){Navigator.of(context).pop();action();}
@@ -919,16 +882,11 @@ class SalesHomeDrawer extends StatelessWidget {
       selected:selectedIndex==i,onTap:()=>run(()=>onSection(i)));
     return Drawer(child:SafeArea(child:ListView(padding:EdgeInsets.zero,children:[
       const ListTile(title:Text('PHÂN HỆ SALES')),
-      if(onRouteTemplates!=null)ListTile(
-        key:const Key('route-templates-menu'),
-        leading:const Icon(Icons.bookmarks_outlined),
-        title:const Text('Cài đặt mẫu tuyến'),
-        onTap:()=>run(onRouteTemplates!)),
-      if(onSurveyTemplate!=null)ListTile(
-        key:const Key('survey-template-menu'),
+      if(onSettings!=null)ListTile(
+        key:const Key('settings-menu'),
         leading:const Icon(Icons.tune_outlined),
-        title:const Text('Cài đặt mẫu khảo sát · nhãn hàng'),
-        onTap:()=>run(onSurveyTemplate!)),
+        title:const Text('Thiết lập'),
+        onTap:()=>run(onSettings!)),
       if(admin)ListTile(leading:const Icon(Icons.manage_accounts_outlined),
         title:const Text('Quản lý nhân viên'),onTap:()=>run(onStaff)),
       ListTile(leading:const Icon(Icons.account_circle_outlined),
@@ -944,8 +902,6 @@ class SalesHomeDrawer extends StatelessWidget {
         value: themeMode == ThemeMode.dark,
         onChanged: (enabled) => onThemeModeChanged!(
           enabled ? ThemeMode.dark : ThemeMode.light)),
-      ListTile(leading:const Icon(Icons.sync),title:const Text('Tải lại dữ liệu'),
-        enabled:!loading,onTap:loading?null:()=>run(onRefresh)),
       const Divider(),
       for(final i in [10,11,12])section(i),
       const Divider(),

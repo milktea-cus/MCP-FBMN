@@ -145,8 +145,9 @@ class _SurveyPageState extends State<SurveyPage>{
  }
  Future<Map<String,dynamic>> template(String province)async{
   final items=await list('/api/v1/survey-templates',{'province':province},'survey-template:$province');
-  if(items.isEmpty)throw StateError('Chưa có mẫu khảo sát tỉnh này trên máy; cần đồng bộ hoặc Admin tạo mẫu.');
-  return items.first;
+  final selected=items.where((row)=>row['province']==province).firstOrNull;
+  if(selected==null)throw StateError('Chưa có mẫu khảo sát tỉnh này trên máy; cần đồng bộ hoặc Admin tạo mẫu.');
+  return selected;
  }
  bool canStart(Map<String,dynamic> row)=>row['owner_sub']==widget.queue.identity||row['planned']!=true&&row['can_fieldwork']==true;
  Future<void> begin(Map<String,dynamic> row)async{
@@ -519,13 +520,16 @@ List<String> supplySourceOptions(Iterable<FieldCustomer> customers){
 
 class SurveyTemplateAdmin extends StatefulWidget{
  final CustomerService service;final RegionCatalog regions;
- const SurveyTemplateAdmin({super.key,required this.service,required this.regions});
+ final bool embedded;
+ const SurveyTemplateAdmin({super.key,required this.service,required this.regions,
+  this.embedded=false});
  @override State<SurveyTemplateAdmin> createState()=>_SurveyTemplateAdminState();
 }
 class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
  String province='';int version=0;bool busy=false;String? message;
  List<Map<String,dynamic>> qs=[];
  List<String> officialBrands=[];
+ List<FieldCustomer> knownCustomers=[];
  List<String> supplierOptions=const ['Mua trực tiếp công ty','NPP khác (ghi chú tên)'];
  @override void initState(){super.initState();unawaited(loadBrands());unawaited(loadSuppliers());}
  Future<void> loadBrands()async{
@@ -540,12 +544,16 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
  Future<void> loadSuppliers()async{
   try{
    final list=await widget.service.list();
-   if(mounted)setState(()=>supplierOptions=supplySourceOptions(list));
+   if(mounted)setState((){
+    knownCustomers=list;
+    supplierOptions=supplySourceOptions(list.where((c)=>c.province==province));
+   });
   }catch(_){
    // Keep the manually editable published template when the customer list is offline.
   }
  }
  void applySupplierChoices(){
+  if(province.isEmpty||province=='*')return;
   final q=<String,dynamic>{
    'id':'supply_source',
    'label':'Nguồn hàng đang lấy (NPP / trực tiếp công ty)',
@@ -562,7 +570,7 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
   if(officialBrands.length<2)return;
   final q=<String,dynamic>{
    'id':'brands','label':'Nhãn hàng thị trường (ghi nhận thực tế)',
-   'type':'multi_choice','required':true,
+   'type':'multi_choice','required':false,
    'catalog_source':'brands','options':List<String>.of(officialBrands),
   };
   setState((){
@@ -572,8 +580,16 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
   });
  }
  Future<void> load(String p)async{
-  setState((){province=p;busy=true;message=null;qs=[];version=0;});
-  try{final data=await surveyGet(widget.service,'/api/v1/survey-templates',{'province':p});final items=asRows(data['items']);if(items.isNotEmpty&&mounted)setState((){version=(items.first['version'] as num).toInt();qs=asRows(items.first['questions']);});}
+  setState((){
+   province=p;busy=true;message=null;qs=[];version=0;
+   supplierOptions=supplySourceOptions(
+    knownCustomers.where((c)=>c.province==p));
+  });
+  try{final data=await surveyGet(widget.service,'/api/v1/survey-templates',{'province':p});final items=asRows(data['items']);final selected=items.where((v)=>v['province']==p).firstOrNull;
+   if(selected!=null&&mounted)setState((){
+    version=(selected['version'] as num).toInt();
+    qs=asRows(selected['questions']);
+   });}
   catch(e){if(mounted)setState(()=>message=e.toString());}
   finally{if(mounted)setState(()=>busy=false);}
  }
@@ -587,10 +603,22 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
   }catch(e){if(mounted)setState(()=>message=e.toString());}
   finally{if(mounted)setState(()=>busy=false);}
  }
- @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Mẫu khảo sát theo tỉnh')),body:ListView(padding:const EdgeInsets.all(16),children:[
-  DropdownButtonFormField<String>(initialValue:province.isEmpty?null:province,isExpanded:true,decoration:const InputDecoration(labelText:'Tỉnh/TP'),items:[for(final p in widget.regions.provinces)DropdownMenuItem(value:p,child:Text(p))],onChanged:busy?null:(p){if(p!=null)load(p);}),
+ @override Widget build(BuildContext context)=>Scaffold(
+ appBar:widget.embedded?null:AppBar(title:const Text('Mẫu làm việc với khách')),
+ body:ListView(padding:const EdgeInsets.all(16),children:[
+  const Text('Mẫu chung áp dụng ở mọi tỉnh. Mẫu theo tỉnh bổ sung câu hỏi và NPP địa phương; nội dung không lặp lại.',style:TextStyle(fontSize:12)),
+  const SizedBox(height:10),
+  DropdownButtonFormField<String>(initialValue:province.isEmpty?null:province,
+   isExpanded:true,decoration:const InputDecoration(labelText:'Phạm vi mẫu'),
+   items:[const DropdownMenuItem(value:'*',child:Text('Mẫu chung · tất cả tỉnh')),
+    for(final p in widget.regions.provinces)DropdownMenuItem(value:p,child:Text('Theo tỉnh · $p'))],
+   onChanged:busy?null:(p){if(p!=null)load(p);}),
   if(busy)const LinearProgressIndicator(),if(message!=null)Text(message!),
-  if(province.isNotEmpty)...[Text('Phiên bản hiện tại: $version · lưu sẽ tạo phiên bản mới'),const Text('Chọn nhiều cho NPP, nhãn hàng, SKU. Thêm lựa chọn Khác và câu văn bản tùy chọn để ghi tên ngoài danh mục.'),
+  if(province.isNotEmpty)...[
+   Text(province=='*'
+    ?'Mẫu chung · phiên bản $version · luôn đi kèm mẫu tỉnh'
+    :'Mẫu $province · phiên bản $version · dùng NPP của tỉnh này'),
+   const Text('Chọn nhiều cho NPP, nhãn hàng, SKU. Thêm lựa chọn Khác và câu văn bản tùy chọn để ghi tên ngoài danh mục.',style:TextStyle(fontSize:12)),
    for(final q in qs)Card(key:ValueKey(q['id']),child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
     TextFormField(key:ValueKey('${province}:$version:${q['id']}'),initialValue:q['label'].toString(),decoration:const InputDecoration(labelText:'Nội dung câu hỏi'),onChanged:(v)=>q['label']=v),
     const SizedBox(height:8),
@@ -612,7 +640,7 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
     OutlinedButton.icon(onPressed:busy||officialBrands.length<2?null:applyBrandCatalog,
      icon:const Icon(Icons.label_outline),
      label:const Text('Chọn nhãn thị trường đã gặp')),
-    OutlinedButton.icon(onPressed:busy?null:applySupplierChoices,
+    OutlinedButton.icon(onPressed:busy||province.isEmpty||province=='*'?null:applySupplierChoices,
      icon:const Icon(Icons.local_shipping_outlined),
      label:const Text('Nguồn hàng / NPP')),
     FilledButton(onPressed:busy?null:publish,child:const Text('Phát hành phiên bản')),

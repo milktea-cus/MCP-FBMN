@@ -118,8 +118,7 @@ void main(){
     await tester.pump(const Duration(milliseconds:350));
     expect(find.text('Quản lý nhân viên'),findsNothing);
     expect(find.text('Hồ sơ / Đăng xuất'),findsOneWidget);
-    final refresh=tester.widget<ListTile>(find.ancestor(of:find.text('Tải lại dữ liệu'),matching:find.byType(ListTile)));
-    expect(refresh.enabled,isFalse);
+    expect(find.text('Tải lại dữ liệu'),findsNothing);
     expect(find.text('Tra tồn').hitTestable(),findsOneWidget);
     await tester.tap(find.text('Tra tồn'));await tester.pump();await tester.pump(const Duration(milliseconds:350));
     expect(calls,['section:11']);

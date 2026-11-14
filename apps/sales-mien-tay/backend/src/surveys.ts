@@ -129,9 +129,14 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
  if(path==='/api/v1/survey-templates'){
   if(req.method==='GET'){
    const province=url.searchParams.get('province')??'';
-   if(province&&!areas[province])return bad('Tỉnh không hợp lệ');
+   if(province&&province!=='*'&&!areas[province])return bad('Tỉnh không hợp lệ');
    const rows=await db`SELECT DISTINCT ON (province) id,province,version,questions,created_at FROM field_survey_templates
-   WHERE (${!province} OR province=${province}) AND (${actor.admin} OR EXISTS(SELECT 1 FROM staff_scopes sc WHERE sc.user_sub=${actor.sub} AND sc.province=field_survey_templates.province))
+   WHERE (${!province} OR province=${province} OR (${province!=='*'} AND province='*'))
+    AND (${actor.admin}
+      OR (field_survey_templates.province='*' AND EXISTS(
+       SELECT 1 FROM staff_scopes sc WHERE sc.user_sub=${actor.sub}))
+      OR EXISTS(SELECT 1 FROM staff_scopes sc WHERE sc.user_sub=${actor.sub}
+       AND sc.province=field_survey_templates.province))
    ORDER BY province,version DESC`;
    return json({items:rows});
   }
@@ -139,7 +144,7 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   if(!actor.admin)return bad('Chỉ Admin thiết lập mẫu',403);
   let v:Body;try{v=await body(req);}catch{return bad('JSON không hợp lệ');}
   const province=String(v.province??''),qs=questions(v.questions);
-  if(!areas[province]||!qs||!isUuid(v.client_ref)||!Number.isInteger(v.expected_version)||Number(v.expected_version)<0)return bad('Mẫu, tỉnh hoặc phiên bản không hợp lệ');
+  if((province!=='*'&&!areas[province])||!qs||!isUuid(v.client_ref)||!Number.isInteger(v.expected_version)||Number(v.expected_version)<0)return bad('Mẫu, tỉnh hoặc phiên bản không hợp lệ');
   // A catalog-backed question snapshots official names in the published version;
   // unchecked free text and expired aliases must never enter a canonical survey.
   if(qs.some(q=>q.catalog_source==='brands')){

@@ -26,6 +26,48 @@ List<Map<String,dynamic>> pendingCustomerWork(OfflineQueue queue,String routeId)
     'sync_status':op['status'],'sync_error':op['error']},
 ];
 
+bool customerWorkDateAllowed(Map<String,dynamic> route,DateTime localToday){
+ final key='${localToday.year.toString().padLeft(4,'0')}-${localToday.month.toString().padLeft(2,'0')}-${localToday.day.toString().padLeft(2,'0')}';
+ if(route['trip_id']!=null){
+  final from=route['trip_start_date']?.toString().substring(0,10)??'',
+   to=route['trip_end_date']?.toString().substring(0,10)??'';
+  return route['trip_closed_at']==null&&
+   key.compareTo(from)>=0&&key.compareTo(to)<=0;
+ }
+ final d=DateTime.tryParse(route['route_date']?.toString()??'');
+ return d!=null&&d.year==localToday.year&&d.month==localToday.month&&d.day==localToday.day;
+}
+
+/// Shared questions are offered everywhere; territory questions are layered
+/// on top using the actual customer's province, not the trip's primary area.
+/// A provincial override replaces a duplicate shared ID, never renders twice.
+Map<String,dynamic>? mergeCustomerVisitTemplates(
+  Iterable<Map<String,dynamic>> templates,String province){
+ Map<String,dynamic>? latest(String p){
+  final candidates=templates.where((t)=>t['province']==p).toList()
+   ..sort((a,b)=>((b['version'] as num?)?.toInt()??0)
+        .compareTo((a['version'] as num?)?.toInt()??0));
+  return candidates.isEmpty?null:candidates.first;
+ }
+ final common=latest('*'),specific=latest(province);
+ if(common==null&&specific==null)return null;
+ final localQuestions=((specific?['questions'] as List?)??[])
+   .map((q)=>Map<String,dynamic>.from(q as Map)).toList();
+ final localIds=localQuestions.map((q)=>q['id']?.toString()).toSet();
+ final commonQuestions=((common?['questions'] as List?)??[])
+   .map((q)=>Map<String,dynamic>.from(q as Map))
+   .where((q)=>!localIds.contains(q['id']?.toString()))
+   .map((q)=>{...q,'template_scope':'common'}).toList();
+ return {
+  ...?specific,...?((specific==null)?common:null),
+  'questions':[...commonQuestions,
+   for(final q in localQuestions){...q,'template_scope':'province'}],
+  'common_version':common?['version'],
+  'province_version':specific?['version'],
+  'template_province':province,
+ };
+}
+
 class CustomerWorkPage extends StatefulWidget{
  final CustomerService service;
  final OfflineQueue queue;
@@ -55,9 +97,7 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
    ((template?['questions'] as List?)??[])
     .map((q)=>Map<String,dynamic>.from(q as Map)).toList();
  bool get isToday{
-  final d=DateTime.tryParse(widget.route['route_date']?.toString()??'');
-  final today=DateTime.now().toUtc().add(const Duration(hours:7));
-  return d!=null&&d.year==today.year&&d.month==today.month&&d.day==today.day;
+  return customerWorkDateAllowed(widget.route,DateTime.now().toUtc().add(const Duration(hours:7)));
  }
  bool get writable=>widget.editable&&isToday&&!denied;
  String get province=>profile?['province']?.toString()??
@@ -106,24 +146,28 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
     inform('Hồ sơ đang dùng dữ liệu trên máy; chưa cập nhật từ máy chủ.');
    }
    final area=province;
-   if(area.isNotEmpty){
-    final key='survey-template:$area';
-    var saved=await cache(key);
-    if(saved.isNotEmpty&&mounted)setState(()=>template=saved.first);
-    try{
-     final res=decodeApi(await http.get(widget.service.uri(
-      '/api/v1/survey-templates',{'province':area}),
-      headers:widget.service.headers).timeout(const Duration(seconds:15)));
-     final items=((res['items'] as List?)??[])
-      .map((v)=>Map<String,dynamic>.from(v as Map)).toList();
-     if(items.isNotEmpty){
-      if(mounted)setState(()=>template=items.first);
-      try{await widget.queue.cache(key,items);}catch(_){}
+   final provinceKey='survey-template:$area',commonKey='survey-template:*';
+   final provinceSaved=area.isEmpty?<Map<String,dynamic>>[]:await cache(provinceKey);
+   final commonSaved=await cache(commonKey);
+   if(mounted)setState(()=>
+    template=mergeCustomerVisitTemplates([...provinceSaved,...commonSaved],area));
+   try{
+    final res=decodeApi(await http.get(widget.service.uri(
+     '/api/v1/survey-templates',{'province':area.isEmpty?'*':area}),
+     headers:widget.service.headers).timeout(const Duration(seconds:15)));
+    final items=((res['items'] as List?)??[])
+     .map((v)=>Map<String,dynamic>.from(v as Map)).toList();
+    if(items.isNotEmpty){
+     if(mounted)setState(()=>template=mergeCustomerVisitTemplates(items,area));
+     for(final row in items){
+      try{
+       await widget.queue.cache('survey-template:${row['province']}',[row]);
+      }catch(_){}
      }
-    }catch(e){
-     if(e is ApiFailure&&(e.status==401||e.status==403)){
-      if(mounted)setState(()=>denied=true);
-     }
+    }
+   }catch(e){
+    if(e is ApiFailure&&(e.status==401||e.status==403)){
+     if(mounted)setState(()=>denied=true);
     }
    }
    try{
@@ -368,10 +412,12 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
       :'Chưa ghi nhận hoạt động',
       style:Theme.of(context).textTheme.titleSmall),
     const SizedBox(height:10),
-    if(template==null)const Text('Địa bàn chưa có mẫu hạng mục ghé khách. '
-     'Admin cấu hình trong menu · Mẫu khảo sát; hiện có thể ghi chú/GPS/ảnh/đơn.'),
+    if(template==null)const Text('Chưa tải được mẫu hạng mục ghé khách. '
+     'Admin cấu hình tại Thiết lập · Mẫu làm việc; có thể ghi chú/GPS/ảnh/đơn.'),
     if(template!=null)...[
-     Text('Hạng mục theo cấu hình · mẫu v${template!['version']}',
+     Text('Mẫu chung v${template!['common_version']??'—'}'
+      ' · tỉnh ${province.isEmpty?'—':province}'
+      ' v${template!['province_version']??'—'}',
       style:Theme.of(context).textTheme.titleMedium),
      const SizedBox(height:8),
      for(final q in fields)...[
