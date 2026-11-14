@@ -177,7 +177,15 @@ class _SurveyPageState extends State<SurveyPage>{
    final accuracy=verified==null?pos!.accuracy:(verified['accuracy_m'] as num).toDouble();
    final payload=<String,dynamic>{'client_ref':id,'customer_id':row['customer_id'],'route_stop_id':row['planned']==true&&row['day_route_stop_id']==null?row['id']:null,'day_route_stop_id':row['day_route_stop_id'],'template_id':t['id'],'started_at':started,'latitude':latitude,'longitude':longitude,'accuracy_m':accuracy,if(first)'initialize_location':true,if(verified!=null)'visit_ref':verified['client_ref']};
    final draft=<String,dynamic>{...payload,'id':id,'owner_sub':widget.queue.identity,'province':row['province'],'district':row['district'],'customer_name':row['name'],'template_version':t['version'],'questions':t['questions'],'status':'in_progress','location_initialized':first,'start_op':id,'version':1,'answers':<String,dynamic>{},'note':'','photos':<Map<String,dynamic>>[]};
-   await widget.queue.saveSurveyDraft(draft,path:'/api/v1/sessions',payload:payload);
+   final sessionDeps=<String>[
+    for(final job in widget.queue.pending)
+     if(widget.initialStop?['day_route_id']!=null&&
+        job['path']=='/api/v1/day-routes/${widget.initialStop!['day_route_id']}/work-session'&&
+        (job['payload'] as Map?)?['client_ref']!=null)
+      (job['payload'] as Map)['client_ref'].toString(),
+   ];
+   await widget.queue.saveSurveyDraft(draft,path:'/api/v1/sessions',
+    payload:payload,dependsOn:sessionDeps);
    if(mounted)await open(draft);
   }catch(e){notify('Không bắt đầu được: $e');}
   finally{if(mounted){setState(()=>busy=false);await load();}}
