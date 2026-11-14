@@ -24,3 +24,13 @@
 ## Không làm
 
 Không `DELETE FROM` dữ liệu khách, tuyến, lượt ghé, phiên khảo sát hoặc audit; không reset IndexedDB, không đụng Cloudflare secrets/R2, không tạo app/repo khác. Lịch đã xóa chỉ được ẩn khỏi kế hoạch đang hoạt động, lịch sử còn tra cứu được.
+
+## Kết quả triển khai và kiểm thử (14/11/2026)
+
+- **Frontend Vercel production READY:** `dpl_96NRJYUJjixzUkQQjrfmkMHH8GX1`, mã nguồn `29de31387177e1e02f2a2d23892e391de771a576`, alias chính thức `https://sales-mien-tay.vercel.app` đã xác nhận qua Vercel API.
+- **Build:** backend `tsc --noEmit` PASS, Flutter analyze `--no-fatal-infos` PASS (lint info không chặn build), **200/200 Flutter tests PASS**, Flutter Web release PASS và offline PWA shell 42 assets PASS, không cache API.
+- **Cloudflare Worker:** deployment `fbb7933a-0bc3-4fc6-9b4b-38fbc535f5f3` đạt **100%**, bundle có hàm xóa lịch và `plan_status` để loại tuyến của lịch đã xóa khỏi Công tác; 7 bindings/secrets cũ còn nguyên.
+- **Neon:** migration 046 đã chạy; `sales_archive_monthly_plan` cho `sales_api` EXECUTE và PUBLIC không được phép. **Chưa xóa thử dữ liệu production của Owner:** lúc xác nhận có 1 lịch hoạt động, 0 lịch đã xóa; bản ghi khách/lượt ghé/khảo sát không bị đụng đến.
+- **Kiểm thử mới:** chạm nút rác và xác nhận API ở 320/360/390px, vào mục Đã xóa, không DELETE khi chọn Giữ lịch, 409 stale giữ dữ liệu, dọn graph tuyến chờ không kèm thực địa và giữ nguyên bản nháp/việc đã ghi GPS.
+
+**Giới hạn:** CI GitHub Actions quota vẫn không có chứng cứ xanh; thay thế bằng build/typecheck/test trực tiếp trên Vercel. Chưa thử nghiệm có đăng nhập trên iPhone thực tế của Owner và chưa thể xem một row IndexedDB của máy. Code/deploy READY **không đồng nghĩa** hàng đợi cụ thể trên iPhone đã giảm về 0. Không xóa Safari site data/gỡ app để xử lý.
