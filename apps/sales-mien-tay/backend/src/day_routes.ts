@@ -188,6 +188,12 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
        saved.purpose===String(v.purpose).trim()&&
        saved.note===String(v.note??'')&&
        saved.status===String(v.status??'ready')){
+     // Older PWAs do not understand canonical-ID remapping and must not
+     // silently acknowledge a different UUID while leaving orphaned stops.
+     if(req.headers.get('X-Sync-Protocol')!=='2'&&
+        String(saved.id)!==String(v.client_ref)){
+      return fail('Tuyến đã lưu; cần phiên bản ứng dụng mới để nối điểm ghé an toàn',409);
+     }
      return reply({item:saved,already_saved:true},200);
     }
     return fail('Kế hoạch này đã có tuyến khác nội dung; mở tuyến hiện tại để sửa',409);
@@ -238,7 +244,12 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
       AND public.sales_monthly_plan_scope_allowed(
         ${actor.sub},p.scope_kind,p.scope_key,p.province,p.district)
     LIMIT 1`;
-   if(duplicate.length)return reply({item:duplicate[0],already_saved:true},200);
+   if(duplicate.length){
+    if(req.headers.get('X-Sync-Protocol')!=='2'&&
+       String(duplicate[0].id)!==String(v.client_ref))
+     return fail('Điểm ghé đã lưu; cần phiên bản ứng dụng mới để đồng bộ an toàn',409);
+    return reply({item:duplicate[0],already_saved:true},200);
+   }
   }
   if(routeAlreadyStarted)
    return fail('Tuyến đã thực hiện; chỉ được bổ sung điểm phát sinh',409);
