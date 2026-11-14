@@ -304,21 +304,26 @@ class OfflineQueue extends ChangeNotifier {
   if(path=='/api/v1/day-routes'){
    final date=payload['route_date']?.toString()??'';
    if(!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(date))return false;
-   // After an authorized Xóa lịch, a stale 409 create-route on an old
-   // iPhone must not remain blocked forever. Confirm that the *same* plan
-   // is archived on the server before dropping only its unstarted draft graph.
-   final listing=await _readRoute('/api/v1/monthly-plans?month='+date.substring(0,7));
-   for(final raw in listing['items'] as List? ?? []){
-    if(raw is Map&&raw['id']==payload['monthly_plan_id']&&
-       raw['owner_sub']==identity&&raw['status']=='cancelled'){
-     return (await discardPendingForArchivedPlan(
-       payload['monthly_plan_id'].toString(),internal:true))>0;
-    }
-   }
    final remote=await _readRoute('/api/v1/day-routes?month='+date.substring(0,7));
-   for(final raw in remote['items'] as List? ?? []){
+   final routes=remote['items'] as List? ?? [];
+   for(final raw in routes){
     if(raw is Map&&sameSavedRoute(raw,payload,identity)){
      return _ackMatchedRouteRow(row,raw,isStop:false);
+    }
+   }
+   // Only a route already cancelled by the server needs a second read of
+   // the monthly plan to verify that Xóa lịch was explicitly confirmed.
+   // Other 409 cases remain blocked rather than blindly reposting.
+   if(row['status']=='blocked'&&routes.any((raw)=>raw is Map&&
+     raw['monthly_plan_id']==payload['monthly_plan_id']&&
+     raw['owner_sub']==identity&&raw['status']=='cancelled')){
+    final plans=await _readRoute('/api/v1/monthly-plans?month='+date.substring(0,7));
+    for(final raw in plans['items'] as List? ?? []){
+     if(raw is Map&&raw['id']==payload['monthly_plan_id']&&
+        raw['owner_sub']==identity&&raw['status']=='cancelled'){
+      return (await discardPendingForArchivedPlan(
+       payload['monthly_plan_id'].toString(),internal:true))>0;
+     }
     }
    }
    return false;
