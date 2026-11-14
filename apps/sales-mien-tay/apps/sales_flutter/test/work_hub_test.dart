@@ -40,6 +40,16 @@ void main(){
   expect(result.withoutReason,0);
   expect(result.leads,0);
  });
+ test('empty market route records GPS without invented customer visits',(){
+  final actual=WorkCounts.fromRoutes([{
+   'stop_count':0,'visited_count':0,'market_visit_count':2,'lead_count':1
+  }]);
+  expect(actual.planned,0);
+  expect(actual.visited,0);
+  expect(actual.marketVisits,2);
+  expect(actual.leads,1);
+  expect(actual.notVisited,0);
+ });
  test('missed reasons stay distinct from GPS and planned status',(){
   expect(missedReasonLabel('closed'),'Khách đóng cửa');
   expect(missedReasonLabel('unavailable'),'Không gặp được khách');
