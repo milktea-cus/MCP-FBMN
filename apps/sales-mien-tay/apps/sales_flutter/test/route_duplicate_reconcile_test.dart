@@ -245,4 +245,83 @@ void main(){
   q.dispose();net.close();
  });
 
+ test('archived unstarted route clears orphan blocked stop after GET only',()async{
+  final factory=newIdbFactoryMemory();
+  var gets=0,writes=0;
+  final client=MockClient((req)async{
+   if(req.method!='GET'){writes++;return send({'error':'unexpected write'},500);}
+   gets++;
+   return send({'item':{'owner_sub':owner,'id':serverRoute,
+    'status':'cancelled','plan_status':'cancelled'},'stops':[]},200);
+  });
+  final q=OfflineQueue(Authorized(),owner,'8',factory:factory,networkClient:client);
+  final path='/api/v1/day-routes/'+serverRoute+'/stops';
+  await q.enqueue(path,{
+   'client_ref':stop,'stop_kind':'area','province':'Bến Tre',
+   'district':'Huyện Bình Đại','sequence':2,'purpose':'Tìm điểm bán mới'});
+  final d=await q.db,t=d.transaction('outbox',idbModeReadWrite);
+  await t.objectStore('outbox').put({...q.pending.single,
+   'status':'blocked','error':'Tuyến hoặc điểm ghé bị trùng'});
+  await t.completed;await q.reload();
+  await q.reconcileBlockedRoutes();
+  expect(gets,1);expect(writes,0);expect(q.pending,isEmpty);
+  q.dispose();client.close();
+ });
+
+ test('archived unstarted route preserves blocked stop with offline survey evidence',()async{
+  final factory=newIdbFactoryMemory();
+  final client=MockClient((req)async=>send({
+   'item':{'owner_sub':owner,'id':serverRoute,
+    'status':'cancelled','plan_status':'cancelled'},'stops':[]},200));
+  final q=OfflineQueue(Authorized(),owner,'8',factory:factory,networkClient:client);
+  final path='/api/v1/day-routes/'+serverRoute+'/stops';
+  await q.enqueue(path,{
+   'client_ref':stop,'stop_kind':'area','province':'Bến Tre',
+   'district':'Huyện Bình Đại','sequence':2,'purpose':'Tìm điểm bán mới'});
+  await q.saveSurveyDraft({
+   'id':'88888888-8888-4888-8888-888888888888',
+   'day_route_stop_id':stop,'answers':{'notes':'Not sent yet'},
+  });
+  final d=await q.db,t=d.transaction('outbox',idbModeReadWrite);
+  await t.objectStore('outbox').put({...q.pending.single,
+   'status':'blocked','error':'HTTP 409'});
+  await t.completed;await q.reload();
+  await q.reconcileBlockedRoutes();
+  expect(q.pending.length,1);
+  expect((await q.cached('survey-drafts')).single['day_route_stop_id'],stop);
+  q.dispose();client.close();
+ });
+
+ test('200 already_saved remaps route reference rather than POSTing stale child ID',()async{
+  final factory=newIdbFactoryMemory();
+  var routePosts=0;
+  final stopPaths=<String>[];
+  final client=MockClient((req)async{
+   if(req.method!='POST')return send({'error':'unexpected read'},500);
+   if(req.url.path=='/api/v1/day-routes'){
+    routePosts++;
+    return send({'item':existingRoute(),'already_saved':true},200);
+   }
+   if(req.url.path.endsWith('/stops')){
+    stopPaths.add(req.url.path);
+    return send({'item':{'id':stop}},201);
+   }
+   return send({'error':'Unknown'},404);
+  });
+  final q=OfflineQueue(Authorized(),owner,'8',factory:factory,networkClient:client);
+  await q.enqueue('/api/v1/day-routes',draftRoute);
+  await q.enqueue('/api/v1/day-routes/'+oldRoute+'/stops',{
+   'client_ref':stop,'stop_kind':'area','province':'Bến Tre',
+   'district':'Huyện Bình Đại','sequence':1,'purpose':'Tìm điểm bán mới'
+  },dependsOn:[oldRoute]);
+  await q.sync();
+  for(var i=0;i<20&&q.pending.isNotEmpty;i++){
+   await Future<void>.delayed(const Duration(milliseconds:10));
+  }
+  expect(routePosts,1);
+  expect(stopPaths,['/api/v1/day-routes/'+serverRoute+'/stops']);
+  expect(q.pending,isEmpty);
+  q.dispose();client.close();
+ });
+
 }
