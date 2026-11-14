@@ -7,6 +7,8 @@ export FLUTTER_SUPPRESS_ANALYTICS=true
 # Build does not deploy Worker or alter production secrets/bindings.
 npm --prefix ../../backend install --ignore-scripts --no-audit --no-fund --no-package-lock
 npm --prefix ../../backend run typecheck
+# Block deployment if the work schedule audit values and CHECK constraint drift.
+node ../../backend/scripts/check_work_audit_contract.mjs
 sdk="/tmp/sales-flutter-sdk"
 git clone --depth 1 --branch 3.47.9 https://github.com/flutter/flutter.git "$sdk"
 export PATH="$sdk/bin:$PATH"
