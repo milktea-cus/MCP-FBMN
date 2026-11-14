@@ -8,6 +8,26 @@ const owner='sales-account-1';
 const route='af63dbf2-ff5d-4279-95be-6a46646c2e94';
 
 void main(){
+ test('rescheduled local route is visible on new day without rewriting server snapshot',(){
+  final remote=<String,dynamic>{'id':route,'monthly_plan_id':
+   '11111111-1111-4111-8111-111111111111','owner_sub':owner,
+   'route_date':'2026-11-01','work_session_state':'open'};
+  final queued=<String,dynamic>{
+   'path':'/api/v1/day-routes/$route','method':'PATCH','status':'pending',
+   'payload':{
+    'client_ref':'22222222-2222-4222-8222-222222222222',
+    'monthly_plan_id':remote['monthly_plan_id'],
+    'route_date':'2026-11-14','version':1,
+   },
+  };
+  final mapped=effectiveRouteDate(remote,[queued],owner);
+  expect(mapped['route_date'],'2026-11-14');
+  expect(mapped['pending_route_date'],true);
+  expect(remote['route_date'],'2026-11-01');
+  expect(effectiveRouteDate(remote,[queued],'another-user')['route_date'],'2026-11-01');
+  expect(effectiveRouteDate(remote,[{...queued,'status':'blocked'}],owner)['route_date'],'2026-11-01');
+ });
+
  test('route session start/close survive reopening durable offline queue',()async{
   final f=newIdbFactoryMemory(),id=workSessionId(owner,route);
   final queue=OfflineQueue(SalesSession(),owner,'1',factory:f);
