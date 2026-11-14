@@ -34,3 +34,12 @@
 - **Kiểm thử:** `test/sync_banner_test.dart` kiểm tra màn 320, 360, 390 px, giả lập queue `syncing=true` >2 phút, nhấn nút **Chi tiết** và nhấn dải trạng thái đều mở **hộp thoại thực** chứa tên thao tác, số lượng, nút thử lại.
 - **PWA cập nhật:** `scripts/build_offline_shell.py` yêu cầu cập nhật service worker và ưu tiên lấy code Flutter/bootstrap từ mạng khi có kết nối, fallback cache khi offline. `vercel.json` vô hiệu hóa CDN/browser stale caching riêng cho index, main.dart.js, flutter_bootstrap.js và worker script. Không xóa bất kỳ IndexedDB, session hoặc file ảnh nào.
 - **Nghiệm thu còn mở:** Chưa đọc được tác vụ offline cục bộ của iPhone từ server; sau khi bản web production được xác nhận, Owner cần mở lại PWA để thấy nút **Chi tiết**. Nếu vẫn không thao tác, cần kiểm tra có phải cả Flutter runtime bị treo hoặc PWA vẫn dùng code cũ; tuyệt đối không khuyến nghị gỡ app/xóa dữ liệu Safari.
+
+
+## Nghiệm thu kỹ thuật bản sửa nút phản hồi (14/11/2026)
+
+- **Source main:** commit `53c337b086fc16cdb2002a8ecbde8d15560382a8`; các file UI `lib/main.dart`, unit/widget test `test/sync_banner_test.dart`, PWA shell `scripts/build_offline_shell.py`, `vercel.json`.
+- **Lỗi gốc tái hiện được:** nút tròn `Icons.sync` của banner tự đặt `onPressed=null` khi `OfflineQueue.syncing=true`; iPhone bấm đúng biểu tượng nhưng không mở chi tiết và không thấy phản hồi. Bản mới có `OutlinedButton.icon('Chi tiết')` độc lập tình trạng mạng, đồng thời cả dải `InkWell` cũng mở cùng một hộp `showSyncQueueDetails`.
+- **Kiểm thử tương tác thật:** 3 test tại **320/360/390px** với `syncing=true`, lượt đồng bộ >2 phút, bấm `Chi tiết`, thấy `Hàng đợi đồng bộ trên máy`, số tác vụ và loại nghiệp vụ, bấm `Đóng`, bấm toàn bộ dải để mở lại. Test không bắt đầu POST thứ hai.
+- **Vercel production:** `dpl_2rMmYLaa6Y9WwMM7spms5wpL9ex9` READY, target production, production alias `https://sales-mien-tay.vercel.app`; source SHA `53c337b` đúng build. Backend TypeScript typecheck PASS; Flutter analyze --no-fatal-infos PASS (chỉ còn lint info); **186/186 Flutter test PASS**, Flutter Web release PASS, offline shell 42 assets, API không được cache.
+- **Giới hạn nghiệm thu:** chưa kiểm tra HTTP end-to-end đăng nhập trên iPhone của Owner và chưa xem được 1 outbox row trong IndexedDB của máy. Bản sửa **không tự động xóa row chờ** và không thể khẳng định thao tác cụ thể đã đồng bộ xong. Cần Owner mở lại PWA; có thể phải đóng/mở lần nữa để worker mới nhận quyền; không gỡ app, không xóa cache/site data.
