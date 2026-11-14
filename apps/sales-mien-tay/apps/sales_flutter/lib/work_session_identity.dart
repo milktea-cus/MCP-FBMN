@@ -38,7 +38,7 @@ Map<String,dynamic> effectiveRouteDate(Map<String,dynamic> route,
   final payload=job['payload'];
   if(payload is! Map||payload['monthly_plan_id']!=route['monthly_plan_id'])continue;
   final day=payload['route_date']?.toString()??'';
-  if(!RegExp(r'^\\d{4}-\\d{2}-\\d{2}$').hasMatch(day))continue;
+  if(!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(day))continue;
   return {...route,'route_date':day,'pending_route_date':true};
  }
  return route;
