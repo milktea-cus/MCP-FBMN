@@ -380,6 +380,8 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
         onSettings:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>
           SalesSettingsPage(service:_customerService,queue:_queue,
            regions:_catalog,admin:widget.me['role']=='admin'))),
+        onSyncIssues:_queue.blockedCount>0
+          ?()=>showSyncQueueDetails(context,_queue):null,
         onUpdate:kIsWeb
           ?()=>Navigator.push(context,MaterialPageRoute(
             builder:(_)=>const PwaUpdatePage()))
@@ -491,6 +493,15 @@ void showSyncQueueDetails(BuildContext context,OfflineQueue queue)=>showDialog<v
         style:TextStyle(fontSize:12)),
       ])))),
     actions:[
+     if(queue.blockedCount>0&&queue.readyCount==0)TextButton.icon(
+      key:const ValueKey('sync-dismiss-banner'),
+      onPressed:()async{
+       await queue.dismissBlockedBanner();
+       if(dialogContext.mounted)Navigator.pop(dialogContext);
+      },
+      icon:const Icon(Icons.visibility_off_outlined),
+      label:const Text('Ẩn cảnh báo'),
+     ),
      TextButton(onPressed:()=>Navigator.pop(dialogContext),child:const Text('Đóng')),
      FilledButton.icon(onPressed:(){
        if(queue.syncing||queue.reconciling){
@@ -514,7 +525,8 @@ class SyncQueueBanner extends StatelessWidget{
  @override Widget build(BuildContext context)=>AnimatedBuilder(
   animation:queue,
   builder:(context,_){
-   if(queue.pending.isEmpty&&queue.quarantined==0&&queue.error==null){
+   if(queue.blockedBannerDismissed||
+      queue.pending.isEmpty&&queue.quarantined==0&&queue.error==null){
     return const SizedBox.shrink();
    }
    final blocked=queue.blockedCount;
@@ -540,7 +552,9 @@ class SyncQueueBanner extends StatelessWidget{
          color:colors.onPrimaryContainer,size:24),
         const SizedBox(width:10),
         Expanded(child:Text(
-         'Chờ đồng bộ: ${queue.pending.length} · Cách ly: ${queue.quarantined}',
+         blocked>0&&queue.readyCount==0
+         ?'Cần đối chiếu: $blocked thao tác · đã giữ trên máy'
+         :'Chờ đồng bộ: ${queue.pending.length} · Cách ly: ${queue.quarantined}',
          maxLines:2,style:TextStyle(color:colors.onPrimaryContainer,
           fontWeight:FontWeight.w600))),
         const SizedBox(width:6),
@@ -868,13 +882,13 @@ class SalesHomeDrawer extends StatelessWidget {
   final List<IconData> icons;
   final ValueChanged<int> onSection;
   final VoidCallback onRefresh,onStaff,onProfile;
-  final VoidCallback? onUpdate,onSettings;
+  final VoidCallback? onUpdate,onSettings,onSyncIssues;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
   const SalesHomeDrawer({super.key,required this.admin,required this.loading,
     required this.selectedIndex,required this.sections,required this.icons,
     required this.onSection,required this.onRefresh,required this.onStaff,required this.onProfile,
-    this.onUpdate,this.onSettings,
+    this.onUpdate,this.onSettings,this.onSyncIssues,
     this.themeMode = ThemeMode.light, this.onThemeModeChanged});
   @override Widget build(BuildContext context){
     void run(VoidCallback action){Navigator.of(context).pop();action();}
@@ -887,6 +901,11 @@ class SalesHomeDrawer extends StatelessWidget {
         leading:const Icon(Icons.tune_outlined),
         title:const Text('Thiết lập'),
         onTap:()=>run(onSettings!)),
+      if(onSyncIssues!=null)ListTile(
+        key:const ValueKey('sync-issues-menu'),
+        leading:const Icon(Icons.sync_problem_outlined),
+        title:const Text('Lỗi đồng bộ đã lưu'),
+        onTap:()=>run(onSyncIssues!)),
       if(admin)ListTile(leading:const Icon(Icons.manage_accounts_outlined),
         title:const Text('Quản lý nhân viên'),onTap:()=>run(onStaff)),
       ListTile(leading:const Icon(Icons.account_circle_outlined),

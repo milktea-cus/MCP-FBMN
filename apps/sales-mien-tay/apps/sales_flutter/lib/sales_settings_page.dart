@@ -15,13 +15,13 @@ class SalesSettingsPage extends StatelessWidget {
   required this.regions,required this.admin});
  @override
  Widget build(BuildContext context)=>DefaultTabController(
-  length:admin?2:1,
+  length:admin?2:1,initialIndex:admin?1:0,
   child:Scaffold(
    appBar:AppBar(
     title:const Text('Thiết lập'),
     bottom:TabBar(isScrollable:false,tabs:[
-     const Tab(icon:Icon(Icons.bookmark_outline),text:'Mẫu tuyến'),
-     if(admin)const Tab(icon:Icon(Icons.fact_check_outlined),text:'Mẫu làm việc'),
+     const Tab(icon:Icon(Icons.bookmark_outline),text:'Mẫu lịch trình'),
+     if(admin)const Tab(icon:Icon(Icons.fact_check_outlined),text:'Câu hỏi gặp khách'),
     ]),
    ),
    body:TabBarView(children:[

@@ -1,10 +1,42 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:idb_shim/idb_shim.dart';
 import 'package:sales_mien_tay/main.dart';
 import 'package:sales_mien_tay/offline_queue.dart';
 import 'package:sales_mien_tay/session.dart';
 
 void main(){
+ testWidgets('4xx cố định có thể ẩn banner nhưng dữ liệu không bị xóa',(tester)async{
+  final queue=OfflineQueue(SalesSession(),'account','revision',
+   factory:newIdbFactoryMemory());
+  queue.pending=[{
+   'key':'account:revision:old1','namespace':'account:revision',
+   'path':'/api/v1/day-routes/11111111-1111-4111-8111-111111111111/customer-work',
+   'status':'blocked','error':'HTTP 400: Checklist có câu hỏi không thuộc mẫu',
+   'created':DateTime.now().millisecondsSinceEpoch,
+   'payload':{'client_ref':'old1','answers':{'old_question':'test'}},
+  }];
+  await tester.pumpWidget(MaterialApp(home:Scaffold(body:SyncQueueBanner(
+   queue:queue,onDetails:(){},
+  ))));
+  expect(find.textContaining('Cần đối chiếu'),findsOneWidget);
+  await tester.runAsync(()=>queue.dismissBlockedBanner());
+  await tester.pump();
+  expect(queue.blockedBannerDismissed,isTrue);
+  expect(find.byKey(const ValueKey('sync-banner-tap')),findsNothing);
+  expect(queue.pending,hasLength(1));
+  expect((queue.pending.first['payload'] as Map)['answers'],{'old_question':'test'});
+  queue.pending.add({
+   ...queue.pending.first,
+   'key':'account:revision:old2','error':'HTTP 400: lỗi khác',
+  });
+  queue.notifyListeners();
+  await tester.pump();
+  expect(queue.blockedBannerDismissed,isFalse);
+  expect(find.byKey(const ValueKey('sync-banner-tap')),findsOneWidget);
+  queue.dispose();
+ });
+
  for(final width in [320.0,360.0,390.0]){
   testWidgets('pending iPhone sync always opens details at $width px',(tester)async{
    tester.view.devicePixelRatio=1;

@@ -133,20 +133,65 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
    const history=url.searchParams.get('history')==='1';
    if(history){
     if(!actor.admin||!province)return bad('Chỉ Admin được xem lịch sử mẫu',403);
-    const older=await db`SELECT id,province,version,questions,created_by,created_at
-      FROM public.field_survey_templates WHERE province=${province}
-      ORDER BY version DESC LIMIT 100`;
+    const older=await db`SELECT t.id,t.province,t.version,t.questions,t.created_by,
+      t.created_at,coalesce(v.status,'active') AS status
+      FROM public.field_survey_templates t
+      LEFT JOIN public.field_survey_template_visibility v ON v.province=t.province
+      WHERE t.province=${province} ORDER BY t.version DESC LIMIT 100`;
     return json({items:older});
    }
-   const rows=await db`SELECT DISTINCT ON (province) id,province,version,questions,created_by,created_at FROM field_survey_templates
-   WHERE (${!province} OR province=${province} OR (${province!=='*'} AND province='*'))
+   const rows=await db`SELECT DISTINCT ON (t.province)
+    t.id,t.province,t.version,t.questions,t.created_by,t.created_at
+    FROM public.field_survey_templates t
+    LEFT JOIN public.field_survey_template_visibility v ON v.province=t.province
+    WHERE coalesce(v.status,'active')='active'
+    AND (${!province} OR t.province=${province} OR (${province!=='*'} AND t.province='*'))
     AND (${actor.admin}
-      OR (field_survey_templates.province='*' AND EXISTS(
+      OR (t.province='*' AND EXISTS(
        SELECT 1 FROM staff_scopes sc WHERE sc.user_sub=${actor.sub}))
       OR EXISTS(SELECT 1 FROM staff_scopes sc WHERE sc.user_sub=${actor.sub}
-       AND sc.province=field_survey_templates.province))
-   ORDER BY province,version DESC`;
+       AND sc.province=t.province))
+   ORDER BY t.province,t.version DESC`;
    return json({items:rows});
+  }
+  if(req.method==='PATCH'){
+   if(!actor.admin)return bad('Chỉ Admin được quản lý mẫu',403);
+   let v:Body;try{v=await body(req);}catch{return bad('JSON không hợp lệ');}
+   const province=String(v.province??''),status=String(v.status??'');
+   const expectedStatus=String(v.expected_status??'');
+   if(!province||province==='*'&&status!=='active'||
+     province!=='*'&&!areas[province]||
+     !['active','paused','archived'].includes(status)||
+     !['active','paused','archived'].includes(expectedStatus)||
+     !isUuid(v.client_ref)||!Number.isInteger(v.expected_version)||
+     Number(v.expected_version)<1)return bad('Phạm vi, trạng thái hoặc phiên bản không hợp lệ');
+   const latest=await db`SELECT coalesce(max(version),0)::integer AS version
+     FROM public.field_survey_templates WHERE province=${province}`;
+   if(Number(latest[0].version)!==Number(v.expected_version))
+    return bad('Mẫu đã được cập nhật; tải lại trước khi thay đổi trạng thái',409);
+   const current=await db`SELECT status,client_ref FROM public.field_survey_template_visibility
+     WHERE province=${province}`;
+   if(current.length&&current[0].client_ref===v.client_ref)
+    return json({item:{province,status:current[0].status},idempotent:true});
+   if((current[0]?.status??'active')!==expectedStatus)
+    return bad('Trạng thái mẫu đã đổi; tải lại trước khi thao tác',409);
+   if(current.length===0&&expectedStatus!=='active')
+    return bad('Trạng thái mẫu đã đổi; tải lại trước khi thao tác',409);
+   const changed=await db`INSERT INTO public.field_survey_template_visibility
+      (province,status,changed_by,client_ref)
+      VALUES (${province},${status},${actor.sub},${v.client_ref}::uuid)
+      ON CONFLICT(province) DO UPDATE SET
+       status=EXCLUDED.status,changed_by=EXCLUDED.changed_by,
+       changed_at=now(),client_ref=EXCLUDED.client_ref
+      WHERE public.field_survey_template_visibility.status=${expectedStatus}
+      RETURNING province,status,changed_at`;
+   if(!changed.length)return bad('Mẫu đã thay đổi; tải lại để tiếp tục',409);
+   await db`INSERT INTO public.field_survey_template_status_audit
+      (client_ref,province,status,version,changed_by)
+      VALUES (${v.client_ref}::uuid,${province},${status},
+       ${Number(v.expected_version)},${actor.sub})
+      ON CONFLICT(client_ref) DO NOTHING`;
+   return json({item:changed[0]});
   }
   if(req.method!=='POST')return bad('Method not allowed',405);
   if(!actor.admin)return bad('Chỉ Admin thiết lập mẫu',403);

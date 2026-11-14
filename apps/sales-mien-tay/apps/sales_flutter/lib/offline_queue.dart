@@ -66,6 +66,20 @@ class OfflineQueue extends ChangeNotifier {
  String? activePath;
  int transientFailures=0;
  int get blockedCount=>pending.where((r)=>r['status']=='blocked').length;
+ String? _dismissedBlockedSignature;
+ String get _blockedSignature=>(pending.where((r)=>r['status']=='blocked')
+  .map((r)=>'${r['key']}:${r['error']}').toList()..sort()).join('|');
+ bool get blockedBannerDismissed=>blockedCount>0&&readyCount==0&&
+  !syncing&&_dismissedBlockedSignature==_blockedSignature;
+ /// Hide the persistent banner for reviewed 4xx errors without deleting,
+ /// mutating, or resending any failed work from IndexedDB.
+ Future<void> dismissBlockedBanner()async{
+  if(_closed||syncing||readyCount>0||blockedCount==0)return;
+  final signature=_blockedSignature;
+  await cache('sync-blocked-banner-dismiss',[{'signature':signature}]);
+  _dismissedBlockedSignature=signature;
+  _notify();
+ }
  bool get reconciling=>_reconciling;
  int get readyCount=>pending.length-blockedCount;
  bool get isStalled=>syncing&&lastAttemptAt!=null&&
@@ -557,7 +571,12 @@ class OfflineQueue extends ChangeNotifier {
   await t.completed;await reload();await retryNow();
  }
  Future<void> start() async{
-  try{await reload();}catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
+  try{
+   await reload();
+   final acknowledged=await cached('sync-blocked-banner-dismiss');
+   _dismissedBlockedSignature=acknowledged.firstOrNull?['signature']?.toString();
+   _notify();
+  }catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
   if(_closed)return;
   _timer=Timer.periodic(const Duration(seconds:30),(_)=>unawaited(sync()));
   unawaited(reconcileBlockedRoutes().then((_)=>sync()).catchError((Object e){

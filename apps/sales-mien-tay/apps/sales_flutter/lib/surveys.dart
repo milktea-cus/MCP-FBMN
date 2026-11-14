@@ -50,7 +50,9 @@ String? checklistError(List<Map<String,dynamic>> qs,Map<String,dynamic> answers)
  }
  return null;
 }
-Future<Map<String,dynamic>> surveyGet(CustomerService service,String path,[Map<String,String>? params])async=>decodeApi(await http.get(service.uri(path,params),headers:service.headers).timeout(const Duration(seconds:20)));
+Future<Map<String,dynamic>> surveyGet(CustomerService service,String path,[Map<String,String>? params])async=>
+ decodeApi(await (service.client?.get(service.uri(path,params),headers:service.headers) ??
+  http.get(service.uri(path,params),headers:service.headers)).timeout(const Duration(seconds:20)));
 
 class SurveyPage extends StatefulWidget{
  final OfflineQueue queue;final CustomerService service;final RegionCatalog regions;final bool admin;final String? initialCustomer;final Map<String,dynamic>? initialStop;final WidgetBuilder? legacy;
@@ -526,14 +528,15 @@ class SurveyTemplateAdmin extends StatefulWidget{
  @override State<SurveyTemplateAdmin> createState()=>_SurveyTemplateAdminState();
 }
 class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
- String province='';int version=0,draftRevision=0;bool busy=false;String? message;
+ String province='';int version=0,draftRevision=0;bool busy=false,editing=false;
+ String lifecycle='active';String? message;
  List<Map<String,dynamic>> qs=[];
  List<Map<String,dynamic>> publishedVersions=[];
  String publishedSignature='';
  List<String> officialBrands=[];
  List<FieldCustomer> knownCustomers=[];
  List<String> supplierOptions=const ['Mua trực tiếp công ty','NPP khác (ghi chú tên)'];
- @override void initState(){super.initState();unawaited(loadBrands());unawaited(loadSuppliers());}
+ @override void initState(){super.initState();unawaited(loadBrands());unawaited(loadSuppliers());unawaited(load('*'));}
  Future<void> loadBrands()async{
   try{
    final result=await surveyGet(widget.service,'/api/v1/market/brands');
@@ -583,7 +586,7 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
  }
  Future<void> load(String p)async{
   setState((){
-   province=p;busy=true;message=null;qs=[];publishedVersions=[];publishedSignature='';version=0;draftRevision++;
+   province=p;busy=true;editing=false;lifecycle='active';message=null;qs=[];publishedVersions=[];publishedSignature='';version=0;draftRevision++;
    supplierOptions=supplySourceOptions(
     knownCustomers.where((c)=>c.province==p));
   });
@@ -594,6 +597,7 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
    final selected=items.firstOrNull;
    if(mounted)setState((){
     publishedVersions=items;
+    lifecycle=selected?['status']?.toString()??'active';
     version=(selected?['version'] as num?)?.toInt()??0;
     final authored=selected!=null&&selected['created_by']!='system:initial';
     qs=authored?asRows(selected['questions']):[];
@@ -602,6 +606,48 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
    });
   }
   catch(e){if(mounted)setState(()=>message=e.toString());}
+  finally{if(mounted)setState(()=>busy=false);}
+ }
+ Future<void> changeAvailability(String next)async{
+  if(busy||province.isEmpty||province=='*'||version==0)return;
+  final verb=next=='paused'?'Ngưng sử dụng':next=='archived'?'Xóa khỏi sử dụng':'Bật lại';
+  final confirmed=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(
+   title:Text('$verb mẫu?'),
+   content:Text(next=='archived'
+    ?'Ẩn mẫu tỉnh $province khỏi các phiên đi khách. Các phiên bản và câu trả lời cũ vẫn được giữ để đối chiếu và khôi phục.'
+    :next=='paused'
+    ?'Tạm ngưng mẫu $province. Sales không thấy mẫu này cho đến khi bật lại.'
+    :'Bật lại mẫu tỉnh $province để Sales tiếp tục sử dụng.'),
+   actions:[
+    TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('Hủy')),
+    FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:Text(verb)),
+   ],
+  ));
+  if(confirmed!=true||!mounted)return;
+  setState(()=>busy=true);
+  try{
+   final response=await (widget.service.client?.patch(
+    widget.service.uri('/api/v1/survey-templates'),headers:widget.service.headers,
+    body:jsonEncode({
+     'client_ref':const Uuid().v4(),'province':province,
+     'status':next,'expected_status':lifecycle,'expected_version':version,
+    })) ?? http.patch(widget.service.uri('/api/v1/survey-templates'),
+    headers:widget.service.headers,body:jsonEncode({
+     'client_ref':const Uuid().v4(),'province':province,
+     'status':next,'expected_status':lifecycle,'expected_version':version,
+    }))).timeout(const Duration(seconds:20));
+   final result=asMap(decodeApi(response)['item']);
+   if(!mounted)return;
+   setState((){
+    lifecycle=result['status']?.toString()??next;
+    publishedVersions=[for(final v in publishedVersions){...v,'status':lifecycle}];
+    editing=false;
+    message=next=='paused'?'Đã ngưng sử dụng mẫu tỉnh $province.'
+     :next=='archived'?'Đã xóa mẫu khỏi danh sách sử dụng. Lịch sử vẫn được giữ.'
+     :'Đã bật lại mẫu tỉnh $province.';
+   });
+   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(message!)));
+  }catch(e){if(mounted)setState(()=>message='Không đổi được trạng thái mẫu: $e');}
   finally{if(mounted)setState(()=>busy=false);}
  }
  Future<void> publish()async{
@@ -636,7 +682,8 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
      version=v;qs=asRows(item['questions']);
      publishedSignature=jsonEncode(qs);
      draftRevision++;
-     publishedVersions=[item,...publishedVersions];
+     publishedVersions=[{...item,'status':lifecycle},...publishedVersions];
+     editing=false;
      message='ĐÃ PHÁT HÀNH mẫu v$v · ${qs.length} câu hỏi.';
     });
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -667,30 +714,75 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
   if(province.isNotEmpty)...[
    Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(
     crossAxisAlignment:CrossAxisAlignment.start,children:[
-     Text('Quản lý mẫu đã phát hành',style:Theme.of(context).textTheme.titleMedium),
-     Text('${publishedVersions.isEmpty?'Chưa có mẫu':version==1&&publishedVersions.first['created_by']=='system:initial'?'Chưa cấu hình mẫu tỉnh · câu mặc định không áp dụng':'Đang áp dụng v$version · ${publishedVersions.isNotEmpty?asRows(publishedVersions.first['questions']).length:0} câu'}'),
-     for(final v in publishedVersions.take(12))ExpansionTile(
+     Text('Mẫu đang chọn',style:Theme.of(context).textTheme.titleMedium),
+     const SizedBox(height:6),
+     Text(publishedVersions.isEmpty?'Chưa tạo mẫu'
+      :version==1&&publishedVersions.first['created_by']=='system:initial'
+       ?'Mẫu tỉnh khởi tạo chưa được áp dụng'
+       :lifecycle=='paused'?'ĐÃ NGƯNG · v$version'
+       :lifecycle=='archived'?'ĐÃ XÓA KHỎI SỬ DỤNG · v$version'
+       :'Đang áp dụng · v$version · ${asRows(publishedVersions.first['questions']).length} câu'),
+     const SizedBox(height:8),
+     Wrap(spacing:8,runSpacing:8,children:[
+      FilledButton.icon(
+       key:const Key('template-edit-button'),
+       onPressed:busy?null:()=>setState((){
+        editing=true;draftRevision++;
+        message='Đang chỉnh sửa bản nháp. Bấm Phát hành khi hoàn tất.';
+       }),
+       icon:const Icon(Icons.edit_outlined),
+       label:Text(version==0||version==1&&publishedVersions.firstOrNull?['created_by']=='system:initial'
+        ?'Tạo mẫu':'Sửa mẫu')),
+      if(province!='*'&&version>0&&publishedVersions.firstOrNull?['created_by']!='system:initial')...[
+       if(lifecycle=='active')OutlinedButton.icon(
+        key:const Key('template-pause-button'),
+        onPressed:busy?null:()=>changeAvailability('paused'),
+        icon:const Icon(Icons.pause_circle_outline),
+        label:const Text('Ngưng sử dụng')),
+       if(lifecycle=='paused'||lifecycle=='archived')OutlinedButton.icon(
+        key:const Key('template-resume-button'),
+        onPressed:busy?null:()=>changeAvailability('active'),
+        icon:const Icon(Icons.play_circle_outline),
+        label:Text(lifecycle=='archived'?'Khôi phục':'Bật lại')),
+       if(lifecycle!='archived')TextButton.icon(
+        key:const Key('template-delete-button'),
+        onPressed:busy?null:()=>changeAvailability('archived'),
+        icon:const Icon(Icons.delete_outline),
+        label:const Text('Xóa mẫu')),
+      ],
+     ]),
+     if(province=='*')const Padding(padding:EdgeInsets.only(top:6),
+      child:Text('Mẫu chung phải luôn có, không thể ngưng hoặc xóa.',
+       style:TextStyle(fontSize:12))),
+     if(lifecycle!='active')const Padding(padding:EdgeInsets.only(top:6),
+      child:Text('Mẫu đang tắt, không xuất hiện khi Sales làm việc với khách.',
+       style:TextStyle(fontSize:12))),
+    ],
+   ))),
+   ExpansionTile(
+    title:Text('Lịch sử phiên bản (${publishedVersions.length})'),
+    children:[
+     for(final v in publishedVersions.take(20))ExpansionTile(
       tilePadding:EdgeInsets.zero,
-      title:Text('Phiên bản v${v['version']} · ${v['created_by']=='system:initial'?'Mẫu cũ tự động':'Đã lưu'}'),
-      subtitle:Text('${asRows(v['questions']).length} câu hỏi · ${v['created_at']?.toString().substring(0,10)??''}'),
+      title:Text('v${v['version']} · ${v['created_by']=='system:initial'?'Mẫu mặc định cũ':'Đã phát hành'}'),
+      subtitle:Text('${asRows(v['questions']).length} câu · ${v['created_at']?.toString().substring(0,10)??''}'),
       children:[
        for(final q in asRows(v['questions']))ListTile(
         dense:true,title:Text(q['label']?.toString()??''),
         subtitle:Text(q['type']?.toString()??'')),
        TextButton.icon(
         onPressed:busy?null:()=>setState((){
-         qs=asRows(v['questions']);draftRevision++;
-         message='Đã sao chép v${v['version']} vào bản nháp. '
-          'Hãy kiểm tra rồi phát hành phiên bản mới.';
+         qs=asRows(v['questions']);draftRevision++;editing=true;
+         message='Đã sao chép v${v['version']} để sửa. Bản gốc vẫn được giữ.';
         }),
-        icon:const Icon(Icons.copy_outlined),
-        label:const Text('Sao chép để chỉnh sửa'),
+        icon:const Icon(Icons.edit_note_outlined),
+        label:const Text('Sửa từ phiên bản này'),
        ),
       ],
      ),
     ],
-   ))),
-
+   ),
+   if(editing)...[
    Text(province=='*'
     ?'Mẫu chung · phiên bản $version · luôn đi kèm mẫu tỉnh'
     :'Mẫu $province · phiên bản $version · dùng NPP của tỉnh này'),
@@ -707,7 +799,7 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
     decoration:const InputDecoration(labelText:'Lựa chọn (ngăn cách bằng dấu phẩy)'),
     onChanged:(v)=>q['options']=v.split(',').map((s)=>s.trim()).where((s)=>s.isNotEmpty).toSet().toList()),
     CheckboxListTile(contentPadding:EdgeInsets.zero,value:q['required']==true,title:const Text('Bắt buộc'),onChanged:(v)=>setState(()=>q['required']=v==true)),
-    TextButton(onPressed:busy?null:()=>setState(()=>qs.remove(q)),child:const Text('Bỏ câu hỏi trong bản mới')),
+    TextButton(onPressed:busy?null:()=>setState(()=>qs.remove(q)),child:const Text('Xóa câu hỏi')),
    ]))),
    Wrap(spacing:8,runSpacing:8,children:[
     OutlinedButton(onPressed:busy||qs.length>=50?null:()=>setState(()=>qs.add({
@@ -721,8 +813,9 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
      label:const Text('Nguồn hàng / NPP')),
     FilledButton(onPressed:busy?null:publish,child:const Text('Phát hành phiên bản')),
    ]),
-   const Text('Câu chọn một/nhiều cần ít nhất 2 lựa chọn trong chính câu hỏi. '
-    'Không bắt buộc phải tạo 2 nhãn hàng trong danh mục.',style:TextStyle(fontSize:12)),
+   const Text('Câu chọn cần ít nhất 2 đáp án. Bản cũ và kết quả khảo sát không bị xóa.',
+    style:TextStyle(fontSize:12)),
+   ],
   ]
  ]));
 }
