@@ -104,10 +104,17 @@ class _WorkHubPageState extends State<WorkHubPage>{
     return;
    }
    final ref=workSessionId(widget.queue.identity,id);
+   // Do not open the real session before locally scheduled customer
+   // stops are acknowledged. Same-millisecond outbox rows may reorder.
    final depends=<String>[
     for(final op in widget.queue.pending)
      if(op['path']=='/api/v1/day-routes'&&
        (op['payload'] as Map?)?['client_ref']==id)id,
+    for(final op in widget.queue.pending)
+     if(op['path']=='/api/v1/day-routes/$id/stops'&&
+       op['method']=='POST'&&
+       (op['payload'] as Map?)?['client_ref']!=null)
+      (op['payload'] as Map)['client_ref'].toString(),
    ];
    try{
     await widget.queue.enqueue('/api/v1/day-routes/$id/work-session',{
