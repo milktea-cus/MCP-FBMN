@@ -70,8 +70,10 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
       WHERE s.day_route_id=r.id AND se.status='completed')::integer AS survey_count,
     (SELECT count(*)::integer FROM public.field_prospects prospect
       JOIN public.field_area_visits area ON area.id=prospect.area_visit_id
-      JOIN public.field_route_stops stop ON stop.id=area.day_route_stop_id
-      WHERE stop.day_route_id=r.id) AS lead_count
+      LEFT JOIN public.field_route_stops stop ON stop.id=area.day_route_stop_id
+      WHERE coalesce(area.day_route_id,stop.day_route_id)=r.id) AS lead_count,
+    (SELECT count(*)::integer FROM public.field_area_visits area
+      WHERE area.day_route_id=r.id) AS market_visit_count
    FROM public.field_day_routes r JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id
    WHERE p.period_ym=${month} AND
     (r.owner_sub=${actor.sub} OR ${actor.admin} OR
@@ -105,12 +107,28 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
   let v:Record<string,unknown>;try{v=await parse(req);}catch{return fail('JSON không hợp lệ');}
   const invalid=validRouteStop(v,false);
   if(invalid)return fail(invalid);
+  if(v.stop_kind!=='customer')
+   return fail('Địa bàn/chuỗi thuộc phiên, không phải điểm ghé. Ghi GPS/lead theo phiên.',409);
   if(!string(v.captured_at,10,40)||!Number.isFinite(Date.parse(String(v.captured_at))))
    return fail('Thời gian phát sinh không hợp lệ');
-  const customer=v.stop_kind==='customer'?String(v.customer_id):null;
-  const chain=v.stop_kind==='chain'?String(v.chain_id):null;
-  const province=v.stop_kind==='area'?String(v.province):null;
-  const district=v.stop_kind==='area'?String(v.district):null;
+  const customer=String(v.customer_id);
+  const chain=null,province=null,district=null;
+  // Two offline devices can submit the same business stop. Check its owner
+  // and scope before acknowledging the canonical UUID; never create a twin.
+  const existing=await db`SELECT s.* FROM public.field_route_stops s
+    JOIN public.field_day_routes r ON r.id=s.day_route_id
+    JOIN public.field_monthly_plans m ON m.id=r.monthly_plan_id
+    WHERE s.day_route_id=${extra[1]}::uuid AND s.customer_id=${customer}::uuid
+      AND s.owner_sub=${actor.sub} AND r.owner_sub=${actor.sub}
+      AND public.sales_monthly_plan_scope_allowed(
+       ${actor.sub},m.scope_kind,m.scope_key,m.province,m.district)
+    LIMIT 1`;
+  if(existing.length){
+   if(req.headers.get('X-Sync-Protocol')!=='2'&&
+     String(existing[0].id)!==String(v.client_ref))
+     return fail('Khách đã có trên tuyến; cần cập nhật PWA để đồng bộ an toàn',409);
+   return reply({item:existing[0],already_saved:true},200);
+  }
   try{
    const rows=await db`SELECT public.sales_add_unplanned_route_stop(
     ${actor.sub},${String(v.client_ref)}::uuid,${String(v.client_ref)}::uuid,
@@ -124,7 +142,8 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
  if(path&&!uuid.test(path[1])||path?.[3]&&!uuid.test(path[3]))return fail('Route UUID không hợp lệ');
  const routeId=path?.[1]??'';
  if(path&&(req.method==='GET')){
-  const routes=await db`SELECT r.*,p.period_ym,p.scope_kind,p.scope_key,p.province,p.district,p.status AS plan_status
+  const routes=await db`SELECT r.*,p.period_ym,p.scope_kind,p.scope_key,p.province,p.district,p.status AS plan_status,
+    (SELECT count(*)::integer FROM public.field_area_visits v WHERE v.day_route_id=r.id) AS market_visit_count
    FROM public.field_day_routes r JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id
    WHERE r.id=${routeId}::uuid AND
     (r.owner_sub=${actor.sub} OR ${actor.admin} OR
@@ -210,6 +229,8 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
  if(path&&path[2]==='stops'&&(req.method==='POST'||req.method==='PATCH'&&!!path[3])){
   let v:Record<string,unknown>;try{v=await parse(req);}catch{return fail('JSON không hợp lệ');}
   const editing=req.method==='PATCH',error=validRouteStop(v,editing);if(error)return fail(error);
+  if(!editing&&v.stop_kind!=='customer')
+   return fail('Phạm vi địa bàn/chuỗi không phải điểm ghé. Hãy chọn khách thực tế.',409);
   const id=editing?path[3]:String(v.client_ref);
   // Once the first real activity exists, preserve the original plan. The
   // dedicated unplanned endpoint is the only way to append execution stops.
