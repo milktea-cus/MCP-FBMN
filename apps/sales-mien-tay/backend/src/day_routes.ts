@@ -52,6 +52,11 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
  if(suffix===''&&req.method==='GET'){
   const month=url.searchParams.get('month')??'';
   if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))return fail('Tháng không hợp lệ');
+  const day=url.searchParams.get('day')??'';
+  if(day&&(!/^\d{4}-\d{2}-\d{2}$/.test(day)||
+    day.slice(0,7)!==month||!Number.isFinite(Date.parse(day))||
+    new Date(day).toISOString().slice(0,10)!==day))
+   return fail('Ngày tuyến không hợp lệ',400);
   const items=await db`SELECT r.*,p.period_ym,p.scope_kind,p.scope_key,p.province,p.district,p.status AS plan_status,
     (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id AND NOT s.is_unplanned)::integer AS stop_count,
     (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id AND s.is_unplanned)::integer AS unplanned_count,
@@ -79,6 +84,7 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
    FROM public.field_day_routes r JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id
    LEFT JOIN public.field_work_sessions w ON w.day_route_id=r.id
    WHERE p.period_ym=${month} AND
+    (${day||null}::date IS NULL OR r.route_date=${day||null}::date) AND
     (r.owner_sub=${actor.sub} OR ${actor.admin} OR
      (${actor.manager} AND public.sales_staff_in_subtree(${actor.sub},r.owner_sub)))
    ORDER BY r.route_date,r.created_at,r.id LIMIT 2000`;
