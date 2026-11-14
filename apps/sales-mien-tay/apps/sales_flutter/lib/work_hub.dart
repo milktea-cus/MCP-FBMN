@@ -10,16 +10,16 @@ import 'session.dart';
 
 /// Plan and actual counters are deliberately separate: GPS does not finish a survey.
 class WorkCounts {
- final int planned,visited,missed,unplanned,unplannedVisited,surveys,leads;
+ final int planned,visited,missed,unplanned,unplannedVisited,surveys,leads,marketVisits;
  const WorkCounts(this.planned,this.visited,this.missed,this.unplanned,
-  this.unplannedVisited,this.surveys,this.leads);
+  this.unplannedVisited,this.surveys,this.leads,this.marketVisits);
  int get notVisited=>planned>visited?planned-visited:0;
  int get withoutReason=>notVisited>missed?notVisited-missed:0;
  static int count(Map<String,dynamic> r,String key){
   final v=r[key];return v is num&&v>0?v.toInt():0;
  }
  factory WorkCounts.fromRoutes(Iterable<Map<String,dynamic>> routes){
-  var planned=0,visited=0,missed=0,unplanned=0,unplannedVisited=0,surveys=0,leads=0;
+  var planned=0,visited=0,missed=0,unplanned=0,unplannedVisited=0,surveys=0,leads=0,marketVisits=0;
   for(final r in routes){
    planned+=count(r,'stop_count');
    visited+=count(r,'visited_count');
@@ -28,8 +28,9 @@ class WorkCounts {
    unplannedVisited+=count(r,'unplanned_visited_count');
    surveys+=count(r,'survey_count');
    leads+=count(r,'lead_count');
+   marketVisits+=count(r,'market_visit_count');
   }
-  return WorkCounts(planned,visited,missed,unplanned,unplannedVisited,surveys,leads);
+  return WorkCounts(planned,visited,missed,unplanned,unplannedVisited,surveys,leads,marketVisits);
  }
 }
 
@@ -141,6 +142,7 @@ class _WorkHubPageState extends State<WorkHubPage>{
          Text('Kế hoạch: ${totals.planned} · Đã ghé: ${totals.visited} · Chưa ghé: ${totals.notVisited}'),
          Text('Không ghé có lý do: ${totals.missed} · Chưa ghi nhận: ${totals.withoutReason}'),
          Text('Hoàn thành khảo sát: ${totals.surveys} · Lead mới: ${totals.leads}'),
+         Text('GPS phát triển thị trường: ${totals.marketVisits} lần'),
          Text('Ngoài kế hoạch: ${totals.unplanned} điểm · Đã ghé: ${totals.unplannedVisited}'),
         ],
        ))),
@@ -153,7 +155,7 @@ class _WorkHubPageState extends State<WorkHubPage>{
          '${route['scope_kind']=='territory'?'Địa bàn':route['scope_kind']=='chain'?'Chuỗi':'Khách cụ thể'} · ${route['scope_key']}\n'
          'Kế hoạch ${c.planned} · Đã ghé ${c.visited} · Chưa ghé ${c.notVisited}'
          '${c.missed>0?' (lý do: ${c.missed})':''}\n'
-         'Khảo sát xong ${c.surveys} · Lead ${c.leads} · Phát sinh ${c.unplanned}',
+         'Khảo sát xong ${c.surveys} · Lead ${c.leads} · GPS thị trường ${c.marketVisits} · Khách phát sinh ${c.unplanned}',
         ),
         isThreeLine:true,
         trailing:const Icon(Icons.chevron_right),
