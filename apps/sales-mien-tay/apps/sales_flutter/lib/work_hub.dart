@@ -95,7 +95,7 @@ class _WorkHubPageState extends State<WorkHubPage>{
  }
  List<Map<String,dynamic>> get dayRoutes=>
   routes.where((r)=>r['route_date'].toString().startsWith(dayKey(day))
-    &&r['status']=='ready').toList();
+    &&r['status']=='ready'&&r['plan_status']!='cancelled').toList();
  @override Widget build(BuildContext context){
   final today=dayKey(DateTime.now().toUtc().add(const Duration(hours:7)));
   final totals=WorkCounts.fromRoutes(dayRoutes);
