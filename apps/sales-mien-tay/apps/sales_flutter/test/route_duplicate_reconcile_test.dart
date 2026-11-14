@@ -39,6 +39,56 @@ Future<void> blockRoute(OfflineQueue q)async{
 }
 
 void main(){
+ test('stale reschedule PATCH is ACKed only when server already has exactly same date',()async{
+  final factory=newIdbFactoryMemory();
+  var reads=0,writes=0;
+  final net=MockClient((req)async{
+   if(req.method=='GET'){
+    reads++;
+    return send({'item':{'id':serverRoute,'owner_sub':owner,
+     'monthly_plan_id':plan,'route_date':'2026-11-14T00:00:00.000Z',
+     'purpose':'Thị Trường','note':'','status':'ready','version':2}},200);
+   }
+   writes++;
+   return send({'error':'stale version'},409);
+  });
+  final q=OfflineQueue(Authorized(),owner,'8',factory:factory,networkClient:net);
+  await q.enqueue('/api/v1/day-routes/$serverRoute',{
+   'client_ref':'66666666-6666-4666-8666-666666666666',
+   'monthly_plan_id':plan,'route_date':'2026-11-14',
+   'purpose':'Thị Trường','note':'','status':'ready','version':1,
+  },method:'PATCH');
+  final d=await q.db,t=d.transaction('outbox',idbModeReadWrite);
+  await t.objectStore('outbox').put({...q.pending.single,'status':'blocked','error':'HTTP 409'});
+  await t.completed;await q.reload();
+  await q.reconcileBlockedRoutes();
+  expect(reads,1);expect(writes,0);expect(q.pending,isEmpty);
+  q.dispose();net.close();
+ });
+ test('conflicting reschedule PATCH stays in durable storage',()async{
+  final factory=newIdbFactoryMemory();var writes=0;
+  final net=MockClient((req)async{
+   if(req.method=='GET')return send({'item':{
+     'id':serverRoute,'owner_sub':owner,'monthly_plan_id':plan,
+     'route_date':'2026-11-13T00:00:00Z',
+     'purpose':'Thị Trường','note':'','status':'ready','version':2}},200);
+   writes++;return send({'error':'stale'},409);
+  });
+  final q=OfflineQueue(Authorized(),owner,'8',factory:factory,networkClient:net);
+  await q.enqueue('/api/v1/day-routes/$serverRoute',{
+   'client_ref':'66666666-6666-4666-8666-666666666666',
+   'monthly_plan_id':plan,'route_date':'2026-11-14',
+   'purpose':'Thị Trường','note':'','status':'ready','version':1,
+  },method:'PATCH');
+  final d=await q.db,t=d.transaction('outbox',idbModeReadWrite);
+  await t.objectStore('outbox').put({...q.pending.single,'status':'blocked','error':'HTTP 409'});
+  await t.completed;await q.reload();
+  await q.reconcileBlockedRoutes();
+  expect(writes,0);expect(q.pending.length,1);
+  expect(q.pending.single['status'],'blocked');
+  q.dispose();net.close();
+ });
+
  test('unplanned stop identity matches only actual unplanned customer',(){
   final row={'owner_sub':owner,'day_route_id':serverRoute,
    'stop_kind':'customer','is_unplanned':true,'customer_id':plan,
