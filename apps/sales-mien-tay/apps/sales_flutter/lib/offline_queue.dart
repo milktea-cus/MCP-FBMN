@@ -346,6 +346,61 @@ class OfflineQueue extends ChangeNotifier {
    }
   }finally{_reconciling=false;_notify();}
  }
+
+ /// The server has already confirmed this plan is archived. Only now may the
+ /// local create-route graph be dropped. Execution (GPS/visits/surveys/photos)
+ /// must always survive.
+ Future<int> discardPendingForArchivedPlan(String planId)async{
+  if(_closed||syncing||_reconciling)return 0;
+  await reload();
+  final routes=pending.where((row)=>row['path']=='/api/v1/day-routes'&&
+    row['method']=='POST'&&
+    row['payload'] is Map&&
+    (row['payload'] as Map)['monthly_plan_id']==planId).toList();
+  final routeIds=routes
+    .map((r)=>(r['payload'] as Map)['client_ref']?.toString()??'')
+    .where((v)=>v.isNotEmpty).toSet();
+  final draftOps=pending.where((row)=>row['method']=='POST'&&
+    routeIds.any((id)=>row['path']=='/api/v1/day-routes/$id/stops')).toList();
+  final stopIds=draftOps.map((r)=>
+    (r['payload'] as Map)['client_ref']?.toString()??'')
+    .where((id)=>id.isNotEmpty).toSet();
+  final removalKeys={
+   for(final r in routes)r['key'] as String,
+   for(final r in draftOps)r['key'] as String,
+  };
+  if(removalKeys.isEmpty)return 0;
+  // No real execution may be attached to a to-be-removed local stop/route.
+  final drafts=await cached('survey-drafts');
+  if(drafts.any((d)=>stopIds.contains(d['day_route_stop_id'])||
+      stopIds.contains(d['route_stop_id'])))return 0;
+  for(final row in pending.where((r)=>!removalKeys.contains(r['key']))){
+   final depends=row['depends_on'] as List? ??[];
+   final payload=row['payload'];
+   if(depends.any((d)=>routeIds.contains(d)||stopIds.contains(d)))return 0;
+   if(payload is Map&&
+     (routeIds.contains(payload['day_route_id'])||
+      stopIds.contains(payload['route_stop_id'])||
+      stopIds.contains(payload['day_route_stop_id'])))return 0;
+  }
+  final database=await db;
+  final tx=database.transaction('outbox',idbModeReadWrite);
+  final store=tx.objectStore('outbox');
+  for(final key in removalKeys){
+   final row=await store.getObject(key);
+   if(row is Map&&row['namespace']==namespace&&
+      (row['method']=='POST')&&
+      (row['path']=='/api/v1/day-routes'||
+       routeIds.any((id)=>row['path']=='/api/v1/day-routes/$id/stops'))){
+    await store.delete(key);
+   }
+  }
+  await tx.completed;
+  await reload();
+  if(pending.isEmpty)error=null;
+  _notify();
+  return removalKeys.length;
+ }
  /// Explicit user retry; errors and 409 conflicts are never discarded.
  Future<void> retryBlocked(String key)async{
   if(_closed||syncing||_reconciling||!key.startsWith('$namespace:'))return;
