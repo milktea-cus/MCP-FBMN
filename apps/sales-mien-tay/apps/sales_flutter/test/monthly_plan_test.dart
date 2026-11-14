@@ -99,6 +99,11 @@ void main() {
   expect(selection,isNotNull);
   expect(selection!.scopes.length,2);
   expect(selection!.purpose,'Đi tìm điểm bán mới');
-  expect(selection!.date,DateTime(2026,11,1));
+  // A new plan defaults to today's VN calendar date when in this month,
+  // rather than silently scheduling the first day of November.
+  final vn=DateTime.now().toUtc().add(const Duration(hours:7));
+  final expected=vn.year==2026&&vn.month==11
+   ?DateTime(vn.year,vn.month,vn.day):DateTime(2026,11,1);
+  expect(selection!.date,expected);
  });
 }
