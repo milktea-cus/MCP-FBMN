@@ -34,7 +34,7 @@ Future<void> blockRoute(OfflineQueue q)async{
  final d=await q.db,t=d.transaction('outbox',idbModeReadWrite);
  final row=q.pending.single;
  await t.objectStore('outbox').put({...row,
-  'status':'blocked','error':'HTTP 409: Tuyến hoặc điểm ghé bị trùng'});
+  'status':'blocked','error':'Tuyến hoặc điểm ghé bị trùng'});
  await t.completed;await q.reload();
 }
 
