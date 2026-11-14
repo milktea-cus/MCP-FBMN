@@ -39,6 +39,87 @@ Future<void> blockRoute(OfflineQueue q)async{
 }
 
 void main(){
+ test('unplanned stop identity matches only actual unplanned customer',(){
+  final row={'owner_sub':owner,'day_route_id':serverRoute,
+   'stop_kind':'customer','is_unplanned':true,'customer_id':plan,
+   'sequence':1,'purpose':'Ghé khách phát sinh'};
+  final draft={'stop_kind':'customer','customer_id':plan,
+   'sequence':1,'purpose':'Ghé khách phát sinh'};
+  expect(sameSavedStop(row,draft,owner,serverRoute),false);
+  expect(sameSavedStop(row,draft,owner,serverRoute,isUnplanned:true),true);
+ });
+
+ test('old blocked unplanned customer stop reconciles without another POST',()async{
+  final factory=newIdbFactoryMemory();
+  var gets=0,posts=0;
+  final net=MockClient((req)async{
+   if(req.method=='GET'){
+    gets++;
+    expect(req.url.path,'/api/v1/day-routes/'+serverRoute);
+    return send({'item':{'id':serverRoute,'owner_sub':owner},'stops':[{
+     'id':existingStop,'owner_sub':owner,'day_route_id':serverRoute,
+     'stop_kind':'customer','is_unplanned':true,'customer_id':plan,
+     'sequence':1,'purpose':'Ghé khách phát sinh'}]},200);
+   }
+   posts++;
+   return send({'error':'route conflict'},409);
+  });
+  final q=OfflineQueue(Authorized(),owner,'8',factory:factory,networkClient:net);
+  await q.enqueue('/api/v1/day-routes/'+serverRoute+'/unplanned-stops',{
+   'client_ref':stop,'stop_kind':'customer','customer_id':plan,
+   'sequence':1,'purpose':'Ghé khách phát sinh',
+   'captured_at':'2026-11-12T10:00:00Z'});
+  final d=await q.db,t=d.transaction('outbox',idbModeReadWrite);
+  await t.objectStore('outbox').put({...q.pending.single,
+   'status':'blocked','error':'HTTP 409'});
+  await t.completed;await q.reload();
+  await q.reconcileBlockedRoutes();
+  expect(gets,1);expect(posts,0);expect(q.pending,isEmpty);
+  q.dispose();net.close();
+ });
+
+ test('conflicting unplanned customer keeps durable outbox',()async{
+  final factory=newIdbFactoryMemory();
+  var posts=0;
+  final net=MockClient((req)async{
+   if(req.method=='GET')return send({'item':{
+    'id':serverRoute,'owner_sub':owner},'stops':[{
+     'id':existingStop,'owner_sub':owner,'day_route_id':serverRoute,
+     'stop_kind':'customer','is_unplanned':true,'customer_id':plan,
+     'sequence':2,'purpose':'Khác nội dung'}]},200);
+   posts++;return send({'error':'conflict'},409);
+  });
+  final q=OfflineQueue(Authorized(),owner,'8',factory:factory,networkClient:net);
+  await q.enqueue('/api/v1/day-routes/'+serverRoute+'/unplanned-stops',{
+   'client_ref':stop,'stop_kind':'customer','customer_id':plan,
+   'sequence':1,'purpose':'Ghé khách phát sinh',
+   'captured_at':'2026-11-12T10:00:00Z'});
+  final d=await q.db,t=d.transaction('outbox',idbModeReadWrite);
+  await t.objectStore('outbox').put({...q.pending.single,
+   'status':'blocked','error':'HTTP 409'});
+  await t.completed;await q.reload();
+  await q.reconcileBlockedRoutes();
+  expect(posts,0);expect(q.pending.single['status'],'blocked');
+  q.dispose();net.close();
+ });
+
+ test('reusing client_ref cannot overwrite a blocked draft',()async{
+  final q=OfflineQueue(Authorized(),owner,'8',factory:newIdbFactoryMemory());
+  await q.enqueue('/api/v1/day-routes/'+serverRoute+'/unplanned-stops',{
+   'client_ref':stop,'stop_kind':'customer','customer_id':plan,
+   'sequence':1,'purpose':'Ghé khách phát sinh'});
+  final first=Map<String,dynamic>.from(q.pending.single);
+  await q.enqueue('/api/v1/day-routes/'+serverRoute+'/unplanned-stops',{
+   'client_ref':stop,'stop_kind':'customer','customer_id':plan,
+   'sequence':1,'purpose':'Ghé khách phát sinh'});
+  expect(q.pending.length,1);
+  await expectLater(q.enqueue('/api/v1/day-routes/'+serverRoute+'/unplanned-stops',{
+   'client_ref':stop,'stop_kind':'customer','customer_id':plan,
+   'sequence':2,'purpose':'Khác'}),throwsStateError);
+  expect(q.pending.single['payload'],first['payload']);
+  q.dispose();
+ });
+
  test('409 exact route already saved remaps dependent stops with GET only',()async{
   final factory=newIdbFactoryMemory();
   var gets=0,posts=0;

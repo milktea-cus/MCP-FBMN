@@ -127,27 +127,6 @@ class _DayRoutePageState extends State<DayRoutePage>{
  bool get isOwner=>route!=null&&route!['owner_sub']==widget.queue.identity;
  bool get canModify=>isOwner&&route!['status']=='ready'
    &&route!['plan_status']!='cancelled'&&!busy;
- Future<void> addAreaOrChain()async{
-  if(!canEditPlannedStops)return;
-  final r=route!;
-  if(r['scope_kind']=='customer'){
-   notice('Lịch khách riêng không được tạo điểm thuộc địa bàn/chuỗi khác. Lập thêm công tác theo địa bàn hoặc chuỗi đã được giao.');return;
-  }
-  final area=r['scope_kind']=='territory';
-  final ref=const Uuid().v4();
-  final payload=<String,dynamic>{
-   'client_ref':ref,'stop_kind':area?'area':'chain','sequence':nextOrder,
-   'purpose':area?'Phát triển điểm bán mới':'Chăm sóc chuỗi',
-   if(area)...{'province':r['province'],'district':r['district']},
-   if(!area)'chain_id':r['scope_key'],
-  };
-  try{
-   await widget.queue.enqueue('/api/v1/day-routes/${widget.routeId}/stops',payload,
-     dependsOn:_routeDependencies());
-   notice('Đã thêm điểm công tác ${area?'địa bàn':'chuỗi'} (chưa cần khách hàng).');
-   if(mounted)await load();
-  }catch(e){notice('Không thêm được điểm công tác: $e');}
- }
  List<String> _routeDependencies()=>[
   for(final op in widget.queue.pending)
    if(op['path']=='/api/v1/day-routes'&&(op['payload'] as Map)['client_ref']==widget.routeId)
@@ -156,7 +135,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
  Future<void> addCustomers()async{
   if(!canEditPlannedStops)return;
   if(candidates.isEmpty){
-   notice('Chưa có khách gợi ý trên tuyến. Anh vẫn có thể thêm điểm công tác địa bàn để tìm khách mới.');
+   notice('Chưa có khách gợi ý trên tuyến. Có thể dùng Tìm khách mới để ghi nhận tại địa bàn mà không cần khách sẵn.');
    return;
   }
   final selected=<String>{};
@@ -319,34 +298,28 @@ class _DayRoutePageState extends State<DayRoutePage>{
   }catch(e){notice('Không lưu được lý do: $e');}
  }
 
+ /// An unplanned STOP must always represent a real customer. Market discovery
+ /// is recorded against the route itself, never as an area/chain stop.
  Future<void> addUnplanned()async{
-  if(!canModify||!isTodayRoute)return;
-  final scope=route!['scope_kind'].toString();
-  if(scope=='customer'){
-   notice('Khách riêng không cho phép thêm địa bàn khác.');return;
-  }
-  final kind=scope=='chain'?'chain':'area';
-  final scopeAlready=stops.any((s)=>s['stop_kind']==kind)||
-    pendingStops.any((op)=>(op['payload'] as Map)['stop_kind']==kind);
+  if(!canModify||!isTodayRoute||!scopeSupportsExtra(route!))return;
   final occupied=<String>{
    for(final s in stops)if(s['customer_id']!=null)s['customer_id'].toString(),
    for(final op in pendingStops)if((op['payload'] as Map)['customer_id']!=null)
     (op['payload'] as Map)['customer_id'].toString(),
   };
   final eligible=candidates.where((c)=>!occupied.contains(c['id'].toString())).toList();
+  if(eligible.isEmpty){
+   notice('Chưa có khách phù hợp để thêm. Dùng Tìm khách mới để ghi nhận lead thực tế.');
+   return;
+  }
   var query='';
   final selected=await showDialog<String>(context:context,builder:(dialog)=>StatefulBuilder(
    builder:(dialog,update){
     final visible=eligible.where((c)=>('${c['name']} ${c['code']??''}')
       .toLowerCase().contains(query.toLowerCase())).toList();
     return AlertDialog(
-     title:const Text('Thêm điểm phát sinh'),
+     title:const Text('Chọn khách phát sinh'),
      content:SizedBox(width:420,height:320,child:Column(children:[
-      if(!scopeAlready)ListTile(
-       leading:const Icon(Icons.add_location_alt_outlined),
-       title:const Text('Tìm điểm bán / lead mới'),
-       subtitle:const Text('Không cần tạo khách giả'),
-       onTap:()=>Navigator.pop(dialog,'__area__')),
       TextField(onChanged:(v)=>update(()=>query=v),
        decoration:const InputDecoration(prefixIcon:Icon(Icons.search),hintText:'Tìm khách trong quyền')),
       Expanded(child:ListView.builder(itemCount:visible.length,itemBuilder:(context,i){
@@ -355,26 +328,20 @@ class _DayRoutePageState extends State<DayRoutePage>{
         subtitle:Text('${c['code']??''} · ${c['district']??''}'),
         onTap:()=>Navigator.pop(dialog,c['id'].toString()));
       })),
-      if(scopeAlready&&eligible.isEmpty)
-       const Text('Đã có điểm địa bàn/chuỗi: mở điểm đó để ghi lead.'),
      ])),
      actions:[TextButton(onPressed:()=>Navigator.pop(dialog),child:const Text('Hủy'))],
     );
    }));
   if(selected==null||!mounted)return;
-  final isArea=selected=='__area__';
   try{
    await widget.queue.enqueue('/api/v1/day-routes/${widget.routeId}/unplanned-stops',{
-    'client_ref':const Uuid().v4(),'stop_kind':isArea?kind:'customer',
-    'sequence':nextOrder,'purpose':isArea?'Tìm điểm bán phát sinh':'Ghé khách phát sinh',
+    'client_ref':const Uuid().v4(),'stop_kind':'customer',
+    'customer_id':selected,'sequence':nextOrder,'purpose':'Ghé khách phát sinh',
     'captured_at':DateTime.now().toUtc().toIso8601String(),
-    if(isArea&&kind=='area')...{'province':route!['province'],'district':route!['district']},
-    if(isArea&&kind=='chain')'chain_id':route!['scope_key'],
-    if(!isArea)'customer_id':selected,
    },dependsOn:_routeDependencies());
-   notice('Đã thêm điểm ngoài kế hoạch trên máy · chờ đồng bộ.');
+   notice('Đã thêm khách phát sinh trên máy · chờ đồng bộ.');
    if(mounted)await load();
-  }catch(e){notice('Không thêm được điểm phát sinh: $e');}
+  }catch(e){notice('Không thêm được khách phát sinh: $e');}
  }
  /// For scheduled customer stops, open the existing survey linked by
  /// day_route_stop_id. SurveyPage handles its own GPS first verification.
@@ -445,13 +412,11 @@ class _DayRoutePageState extends State<DayRoutePage>{
      Text('${route!['scope_kind']=='chain'?'Chuỗi':route!['scope_kind']=='customer'?'Khách cụ thể':'Địa bàn'}: ${route!['scope_key']} · Đã ghé ${count}/${sorted.length} điểm'),
      const SizedBox(height:8),
      Wrap(spacing:8,runSpacing:6,children:[
-      if(route!['scope_kind']!='customer')OutlinedButton.icon(onPressed:canEditPlannedStops?addAreaOrChain:null,
-       icon:const Icon(Icons.place_outlined),label:Text(route!['scope_kind']=='chain'?'Điểm công tác chuỗi':'Điểm tìm khách')),
       OutlinedButton.icon(onPressed:canEditPlannedStops?addCustomers:null,
        icon:const Icon(Icons.group_add_outlined),label:const Text('Chọn nhiều khách')),
       if(scopeSupportsExtra(route!))OutlinedButton.icon(
        onPressed:canModify&&isTodayRoute?addUnplanned:null,
-       icon:const Icon(Icons.add_circle_outline),label:const Text('Điểm phát sinh')),
+       icon:const Icon(Icons.add_circle_outline),label:const Text('Khách phát sinh')),
       OutlinedButton.icon(onPressed:openTemplates,icon:const Icon(Icons.bookmark_outline),label:const Text('Mẫu tuyến')),
       if(isOwner&&route!['plan_status']!='cancelled')OutlinedButton.icon(
        key:const ValueKey('day-route-delete-schedule'),

@@ -9,6 +9,15 @@ import 'session.dart';
 import 'day_route.dart';
 import 'schedule_archive.dart';
 
+/// Only actual customers become planned stops; area/chain is the route scope.
+/// An empty list is a valid market-development plan (zero fake stops).
+List<Map<String,dynamic>> plannedCustomerStops(List<String> customers)=>[
+ for(var i=0;i<customers.length;i++)<String,dynamic>{
+  'client_ref':const Uuid().v4(),'stop_kind':'customer',
+  'customer_id':customers[i],'sequence':i+1,'purpose':'Chăm sóc điểm bán',
+ },
+];
+
 /// A plan is a dated business assignment, not a customer or a survey session.
 /// Multiple territories/chains can be selected without requiring any customer.
 class MonthlyPlanPage extends StatefulWidget {
@@ -110,20 +119,9 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
     },dependsOn:[ref]);
     final sk='${kind}:${key}';
     final customers=selection.customersByScope[sk]??<String>[];
-    var sequence=0;
-    for(final cid in customers){
-     await widget.queue.enqueue('/api/v1/day-routes/$routeId/stops',{
-      'client_ref':const Uuid().v4(),'stop_kind':'customer',
-      'customer_id':cid,'sequence':++sequence,'purpose':'Chăm sóc điểm bán',
-     },dependsOn:[routeId]);
-    }
-    if(customers.isEmpty&&kind!='customer'){
-     await widget.queue.enqueue('/api/v1/day-routes/$routeId/stops',{
-      'client_ref':const Uuid().v4(),'stop_kind':kind=='chain'?'chain':'area',
-      if(kind=='chain')'chain_id':key,
-      if(kind=='territory')...{'province':scope['province'],'district':scope['district']},
-      'sequence':1,'purpose':kind=='chain'?'Chăm sóc chuỗi':'Tìm điểm bán mới',
-     },dependsOn:[routeId]);
+    for(final customerStop in plannedCustomerStops(customers)){
+     await widget.queue.enqueue('/api/v1/day-routes/$routeId/stops',
+      customerStop,dependsOn:[routeId]);
     }
     await widget.queue.cache('day-route-candidates:$routeId',
       selection.availableByScope[sk]??<Map<String,dynamic>>[]);

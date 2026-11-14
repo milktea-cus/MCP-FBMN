@@ -4,6 +4,14 @@ import 'package:sales_mien_tay/planning_periods.dart';
 import 'package:sales_mien_tay/monthly_plan.dart';
 
 void main() {
+ test('empty area/chain schedules contain no fake stops',(){
+  expect(plannedCustomerStops([]),isEmpty);
+  final stops=plannedCustomerStops(['a','b']);
+  expect(stops.length,2);
+  expect(stops.every((s)=>s['stop_kind']=='customer'),true);
+  expect(stops.map((s)=>s['sequence']).toList(),[1,2]);
+ });
+
  test('monthly period buttons match calendar dates; period five hidden for 28 days', () {
   for(final year in [2024,2025,2026,2028]){
    for(var month=1;month<=12;month++){
