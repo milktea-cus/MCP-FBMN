@@ -85,6 +85,12 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
   if(selection==null||!mounted)return;
   var added=0,skipped=0;
   try{
+   if(original!=null&&
+      dayKey(selection.date)!=original['work_date'].toString().substring(0,10)&&
+      dayRoutes.isEmpty){
+    _toast('Chưa tải được tuyến ngày nên chưa thể đổi lịch an toàn. Hãy tải lại rồi thử lại.');
+    return;
+   }
    for(final scope in selection.scopes){
     final editing=original!=null,ref=const Uuid().v4();
     final kind=scope['scope_kind'].toString(),key=scope['scope_key'].toString();
@@ -111,7 +117,22 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
      editing?'/api/v1/monthly-plans/${original['id']}':'/api/v1/monthly-plans',
      payload,method:editing?'PATCH':'POST');
     added++;
-    if(editing)continue;
+    if(editing){
+     // Prevent plan/route day drift: the outbox submits route PATCH only
+     // after the monthly-plan PATCH has been acknowledged.
+     final related=dayRoutes.where((r)=>r['monthly_plan_id']==original['id']).firstOrNull;
+     if(related!=null&&
+        related['route_date'].toString().substring(0,10)!=date){
+      await widget.queue.enqueue('/api/v1/day-routes/${related['id']}',{
+       'client_ref':const Uuid().v4(),
+       'monthly_plan_id':related['monthly_plan_id'],
+       'route_date':date,'purpose':related['purpose'],
+       'note':related['note']??'','status':related['status'],
+       'version':related['version'],
+      },method:'PATCH',dependsOn:[ref]);
+     }
+     continue;
+    }
     final routeId=const Uuid().v4();
     await widget.queue.enqueue('/api/v1/day-routes',{
      'client_ref':routeId,'monthly_plan_id':ref,'route_date':date,
@@ -362,7 +383,12 @@ class _MonthlyPlanEditorState extends State<MonthlyPlanEditor>{
  @override void initState(){
   super.initState();
   final row=widget.original;
-  date=row==null?DateTime(widget.month.year,widget.month.month,1):DateTime.tryParse(row['work_date'].toString())??widget.month;
+  final today=DateTime.now().toUtc().add(const Duration(hours:7));
+  date=row==null
+   ?(widget.month.year==today.year&&widget.month.month==today.month
+     ?DateTime(today.year,today.month,today.day)
+     :DateTime(widget.month.year,widget.month.month,1))
+   :DateTime.tryParse(row['work_date'].toString())??widget.month;
   purpose=TextEditingController(text:row?['purpose']?.toString()??'');
   note=TextEditingController(text:row?['note']?.toString()??'');
   target=TextEditingController(text:row?['target_new_customers']?.toString()??'0');
@@ -478,8 +504,9 @@ class _MonthlyPlanEditorState extends State<MonthlyPlanEditor>{
      })),
     const SizedBox(height:14),
     if(selected.isNotEmpty)...[
-     Text('Khách dự kiến ghé',style:Theme.of(context).textTheme.titleMedium),
-     const Text('Chọn khách cần ghé. Không chọn khách vẫn lập được tuyến đi tìm điểm bán mới.'),
+     Text('Khách ưu tiên (không bắt buộc)',style:Theme.of(context).textTheme.titleMedium),
+     const Text('Chọn địa bàn là bao gồm tất cả khách trong quyền. '
+      'Khách không tích vẫn hiện khi đi thực tế; tích chỉ để xếp lịch ưu tiên.'),
      const SizedBox(height:6),
      TextField(controller:customerSearch,onChanged:(_)=>setState((){}),
       decoration:const InputDecoration(prefixIcon:Icon(Icons.search),labelText:'Tìm khách/mã khách trong phạm vi đã chọn')),
@@ -493,7 +520,7 @@ class _MonthlyPlanEditorState extends State<MonthlyPlanEditor>{
       return Card(child:Padding(padding:const EdgeInsets.all(8),child:Column(
        crossAxisAlignment:CrossAxisAlignment.stretch,children:[
         Text(scope['label'].toString(),style:Theme.of(context).textTheme.titleSmall),
-        Text('${rows.length} khách được phép lập lịch · Đã chọn ${picked.length}'),
+        Text('${rows.length} khách trong địa bàn · ${picked.length} khách ưu tiên'),
         if(loadingCandidates.contains(id))const LinearProgressIndicator(minHeight:2),
         if(candidateErrors.containsKey(id))
          Text(candidateErrors[id]!,style:Theme.of(context).textTheme.bodySmall),
@@ -503,7 +530,7 @@ class _MonthlyPlanEditorState extends State<MonthlyPlanEditor>{
          TextButton(onPressed:()=>setState((){
           selectedCustomers.putIfAbsent(id,()=><String>{})
            .addAll(filteredCustomers.map((c)=>c['id'].toString()));
-         }),child:Text('Chọn tất cả ${filteredCustomers.length} khách hiển thị')),
+         }),child:Text('Ưu tiên ${filteredCustomers.length} khách hiển thị')),
          SizedBox(height:190,child:ListView.builder(
           itemCount:filteredCustomers.length,
           itemBuilder:(ctx,i){
