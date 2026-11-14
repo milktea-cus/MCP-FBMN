@@ -223,4 +223,26 @@ void main(){
   q.dispose();
  });
 
+ test('old iPhone blocked route disappears only after server confirms plan archived',()async{
+  final factory=newIdbFactoryMemory();
+  var checks=0,writes=0;
+  final net=MockClient((req)async{
+   if(req.method!='GET'){writes++;return send({'error':'No writes permitted'},500);}
+   checks++;
+   if(req.url.path=='/api/v1/day-routes'){
+    return send({'items':[{...existingRoute(),'status':'cancelled'}]},200);
+   }
+   if(req.url.path=='/api/v1/monthly-plans'){
+    return send({'items':[{'id':plan,'owner_sub':owner,'status':'cancelled'}]},200);
+   }
+   fail('Unexpected read');
+  });
+  final q=OfflineQueue(Authorized(),owner,'8',factory:factory,networkClient:net);
+  await blockRoute(q);
+  await q.reconcileBlockedRoutes();
+  expect(checks,2);expect(writes,0);
+  expect(q.pending,isEmpty);
+  q.dispose();net.close();
+ });
+
 }
