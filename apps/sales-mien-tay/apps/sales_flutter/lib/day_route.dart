@@ -102,25 +102,26 @@ class _DayRoutePageState extends State<DayRoutePage>{
  void notice(String message){
   if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(message)));
  }
+ Future<List<Map<String,dynamic>>> safeCached(String key)async{
+  try{return await widget.queue.cached(key).timeout(const Duration(seconds:4));}
+  catch(_){return <Map<String,dynamic>>[];}
+ }
  Future<void> load()async{
   if(busy)return;
   setState((){busy=true;error=null;});
   try{
    // The monthly editor may have cached this territory's full customer list
    // even when the route-detail GET is temporarily offline/slow.
-   final previous=await widget.queue.cached(candidateKey)
-    .timeout(const Duration(seconds:4),onTimeout:()=>[]);
+   final previous=await safeCached(candidateKey);
    if(previous.isNotEmpty&&mounted)setState(()=>candidates=previous);
    final areaRoute=route;
    if(previous.isEmpty&&areaRoute!=null&&
       areaRoute['scope_kind']!=null&&areaRoute['scope_key']!=null){
     final scope='${areaRoute['scope_kind']}:${areaRoute['scope_key']}';
-    final saved=await widget.queue.cached('monthly-plan-candidates:$scope')
-     .timeout(const Duration(seconds:4),onTimeout:()=>[]);
+    final saved=await safeCached('monthly-plan-candidates:$scope');
     if(saved.isNotEmpty&&mounted)setState(()=>candidates=saved);
    }
-   final cached=await widget.queue.cached(key)
-    .timeout(const Duration(seconds:4),onTimeout:()=>[]);
+   final cached=await safeCached(key);
    if(cached.isNotEmpty&&mounted)setState((){
     route=effectiveRouteDate(Map<String,dynamic>.from(cached.first['route'] as Map),widget.queue.pending,widget.queue.identity);
     stops=(cached.first['stops'] as List).map((x)=>Map<String,dynamic>.from(x as Map)).toList();
@@ -130,23 +131,23 @@ class _DayRoutePageState extends State<DayRoutePage>{
      headers:widget.service.headers).timeout(const Duration(seconds:20)));
    final item=Map<String,dynamic>.from(res['item'] as Map);
    final list=(res['stops'] as List).map((x)=>Map<String,dynamic>.from(x as Map)).toList();
-   await widget.queue.cache(key,[{'route':item,'stops':list}]);
+   try{await widget.queue.cache(key,[{'route':item,'stops':list}]);}catch(_){}
    if(mounted)setState((){route=effectiveRouteDate(item,widget.queue.pending,widget.queue.identity);stops=list;offline=false;});
    try{
     final r=decodeApi(await http.get(widget.service.uri('/api/v1/day-routes/${widget.routeId}/candidates'),
       headers:widget.service.headers).timeout(const Duration(seconds:20)));
     candidates=(r['items'] as List).map((x)=>Map<String,dynamic>.from(x as Map)).toList();
-    await widget.queue.cache(candidateKey,candidates);
+    try{await widget.queue.cache(candidateKey,candidates);}catch(_){}
    }catch(e){
     if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;
-    final cached=await widget.queue.cached(candidateKey);
+    final cached=await safeCached(candidateKey);
     if(cached.isNotEmpty)candidates=cached;
    }
   }catch(e){
    if(e is ApiFailure&&(e.status==401||e.status==403)){
     if(mounted)setState((){route=null;stops=[];candidates=[];offline=false;});
    }else{
-    final cached=await widget.queue.cached(candidateKey);
+    final cached=await safeCached(candidateKey);
     if(cached.isNotEmpty)candidates=cached;
    }
    if(mounted)setState(()=>error=e.toString());

@@ -115,7 +115,7 @@ class _WorkHubPageState extends State<WorkHubPage>{
       .timeout(const Duration(seconds:25)));
    final fresh=(res['items'] as List)
      .map((v)=>Map<String,dynamic>.from(v as Map)).toList();
-   await widget.queue.cache(key,fresh);
+   try{await widget.queue.cache(key,fresh);}catch(_){}
    if(mounted)setState((){routes=fresh;offline=false;});
   }catch(e){
    if(e is ApiFailure&&(e.status==401||e.status==403)){

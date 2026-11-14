@@ -69,7 +69,7 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
        '/api/v1/monthly-plans',{'month':monthKey(month)})));
       final next=(res['items'] as List).map((v)=>
        Map<String,dynamic>.from(v as Map)).toList();
-      await widget.queue.cache(monthCache,next);
+      try{await widget.queue.cache(monthCache,next);}catch(_){}
       if(mounted)setState(()=>items=next);
      }catch(e){
       problems.add('Kế hoạch: $e');
@@ -83,7 +83,7 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
        '/api/v1/monthly-plans/options')));
       final next=(res['scopes'] as List).map((v)=>
        Map<String,dynamic>.from(v as Map)).toList();
-      await widget.queue.cache(optionsCache,next);
+      try{await widget.queue.cache(optionsCache,next);}catch(_){}
       if(mounted)setState(()=>scopes=next);
      }catch(e){
       problems.add('Quyền địa bàn: $e');
@@ -97,7 +97,7 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
        '/api/v1/day-routes',{'month':monthKey(month)})));
       final next=(res['items'] as List).map((v)=>
        Map<String,dynamic>.from(v as Map)).toList();
-      await widget.queue.cache(routeCache,next);
+      try{await widget.queue.cache(routeCache,next);}catch(_){}
       if(mounted)setState(()=>dayRoutes=next);
      }catch(e){
       problems.add('Tuyến ngày: $e');
