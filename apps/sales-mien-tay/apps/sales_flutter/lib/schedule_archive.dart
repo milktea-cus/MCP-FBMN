@@ -17,7 +17,7 @@ Future<Map<String,dynamic>> archiveWorkScheduleRequest(
  final uri=service.uri('/api/v1/monthly-plans/$id',{
   'version':version.toString(),
  });
- final response=await (client?.delete(uri,headers:service.headers)??
+ final response=await ((client??service.client)?.delete(uri,headers:service.headers)??
    http.delete(uri,headers:service.headers))
   .timeout(const Duration(seconds:20));
  final result=decodeApi(response);
