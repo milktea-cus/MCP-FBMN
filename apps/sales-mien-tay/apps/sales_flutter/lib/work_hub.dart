@@ -5,6 +5,7 @@ import 'customers.dart';
 import 'offline_queue.dart';
 import 'monthly_plan.dart';
 import 'day_route.dart';
+import 'work_session_identity.dart';
 import 'planning_periods.dart';
 import 'session.dart';
 
@@ -89,9 +90,40 @@ class _WorkHubPageState extends State<WorkHubPage>{
   if(value!=null&&mounted){setState(()=>day=value);await load();}
  }
  Future<void> openRoute(Map<String,dynamic> route)async{
+  final id=route['id'].toString();
+  final state=workSessionState(route,widget.queue.pending);
+  final today=dayKey(DateTime.now().toUtc().add(const Duration(hours:7)));
+  if(state=='open'&&route['owner_sub']==widget.queue.identity&&
+    route['route_date'].toString().startsWith(today)){
+   final another=routes.any((r)=>r['id']!=id&&
+     r['owner_sub']==widget.queue.identity&&
+     workSessionState(r,widget.queue.pending)=='ongoing');
+   if(another){
+    if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+     content:Text('Đã có phiên đang đi. Hãy tiếp tục hoặc kết thúc phiên đó trước.')));
+    return;
+   }
+   final ref=workSessionId(widget.queue.identity,id);
+   final depends=<String>[
+    for(final op in widget.queue.pending)
+     if(op['path']=='/api/v1/day-routes'&&
+       (op['payload'] as Map?)?['client_ref']==id)id,
+   ];
+   try{
+    await widget.queue.enqueue('/api/v1/day-routes/$id/work-session',{
+     'client_ref':ref,'captured_at':DateTime.now().toUtc().toIso8601String(),
+    },dependsOn:depends);
+    route={...route,'work_session_state':'ongoing',
+     'work_session_id':ref,'work_session_version':1};
+   }catch(e){
+    if(mounted)ScaffoldMessenger.of(context).showSnackBar(
+     SnackBar(content:Text('Không lưu được mở phiên: $e')));
+    return;
+   }
+  }
+  if(!mounted)return;
   await Navigator.push(context,MaterialPageRoute(builder:(_)=>DayRoutePage(
-   queue:widget.queue,service:widget.service,
-   routeId:route['id'].toString(),cachedRoute:route)));
+   queue:widget.queue,service:widget.service,routeId:id,cachedRoute:route)));
   if(mounted)await load();
  }
  List<Map<String,dynamic>> get dayRoutes=>
@@ -148,19 +180,34 @@ class _WorkHubPageState extends State<WorkHubPage>{
        ))),
       for(final route in dayRoutes)Builder(builder:(context){
        final c=WorkCounts.fromRoutes([route]);
-       return Card(child:ListTile(
-        leading:const Icon(Icons.route_outlined),
-        title:Text(route['purpose']?.toString()??'Công tác'),
-        subtitle:Text(
-         '${route['scope_kind']=='territory'?'Địa bàn':route['scope_kind']=='chain'?'Chuỗi':'Khách cụ thể'} · ${route['scope_key']}\n'
-         'Kế hoạch ${c.planned} · Đã ghé ${c.visited} · Chưa ghé ${c.notVisited}'
-         '${c.missed>0?' (lý do: ${c.missed})':''}\n'
-         'Khảo sát xong ${c.surveys} · Lead ${c.leads} · GPS thị trường ${c.marketVisits} · Khách phát sinh ${c.unplanned}',
+       final state=workSessionState(route,widget.queue.pending);
+       final own=route['owner_sub']==widget.queue.identity;
+       final start=state=='open'&&own&&route['route_date'].toString().startsWith(today);
+       final action=start?'Bắt đầu phiên':state=='ongoing'?'Tiếp tục phiên'
+        :state=='done'||state=='cancelled'?'Xem lịch sử':'Xem lịch';
+       final status=state=='ongoing'?'Đang đi':state=='done'?'Đã kết thúc'
+        :state=='cancelled'?'Đã hủy':'Chưa bắt đầu';
+       return Card(child:Column(children:[
+        ListTile(
+         leading:Icon(state=='ongoing'?Icons.directions_walk_outlined:Icons.route_outlined),
+         title:Text(route['purpose']?.toString()??'Công tác'),
+         subtitle:Text(
+          '${route['scope_kind']=='territory'?'Địa bàn':route['scope_kind']=='chain'?'Chuỗi':'Khách cụ thể'} · ${route['scope_key']}\n'
+          '$status · Kế hoạch ${c.planned} · Đã ghé ${c.visited} · Chưa ghé ${c.notVisited}\n'
+          'Khảo sát ${c.surveys} · Lead ${c.leads} · GPS thị trường ${c.marketVisits}',
+         ),
+         isThreeLine:true,onTap:()=>openRoute(route),
         ),
-        isThreeLine:true,
-        trailing:const Icon(Icons.chevron_right),
-        onTap:()=>openRoute(route),
-       ));
+        Align(alignment:Alignment.centerRight,child:Padding(
+         padding:const EdgeInsets.only(right:8,bottom:6),
+         child:TextButton.icon(
+          key:ValueKey('work-session-${route['id']}'),
+          onPressed:()=>openRoute(route),
+          icon:Icon(start?Icons.play_arrow_outlined:
+           state=='ongoing'?Icons.play_circle_outline:Icons.history),
+          label:Text(action)),
+        )),
+       ]));
       }),
     ])),
   ]);
