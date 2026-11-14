@@ -30,6 +30,10 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
  @override void dispose(){widget.queue.removeListener(_changed);super.dispose();}
  void _changed(){if(mounted)setState((){});}
  void _toast(String msg){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(msg)));}
+ Future<http.Response> _get(Uri uri)=>(
+  widget.service.client?.get(uri,headers:widget.service.headers)??
+  http.get(uri,headers:widget.service.headers))
+  .timeout(const Duration(seconds:20));
  Future<void> _reload()async{
   if(busy)return;
   setState((){busy=true;error=null;});
@@ -39,10 +43,10 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
     final localRoutes=await widget.queue.cached(routeCache);
    if(mounted)setState((){items=localItems;scopes=localScopes;dayRoutes=localRoutes;cached=true;});
    final results=await Future.wait([
-    http.get(widget.queue.session.uri('/api/v1/monthly-plans').replace(queryParameters:{'month':monthKey(month)}),headers:widget.service.headers).timeout(const Duration(seconds:20)),
-    http.get(widget.queue.session.uri('/api/v1/monthly-plans/options'),headers:widget.service.headers).timeout(const Duration(seconds:20)),
-     http.get(widget.queue.session.uri('/api/v1/day-routes').replace(queryParameters:{'month':monthKey(month)}),headers:widget.service.headers).timeout(const Duration(seconds:20)),
-   ]);
+     _get(widget.service.uri('/api/v1/monthly-plans',{'month':monthKey(month)})),
+     _get(widget.service.uri('/api/v1/monthly-plans/options')),
+     _get(widget.service.uri('/api/v1/day-routes',{'month':monthKey(month)})),
+    ]);
    final plans=decodeApi(results[0]),options=decodeApi(results[1]),routesData=decodeApi(results[2]);
    final fresh=(plans['items'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
    final allowed=(options['scopes'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
