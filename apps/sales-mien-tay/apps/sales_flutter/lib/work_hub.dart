@@ -110,7 +110,10 @@ class _WorkHubPageState extends State<WorkHubPage>{
        ButtonSegment(value:1,icon:Icon(Icons.route_outlined),label:Text('Hôm nay')),
        ButtonSegment(value:2,icon:Icon(Icons.fact_check_outlined),label:Text('Kết quả')),
       ],
-      selected:{tab},onSelectionChanged:(s)=>setState(()=>tab=s.first),
+      selected:{tab},onSelectionChanged:(s){
+        setState(()=>tab=s.first);
+        if(tab!=0)unawaited(load());
+       },
      ),
     ])),
    Expanded(child:tab==0
