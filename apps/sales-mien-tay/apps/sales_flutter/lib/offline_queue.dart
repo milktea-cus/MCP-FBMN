@@ -543,7 +543,7 @@ class OfflineQueue extends ChangeNotifier {
     activePath=describe(row);_notify();
     try{
      final payload=Map<String,dynamic>.from(row['payload'] as Map);
-     final headers={...sessionHeaders(session.cookie),'X-Sync-Identity':identity,'X-Sync-Revision':revision};
+     final headers={...sessionHeaders(session.cookie),'X-Sync-Identity':identity,'X-Sync-Revision':revision,'X-Sync-Protocol':'2'};
      final uri=session.uri(row['path'] as String);
      if((row['path'] as String).endsWith('/photos')){
       final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
