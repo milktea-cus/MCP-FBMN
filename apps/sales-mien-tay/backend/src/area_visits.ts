@@ -42,13 +42,16 @@ export async function areaVisitRoutes(req:Request,env:AuthEnv,actor:Actor,url:UR
  }
  if(url.pathname==='/api/v1/prospects'&&req.method==='GET'){
   const filter=url.searchParams.get('stop_id')??'';
-  if(filter&&!uuid.test(filter))return bad('Stop UUID không hợp lệ');
+  const routeId=url.searchParams.get('route_id')??'';
+  if((filter&&!uuid.test(filter))||(routeId&&!uuid.test(routeId))||
+    (filter!==''&&routeId!==''))return bad('Bộ lọc công tác không hợp lệ');
   const rows=await db`SELECT p.*,v.day_route_stop_id,v.checkin_at,
    s.stop_kind,s.province,s.district,r.route_date FROM public.field_prospects p
    JOIN public.field_area_visits v ON v.id=p.area_visit_id
-   JOIN public.field_route_stops s ON s.id=v.day_route_stop_id
-   JOIN public.field_day_routes r ON r.id=s.day_route_id
-   WHERE (${filter}='' OR v.day_route_stop_id=${filter||null}::uuid) AND
+   LEFT JOIN public.field_route_stops s ON s.id=v.day_route_stop_id
+   JOIN public.field_day_routes r ON r.id=coalesce(v.day_route_id,s.day_route_id)
+   WHERE (${filter}='' OR v.day_route_stop_id=${filter||null}::uuid)
+     AND (${routeId}='' OR v.day_route_id=${routeId||null}::uuid) AND
     (p.owner_sub=${actor.sub} OR ${actor.admin}
     OR (${actor.manager} AND public.sales_staff_in_subtree(${actor.sub},p.owner_sub)))
    ORDER BY p.created_at DESC,p.id LIMIT 1000`;
@@ -56,13 +59,17 @@ export async function areaVisitRoutes(req:Request,env:AuthEnv,actor:Actor,url:UR
  }
  if(url.pathname==='/api/v1/area-visits'&&req.method==='GET'){
   const stop=url.searchParams.get('stop_id')??'';
-  if(!uuid.test(stop))return bad('Thiếu UUID điểm công tác');
+  const routeId=url.searchParams.get('route_id')??'';
+  if((!stop&&!routeId)||(stop&&routeId)||
+   (stop&&!uuid.test(stop))||(routeId&&!uuid.test(routeId)))
+   return bad('Thiếu hoặc trùng UUID phạm vi công tác');
   const items=await db`SELECT v.*,(SELECT count(*) FROM public.field_area_visit_photos f WHERE f.area_visit_id=v.id AND f.status='ready')::int AS photo_count,
    p.id AS prospect_id,p.name AS prospect_name,
    p.address_line AS prospect_address,p.status AS prospect_status
    FROM public.field_area_visits v LEFT JOIN public.field_prospects p ON p.area_visit_id=v.id
-   JOIN public.field_route_stops s ON s.id=v.day_route_stop_id
-   WHERE v.day_route_stop_id=${stop}::uuid
+   LEFT JOIN public.field_route_stops s ON s.id=v.day_route_stop_id
+   WHERE ((${stop}<>'' AND v.day_route_stop_id=${stop||null}::uuid)
+      OR (${routeId}<>'' AND v.day_route_id=${routeId||null}::uuid))
     AND (v.owner_sub=${actor.sub} OR ${actor.admin}
       OR (${actor.manager} AND public.sales_staff_in_subtree(${actor.sub},v.owner_sub)))
    ORDER BY v.checkin_at DESC,v.id LIMIT 200`;
@@ -71,9 +78,13 @@ export async function areaVisitRoutes(req:Request,env:AuthEnv,actor:Actor,url:UR
  if(url.pathname!=='/api/v1/area-visits'||req.method!=='POST')return bad('Method not allowed',405);
  let v:Record<string,unknown>;
  try{v=await input(req);}catch{return bad('JSON không hợp lệ');}
- const ref=v.client_ref,stop=v.day_route_stop_id,at=captured(v.captured_at);
- if(typeof ref!=='string'||!uuid.test(ref)||typeof stop!=='string'||!uuid.test(stop)||!at)
-  return bad('UUID và ngày GPS không hợp lệ');
+ const ref=v.client_ref,stop=v.day_route_stop_id,route=v.day_route_id,at=captured(v.captured_at);
+ const scoped=(typeof stop==='string'&&uuid.test(stop)) !==
+  (typeof route==='string'&&uuid.test(route));
+ if(typeof ref!=='string'||!uuid.test(ref)||!scoped||!at||
+   (stop!=null&&(typeof stop!=='string'||!uuid.test(stop)))||
+   (route!=null&&(typeof route!=='string'||!uuid.test(route))))
+  return bad('UUID tuyến/điểm ghé hoặc ngày GPS không hợp lệ');
  if(typeof v.latitude!=='number'||!Number.isFinite(v.latitude)||Math.abs(v.latitude)>90
    ||typeof v.longitude!=='number'||!Number.isFinite(v.longitude)||Math.abs(v.longitude)>180
    ||typeof v.accuracy_m!=='number'||!Number.isFinite(v.accuracy_m)||v.accuracy_m<0||v.accuracy_m>100)
@@ -89,11 +100,16 @@ export async function areaVisitRoutes(req:Request,env:AuthEnv,actor:Actor,url:UR
  return bad('Lead phải có tên và địa chỉ điểm bán thực tế');
  const prospect=p as {name:string;address_line:string}|null|undefined;
  try{
-  const rows=await db`SELECT public.sales_save_area_visit(
-   ${actor.sub},${ref}::uuid,${stop}::uuid,${at}::timestamptz,
-   ${v.latitude as number},${v.longitude as number},${v.accuracy_m as number},
-   ${String(v.note??'')},${prospect?.name??null},${prospect?.address_line??null}) AS item`;
-  return json({item:rows[0].item},201);
+  const values=typeof route==='string'
+   ?await db`SELECT public.sales_save_route_market_visit(
+    ${actor.sub},${ref}::uuid,${route}::uuid,${at}::timestamptz,
+    ${v.latitude as number},${v.longitude as number},${v.accuracy_m as number},
+    ${String(v.note??'')},${prospect?.name??null},${prospect?.address_line??null}) AS item`
+   :await db`SELECT public.sales_save_area_visit(
+    ${actor.sub},${ref}::uuid,${stop}::uuid,${at}::timestamptz,
+    ${v.latitude as number},${v.longitude as number},${v.accuracy_m as number},
+    ${String(v.note??'')},${prospect?.name??null},${prospect?.address_line??null}) AS item`;
+  return json({item:values[0].item},201);
  }catch(e){
   const message=(e as {message?:string;code?:string}).message??'';
   if(message.includes('permission'))return bad('Chưa được giao tuyến hoặc quyền đã thu hồi',403);
