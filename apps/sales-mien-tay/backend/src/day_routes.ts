@@ -179,7 +179,8 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
   const route=routes[0];if(!route)return fail('Không tìm thấy tuyến hoặc không có quyền',404);
   if(path[2]==='candidates'){
    if(route.owner_sub!==actor.sub)return fail('Chỉ chủ tuyến xem gợi ý khách để lập lịch',403);
-   const customers=await db`SELECT c.id,c.name,c.province,c.district,c.category,c.code
+   const customers=await db`SELECT c.id,c.name,c.province,c.district,c.category,c.code,
+     c.phone,c.address_line,c.latitude,c.longitude,c.location_consent
     FROM public.customers c
     WHERE public.sales_customer_plannable(${actor.sub},c.id)
      AND ((${route.scope_kind==='territory'} AND c.province=${route.province}
@@ -192,7 +193,8 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
    return reply({items:customers,truncated:customers.length===1000});
   }
   const stops=await db`SELECT s.*,c.name AS customer_name,c.code AS customer_code,c.province AS customer_province,
-    c.district AS customer_district,c.category AS category,c.latitude,c.longitude,
+    c.district AS customer_district,c.category AS category,c.phone,
+    c.latitude,c.longitude,
     c.location_consent,c.address_line,c.owner_sub AS customer_owner,ch.name AS chain_name,
     ((SELECT count(*) FROM public.field_visits v WHERE v.day_route_stop_id=s.id)
      +(SELECT count(*) FROM public.field_area_visits a WHERE a.day_route_stop_id=s.id))::integer AS visit_count,

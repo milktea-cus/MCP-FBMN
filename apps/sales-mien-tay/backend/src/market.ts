@@ -7,7 +7,7 @@ const response=(v:unknown,status=200)=>new Response(JSON.stringify(v),{
 });
 const bad=(error:string,status=400)=>response({error},status);
 
-/** Market footprint derives ONLY from surveyed customer/brand sightings.
+/** Market footprint derives from verified surveys and customer-work observations.
  * Each customer-brand is unique and scoped; SKU/order/assortment data is
  * intentionally never joined into these statistics. */
 export async function marketRoutes(
@@ -23,8 +23,10 @@ export async function marketRoutes(
   const items=await db`SELECT b.id::text AS id,b.name,
     count(DISTINCT c.id)::integer AS customers
    FROM public.market_brands b
-   LEFT JOIN public.market_customer_brands m
-     ON m.brand_id=b.id AND m.present
+   LEFT JOIN (
+     SELECT customer_id,brand_id FROM public.market_customer_brands WHERE present
+     UNION SELECT customer_id,brand_id FROM public.market_customer_work_brands WHERE present
+   ) m ON m.brand_id=b.id
    LEFT JOIN public.customers c
      ON c.id=m.customer_id
     AND public.sales_customer_allowed(${actor.sub},c.id,'view')
@@ -36,14 +38,19 @@ export async function marketRoutes(
   const district=(url.searchParams.get('district')??'').trim();
   if(province.length>120||district.length>120)return bad('Địa bàn không hợp lệ');
   const [items,totals]=await Promise.all([
-   db`SELECT c.province,c.district,b.id::text AS brand_id,b.name AS brand,
-     count(DISTINCT c.id)::integer AS customers,
-     max(m.last_seen_at) AS last_seen_at
-    FROM public.market_customer_brands m
+   db`WITH pairs AS (
+      SELECT customer_id,brand_id,last_seen_at
+       FROM public.market_customer_brands WHERE present
+      UNION ALL
+      SELECT customer_id,brand_id,last_seen_at
+       FROM public.market_customer_work_brands WHERE present
+    )
+    SELECT c.province,c.district,b.id::text AS brand_id,b.name AS brand,
+     count(DISTINCT c.id)::integer AS customers,max(m.last_seen_at) AS last_seen_at
+    FROM pairs m
     JOIN public.market_brands b ON b.id=m.brand_id
     JOIN public.customers c ON c.id=m.customer_id
-    WHERE m.present
-     AND public.sales_customer_allowed(${actor.sub},c.id,'view')
+    WHERE public.sales_customer_allowed(${actor.sub},c.id,'view')
      AND (${province}='' OR c.province=${province})
      AND (${district}='' OR c.district=${district})
     GROUP BY c.province,c.district,b.id,b.name
@@ -56,7 +63,7 @@ export async function marketRoutes(
     GROUP BY c.province,c.district ORDER BY c.province,c.district LIMIT 2000`,
   ]);
   return response({items,customers:totals,
-   semantics:'Mỗi khách–nhãn chỉ tính một lần tại địa bàn hiện tại. Khảo sát lại cập nhật lần thấy gần nhất, không cộng lượt.'});
+   semantics:'Một khách–nhãn chỉ tính một lần; ghi nhận khi làm việc hay khảo sát không cộng trùng.'});
  }
  if(path==='/api/v1/market/customers'){
   const brandId=(url.searchParams.get('brand_id')??'').trim();
@@ -69,13 +76,29 @@ export async function marketRoutes(
      q.length>120||province.length>120||district.length>120||
      !Number.isInteger(limit)||limit<1||limit>200)
    return bad('Bộ lọc tìm kiếm nhãn hàng không hợp lệ');
-  const rows=await db`SELECT c.id::text AS customer_id,c.name AS customer_name,
+  const rows=await db`WITH pairs AS (
+     SELECT customer_id,brand_id,first_seen_at,last_seen_at,
+       last_session_id,NULL::uuid AS last_work_action_id
+      FROM public.market_customer_brands WHERE present
+     UNION ALL
+     SELECT customer_id,brand_id,first_seen_at,last_seen_at,
+       NULL::uuid AS last_session_id,last_action_id AS last_work_action_id
+      FROM public.market_customer_work_brands WHERE present
+    ), combined AS (
+     SELECT customer_id,brand_id,min(first_seen_at) AS first_seen_at,
+       max(last_seen_at) AS last_seen_at,
+       (array_agg(last_session_id ORDER BY last_seen_at DESC))[1] AS last_session_id,
+       (array_agg(last_work_action_id ORDER BY last_seen_at DESC))[1] AS last_work_action_id
+      FROM pairs GROUP BY customer_id,brand_id
+    )
+    SELECT c.id::text AS customer_id,c.name AS customer_name,
     c.field_code,c.province,c.district,b.id::text AS brand_id,b.name AS brand,
-    m.first_seen_at,m.last_seen_at,m.last_session_id::text AS last_session_id
-   FROM public.market_customer_brands m
+    m.first_seen_at,m.last_seen_at,m.last_session_id::text AS last_session_id,
+    m.last_work_action_id::text AS last_work_action_id
+   FROM combined m
    JOIN public.market_brands b ON b.id=m.brand_id
    JOIN public.customers c ON c.id=m.customer_id
-   WHERE m.present AND public.sales_customer_allowed(${actor.sub},c.id,'view')
+   WHERE public.sales_customer_allowed(${actor.sub},c.id,'view')
     AND (${brandId}='' OR m.brand_id::text=${brandId})
     AND (${customerId}='' OR c.id::text=${customerId})
     AND (${province}='' OR c.province=${province})

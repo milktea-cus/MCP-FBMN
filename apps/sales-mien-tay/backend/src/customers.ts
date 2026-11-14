@@ -244,10 +244,16 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
     if(!uuid.test(String(data.client_ref??'')))return fail('client_ref UUID bắt buộc');
     if(!point(data.latitude,data.longitude,data.accuracy_m) || typeof data.accuracy_m!=='number' || data.accuracy_m>100)
       return fail('GPS cần độ chính xác tối đa 100m');
-    if(!current.location_consent || current.latitude===null || current.longitude===null)
-      return fail('Điểm bán chưa có tọa độ được phép sử dụng',409);
-    const distance=distanceMeters(current.latitude,current.longitude,data.latitude as number,data.longitude as number);
-    if(distance>200)return fail('Vị trí check-in ngoài bán kính 200m',422);
+    // Check-in records the employee's measured GPS, not the shop's canonical
+    // location. Missing/unapproved shop coordinates must never block proof
+    // of a real trip or silently set/overwrite the customer location.
+    const hasVerifiedShopPoint=current.location_consent===true&&
+      typeof current.latitude==='number'&&typeof current.longitude==='number';
+    const distance=hasVerifiedShopPoint
+      ?distanceMeters(current.latitude,current.longitude,data.latitude as number,data.longitude as number)
+      :null;
+    if(distance!==null&&distance>200)
+      return fail('Vị trí check-in ngoài bán kính 200m so với tọa độ cửa hàng đã xác minh',422);
     const captured=typeof data.captured_at==='string'?Date.parse(data.captured_at):Date.now();
     if(!Number.isFinite(captured)||captured>Date.now()+60000||captured<Date.now()-30*86400000)return fail('Thời gian ghi nhận GPS không hợp lệ',422);
     const stop=data.route_stop_id;
