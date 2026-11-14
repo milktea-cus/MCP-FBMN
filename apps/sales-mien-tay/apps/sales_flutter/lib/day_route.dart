@@ -224,6 +224,36 @@ class _DayRoutePageState extends State<DayRoutePage>{
    )));
   if(created==true&&mounted){notice('Đã lưu khách mới vào công tác trên máy.');await load();}
  }
+ /// Opening a customer card only reads details; a route stop is created
+ /// when the employee actually chooses an activity. This avoids phantom
+ /// "outside plan" stops from simply browsing the assigned customer list.
+ Future<Map<String,dynamic>?> ensureCustomerStop(Map<String,dynamic> customer)async{
+  if(customer['source']!='scope')return customer;
+  if(!canExecute)return null;
+  final id=customer['customer_id']?.toString()??'';
+  if(id.isEmpty)return null;
+  for(final row in stops){
+   if(row['customer_id']?.toString()==id)return row;
+  }
+  for(final p in pendingStops){
+   if((p['payload'] as Map?)?['customer_id']?.toString()==id){
+    return {...customer,'id':(p['payload'] as Map)['client_ref'],
+     'source':'pending','sync_status':p['status']};
+   }
+  }
+  try{
+   final ref=const Uuid().v4();
+   await widget.queue.enqueue('/api/v1/day-routes/${widget.routeId}/unplanned-stops',{
+    'client_ref':ref,'stop_kind':'customer','customer_id':id,
+    'sequence':nextOrder,'purpose':'Ghé khách trong phạm vi',
+    'captured_at':DateTime.now().toUtc().toIso8601String(),
+   },dependsOn:_routeDependencies());
+   return {...customer,'id':ref,'source':'pending','sync_status':'pending'};
+  }catch(e){
+   notice('Không lưu được thao tác tại khách: $e');
+   return null;
+  }
+ }
  Future<void> customerWork(Map<String,dynamic> stop)async{
   if(stop['stop_kind']!='customer')return;
   final action=await showModalBottomSheet<String>(context:context,
@@ -250,9 +280,12 @@ class _DayRoutePageState extends State<DayRoutePage>{
        onTap:()=>Navigator.pop(sheet,'missed')),
      ]))));
   if(!mounted)return;
-  if(action=='gps')await visit(stop);
-  if(action=='survey')await openCustomerSurvey(stop);
-  if(action=='missed')await recordMissed(stop);
+  if(action==null)return;
+  final recorded=await ensureCustomerStop(stop);
+  if(recorded==null)return;
+  if(action=='gps')await visit(recorded);
+  if(action=='survey')await openCustomerSurvey(recorded);
+  if(action=='missed')await recordMissed(recorded);
  }
  Future<void> addCustomers()async{
   if(!canEditPlannedStops)return;
@@ -745,7 +778,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
       maxLines:1,overflow:TextOverflow.ellipsis),
      subtitle:Text(
       '${c['customer_code']??''} · ${c['customer_district']??''}'
-      '\\n${switch(c['source']){
+      '\n${switch(c['source']){
        'scope'=>'Trong phạm vi · Chưa ghé theo lịch',
        'pending'=>'Đã lưu máy · ${c['sync_status']=='blocked'?'Cần xử lý đồng bộ':'Chờ đồng bộ'}',
        _=>switch(c['activity_status']){
@@ -762,10 +795,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
        tooltip:'Xem lỗi đồng bộ',onPressed:()=>notice(
         c['sync_error']?.toString()??'Cần xử lý đồng bộ.'))
       :const Icon(Icons.chevron_right),
-     onTap:c['source']=='scope'
-      ?(canExecute?()=>unawaited(addUnplanned(customerId:c['customer_id'].toString()))
-       :()=>notice('Đến ngày công tác, mở Hôm nay để làm việc tại khách.'))
-      :()=>unawaited(customerWork(c)),
+     onTap:()=>unawaited(customerWork(c)),
     )),
     if(customerRows.length>100)Padding(padding:const EdgeInsets.all(8),
      child:Text('Hiển thị 100/${customerRows.length} khách. '
