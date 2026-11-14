@@ -239,7 +239,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
      'client_ref':const Uuid().v4(),'route_stop_id':stop['id'],
      'latitude':pos.latitude,'longitude':pos.longitude,'accuracy_m':pos.accuracy,
      'captured_at':pos.timestamp.toUtc().toIso8601String(),
-    });
+    },dependsOn:_routeDependencies());
    }else{
     final note=TextEditingController();
     final prospect=TextEditingController();
@@ -266,7 +266,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
      'latitude':pos.latitude,'longitude':pos.longitude,'accuracy_m':pos.accuracy,
      'captured_at':pos.timestamp.toUtc().toIso8601String(),'note':info,
      if(lead.isNotEmpty)'prospect':{'name':lead,'address_line':where},
-    });
+    },dependsOn:_routeDependencies());
    }
    notice('Đã ghi nhận GPS trên máy. Check-in chưa phải hoàn thành khảo sát.');
    if(mounted)await load();
@@ -309,7 +309,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
    await widget.queue.enqueue('/api/v1/day-routes/${widget.routeId}/stops/${stop['id']}/missed',{
     'client_ref':const Uuid().v4(),'reason_code':reason,
     'reason_note':detail,'captured_at':DateTime.now().toUtc().toIso8601String(),
-   });
+   },dependsOn:_routeDependencies());
    notice('Đã lưu lý do, không tính là đã ghé · chờ đồng bộ.');
    if(mounted)await load();
   }catch(e){notice('Không lưu được lý do: $e');}
