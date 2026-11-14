@@ -459,11 +459,13 @@ void showSyncQueueDetails(BuildContext context,OfflineQueue queue)=>showDialog<v
            Align(alignment:Alignment.centerRight,child:TextButton.icon(
             onPressed:queue.syncing?null:()=>unawaited(
              queue.retryBlocked(job['key'].toString())),
-            icon:const Icon(Icons.refresh),label:const Text('Thử gửi lại'))),
+            icon:const Icon(Icons.refresh),label:Text(queue.isRouteDuplicateConflict(job)
+             ?'Đối chiếu tuyến đã lưu':'Thử gửi lại'))),
          ]))),
        const SizedBox(height:8),
-       const Text('Thao tác chưa được gửi không bị tự xóa. '
-        'Nếu gặp lỗi 403/409, xem nguyên nhân trước khi gửi lại.',
+       const Text('Với lỗi 409 trùng tuyến, Đối chiếu chỉ đọc dữ liệu máy chủ: '
+        'nếu trùng hoàn toàn sẽ xác nhận đã lưu; nếu khác sẽ giữ dữ liệu trên máy. '
+        'Không xóa thao tác chưa xác nhận.',
         style:TextStyle(fontSize:12)),
       ])))),
     actions:[
