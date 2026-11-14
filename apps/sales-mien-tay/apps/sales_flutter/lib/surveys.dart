@@ -508,6 +508,15 @@ class _SurveyDetailState extends State<SurveyDetail>{
  }
 }
 
+/// Supplier choices are published as a versioned snapshot, just like brands.
+/// They refer to real NPP customers, not product/SKU brands.
+List<String> supplySourceOptions(Iterable<FieldCustomer> customers){
+ final names={for(final c in customers)
+  if(c.category=='npp'&&c.name.trim().isNotEmpty)c.name.trim()};
+ final sorted=names.toList()..sort();
+ return ['Mua trực tiếp công ty',...sorted,'NPP khác (ghi chú tên)'];
+}
+
 class SurveyTemplateAdmin extends StatefulWidget{
  final CustomerService service;final RegionCatalog regions;
  const SurveyTemplateAdmin({super.key,required this.service,required this.regions});
@@ -517,7 +526,8 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
  String province='';int version=0;bool busy=false;String? message;
  List<Map<String,dynamic>> qs=[];
  List<String> officialBrands=[];
- @override void initState(){super.initState();unawaited(loadBrands());}
+ List<String> supplierOptions=const ['Mua trực tiếp công ty','NPP khác (ghi chú tên)'];
+ @override void initState(){super.initState();unawaited(loadBrands());unawaited(loadSuppliers());}
  Future<void> loadBrands()async{
   try{
    final result=await surveyGet(widget.service,'/api/v1/market/brands');
@@ -526,6 +536,27 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
   }catch(_){
    // Existing versioned templates stay available during a catalog outage.
   }
+ }
+ Future<void> loadSuppliers()async{
+  try{
+   final list=await widget.service.list();
+   if(mounted)setState(()=>supplierOptions=supplySourceOptions(list));
+  }catch(_){
+   // Keep the manually editable published template when the customer list is offline.
+  }
+ }
+ void applySupplierChoices(){
+  final q=<String,dynamic>{
+   'id':'supply_source',
+   'label':'Nguồn hàng đang lấy (NPP / trực tiếp công ty)',
+   'type':'multi_choice','required':false,
+   'options':List<String>.of(supplierOptions),
+  };
+  setState((){
+   final i=qs.indexWhere((item)=>item['id']=='supply_source');
+   if(i>=0)qs[i]=q;
+   else if(qs.length<50)qs.add(q);
+  });
  }
  void applyBrandCatalog(){
   if(officialBrands.length<2)return;
@@ -581,6 +612,9 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
     OutlinedButton.icon(onPressed:busy||officialBrands.length<2?null:applyBrandCatalog,
      icon:const Icon(Icons.label_outline),
      label:const Text('Chọn nhãn thị trường đã gặp')),
+    OutlinedButton.icon(onPressed:busy?null:applySupplierChoices,
+     icon:const Icon(Icons.local_shipping_outlined),
+     label:const Text('Nguồn hàng / NPP')),
     FilledButton(onPressed:busy?null:publish,child:const Text('Phát hành phiên bản')),
    ]),
    if(officialBrands.length<2)const Text(
