@@ -9,6 +9,8 @@ import 'session.dart';
 import 'surveys.dart';
 import 'route_workflow.dart';
 import 'schedule_archive.dart';
+import 'work_session_identity.dart';
+import 'dart:convert';
 
 bool scopeSupportsExtra(Map<String,dynamic> route)=>
  route['scope_kind']=='territory'||route['scope_kind']=='chain';
@@ -108,7 +110,11 @@ class _DayRoutePageState extends State<DayRoutePage>{
     ((stop['visit_count'] as num?)?.toInt()??0)>0||
     ((stop['session_count'] as num?)?.toInt()??0)>0||
     stop['missed_code']!=null);
- bool get canEditPlannedStops=>canModify&&!hasRecordedActivity;
+ String get workState=>route==null?'open':workSessionState(route!,widget.queue.pending);
+ String get sessionId=>route==null?'':workSessionRouteId(route!,widget.queue.identity);
+ bool get sessionActive=>workState=='ongoing';
+ bool get canExecute=>canModify&&sessionActive&&isTodayRoute;
+ bool get canEditPlannedStops=>canModify&&workState=='open'&&!hasRecordedActivity;
  bool missedPending(String id)=>widget.queue.pending.any((op)=>
   op['path']=='/api/v1/day-routes/${widget.routeId}/stops/$id/missed');
  bool activityPending(String id)=>widget.queue.pending.any((op){
@@ -130,11 +136,16 @@ class _DayRoutePageState extends State<DayRoutePage>{
  }
  bool get isOwner=>route!=null&&route!['owner_sub']==widget.queue.identity;
  bool get canModify=>isOwner&&route!['status']=='ready'
-   &&route!['plan_status']!='cancelled'&&!busy;
+   &&route!['plan_status']!='cancelled'&&
+   workState!='done'&&workState!='cancelled'&&!busy;
  List<String> _routeDependencies()=>[
   for(final op in widget.queue.pending)
-   if(op['path']=='/api/v1/day-routes'&&(op['payload'] as Map)['client_ref']==widget.routeId)
-    widget.routeId
+   if(op['path']=='/api/v1/day-routes'&&
+      (op['payload'] as Map)['client_ref']==widget.routeId)
+    widget.routeId,
+  for(final op in widget.queue.pending)
+   if(op['path']=='/api/v1/day-routes/${widget.routeId}/work-session')
+    sessionId,
  ];
  Future<void> addCustomers()async{
   if(!canEditPlannedStops)return;
@@ -207,7 +218,9 @@ class _DayRoutePageState extends State<DayRoutePage>{
   }catch(e){notice('Không đổi được thứ tự: $e');}
  }
  Future<void> visit(Map<String,dynamic> stop)async{
-  if(!isOwner)return;
+  if(!canExecute){
+   notice('Hãy bắt đầu hoặc tiếp tục phiên hôm nay trước khi check-in.');return;
+  }
   if(stop['missed_code']!=null||missedPending(stop['id'].toString())){
    notice('Điểm đã ghi nhận không ghé, không tạo check-in giả.');return;
   }
@@ -261,7 +274,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
  }
 
  Future<void> recordMissed(Map<String,dynamic> stop)async{
-  if(!isOwner||!isTodayRoute||
+  if(!canExecute||
     ((stop['visit_count'] as num?)?.toInt()??0)>0||
     ((stop['session_count'] as num?)?.toInt()??0)>0||
     stop['missed_code']!=null||missedPending(stop['id'].toString())||
@@ -305,7 +318,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
  /// An unplanned STOP must always represent a real customer. Market discovery
  /// is recorded against the route itself, never as an area/chain stop.
  Future<void> addUnplanned()async{
-  if(!canModify||!isTodayRoute||!scopeSupportsExtra(route!))return;
+  if(!canExecute||!scopeSupportsExtra(route!))return;
   final occupied=<String>{
    for(final s in stops)if(s['customer_id']!=null)s['customer_id'].toString(),
    for(final op in pendingStops)if((op['payload'] as Map)['customer_id']!=null)
@@ -350,6 +363,9 @@ class _DayRoutePageState extends State<DayRoutePage>{
  /// For scheduled customer stops, open the existing survey linked by
  /// day_route_stop_id. SurveyPage handles its own GPS first verification.
  Future<void> openCustomerSurvey(Map<String,dynamic> stop)async{
+  if(!sessionActive||!isOwner||!isTodayRoute){
+   notice('Khảo sát chỉ được bắt đầu/tiếp tục trong phiên đang đi hôm nay.');return;
+  }
   if(stop['missed_code']!=null||missedPending(stop['id'].toString())){
    notice('Điểm đã ghi nhận không ghé. Không thể bắt đầu khảo sát.');return;
   }
@@ -373,7 +389,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
  }
  /// Real market discovery lives at route level. No fake area/chain stop.
  Future<void> recordMarketVisit()async{
-  if(!canModify||!isTodayRoute||!scopeSupportsExtra(route!))return;
+  if(!canExecute||!scopeSupportsExtra(route!))return;
   try{
    final pos=await captureGps(context);
    if(!mounted)return;
@@ -433,6 +449,66 @@ class _DayRoutePageState extends State<DayRoutePage>{
    queue:widget.queue,service:widget.service,route:route!,stop:stop)));
   if(mounted)await load();
  }
+ /// A session closes only after every earlier local operation is ACKed.
+ /// The queue dependency chain preserves GPS, photos, surveys and orders.
+ Future<void> endWorkSession()async{
+  if(!canExecute)return;
+  final noteController=TextEditingController();
+  final action=await showDialog<String>(context:context,builder:(dialog)=>AlertDialog(
+   title:const Text('Kết thúc phiên công tác'),
+   content:Column(mainAxisSize:MainAxisSize.min,children:[
+    const Text('Kết thúc lưu lại toàn bộ lịch sử công việc. Không được sửa lại GPS/khảo sát đã xác nhận.'),
+    TextField(controller:noteController,maxLength:2000,
+     decoration:const InputDecoration(labelText:'Ghi chú kết quả phiên')),
+   ]),
+   actions:[
+    TextButton(onPressed:()=>Navigator.pop(dialog),child:const Text('Tiếp tục đi')),
+    TextButton(onPressed:()=>Navigator.pop(dialog,'cancelled'),child:const Text('Hủy phiên')),
+    FilledButton(onPressed:()=>Navigator.pop(dialog,'done'),child:const Text('Kết thúc')),
+   ],
+  ));
+  final note=noteController.text.trim();noteController.dispose();
+  if(action==null)return;
+  if(!mounted)return;
+  final dependencies=<String>{
+   for(final op in widget.queue.pending)
+    if((op['payload'] as Map?)?['client_ref'] is String)
+     (op['payload'] as Map)['client_ref'].toString(),
+  }.toList();
+  try{
+   await widget.queue.enqueue('/api/v1/work-sessions/$sessionId/close',{
+    'client_ref':const Uuid().v4(),
+    'version':(route?['work_session_version'] as num?)?.toInt()??1,
+    'action':action,'note':note,
+    'captured_at':DateTime.now().toUtc().toIso8601String(),
+   },dependsOn:dependencies);
+   notice('Đã lưu kết thúc phiên trên máy. Máy chủ sẽ đóng sau khi các việc trước đã đồng bộ.');
+   if(mounted)Navigator.pop(context,true);
+  }catch(e){notice('Không lưu được yêu cầu kết thúc phiên: $e');}
+ }
+ Future<void> deleteEmptyWorkSession()async{
+  final current=route;
+  if(current==null||!isOwner||!['done','cancelled'].contains(workState)||
+    hasRecordedActivity||widget.queue.pending.isNotEmpty)return;
+  final yes=await showDialog<bool>(context:context,builder:(dialog)=>AlertDialog(
+   title:const Text('Xóa phiên rỗng?'),
+   content:const Text('Chỉ xóa phiên không có GPS, lead, khảo sát, khách phát sinh hay lý do không ghé. Lịch gốc và nhật ký kiểm toán được giữ.'),
+   actions:[
+    TextButton(onPressed:()=>Navigator.pop(dialog,false),child:const Text('Giữ phiên')),
+    FilledButton(onPressed:()=>Navigator.pop(dialog,true),child:const Text('Xóa phiên rỗng')),
+   ],
+  ));
+  if(yes!=true||!mounted)return;
+  try{
+   decodeApi(await http.delete(widget.service.uri('/api/v1/work-sessions/$sessionId'),
+    headers:widget.service.headers,body:jsonEncode({
+     'client_ref':const Uuid().v4(),
+     'confirm':'DELETE_EMPTY','version':(current['work_session_version'] as num?)?.toInt()??1,
+    })).timeout(const Duration(seconds:25)));
+   notice('Đã xóa phiên rỗng. Lịch và nhật ký vẫn còn.');
+   if(mounted)Navigator.pop(context,true);
+  }catch(e){notice('Không thể xóa phiên: $e');}
+ }
  Future<void> deleteSchedule()async{
   final current=route;
   if(current==null||current['owner_sub']!=widget.queue.identity||
@@ -470,11 +546,13 @@ class _DayRoutePageState extends State<DayRoutePage>{
      Text('${route!['route_date']?.toString().substring(0,10)} · ${route!['purpose']}',
        style:Theme.of(context).textTheme.titleMedium),
      Text('${route!['scope_kind']=='chain'?'Chuỗi':route!['scope_kind']=='customer'?'Khách cụ thể':'Địa bàn'}: ${route!['scope_key']} · Đã ghé $count/${sorted.length} khách · GPS thị trường ${route!['market_visit_count']??0}'),
+     Text('Phiên: ${switch(workState){'ongoing'=>'Đang đi','done'=>'Đã kết thúc','cancelled'=>'Đã hủy',_=>'Chưa bắt đầu'}}',
+      style:Theme.of(context).textTheme.bodyMedium),
      const SizedBox(height:8),
      Wrap(spacing:8,runSpacing:6,children:[
       if(scopeSupportsExtra(route!))FilledButton.icon(
        key:const ValueKey('route-find-new-lead'),
-       onPressed:canModify&&isTodayRoute?recordMarketVisit:null,
+       onPressed:canExecute?recordMarketVisit:null,
        icon:const Icon(Icons.add_location_alt_outlined),
        label:const Text('Tìm khách mới')),
       if(scopeSupportsExtra(route!))OutlinedButton.icon(
@@ -484,10 +562,19 @@ class _DayRoutePageState extends State<DayRoutePage>{
       OutlinedButton.icon(onPressed:canEditPlannedStops?addCustomers:null,
        icon:const Icon(Icons.group_add_outlined),label:const Text('Chọn nhiều khách')),
       if(scopeSupportsExtra(route!))OutlinedButton.icon(
-       onPressed:canModify&&isTodayRoute?addUnplanned:null,
+       onPressed:canExecute?addUnplanned:null,
        icon:const Icon(Icons.add_circle_outline),label:const Text('Khách phát sinh')),
       OutlinedButton.icon(onPressed:openTemplates,icon:const Icon(Icons.bookmark_outline),label:const Text('Mẫu tuyến')),
-      if(isOwner&&route!['plan_status']!='cancelled')OutlinedButton.icon(
+      if(canExecute)OutlinedButton.icon(
+       key:const ValueKey('work-session-finish'),
+       onPressed:endWorkSession,
+       icon:const Icon(Icons.flag_outlined),label:const Text('Kết thúc phiên')),
+      if(isOwner&&['done','cancelled'].contains(workState)&&
+        !hasRecordedActivity&&widget.queue.pending.isEmpty)OutlinedButton.icon(
+       key:const ValueKey('work-session-delete-empty'),
+       onPressed:deleteEmptyWorkSession,
+       icon:const Icon(Icons.delete_forever_outlined),label:const Text('Xóa phiên rỗng')),
+      if(isOwner&&workState=='open'&&route!['plan_status']!='cancelled')OutlinedButton.icon(
        key:const ValueKey('day-route-delete-schedule'),
        onPressed:busy?null:deleteSchedule,
        icon:const Icon(Icons.delete_outline),label:const Text('Xóa lịch')),
@@ -525,7 +612,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
       isThreeLine:true,
       onTap:sorted[i]['stop_kind']=='customer'
         ?()=>openCustomerSurvey(sorted[i]):()=>openEvidence(sorted[i]),
-      trailing:(!isOwner||(!isTodayRoute&&!canEditPlannedStops)||
+      trailing:(!canExecute&& !canEditPlannedStops||
         sorted[i]['missed_code']!=null)
        ?const Icon(Icons.chevron_right):PopupMenuButton<String>(
        tooltip:'Thao tác điểm ghé',
@@ -537,7 +624,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
         if(action=='down')unawaited(shift(sorted[i],1));
        },
        itemBuilder:(ctx)=>[
-        if(isTodayRoute&&sorted[i]['missed_code']==null&&
+        if(canExecute&&sorted[i]['missed_code']==null&&
           !missedPending(sorted[i]['id'].toString())&&
           !activityPending(sorted[i]['id'].toString())&&
           ((sorted[i]['visit_count'] as num?)?.toInt()??0)==0)...[
@@ -554,7 +641,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
      )),
     if(!busy&&sorted.isEmpty&&pending.isEmpty)
      const Padding(padding:EdgeInsets.all(18),
-      child:Text('Không có khách hẹn trước. Bấm Tìm khách mới để ghi GPS/lead tại địa bàn; không tạo khách giả.')),
+      child:Text('Không có khách hẹn trước. ${scopeSupportsExtra(route??{})?'Bắt đầu phiên và bấm Tìm khách mới để ghi GPS/lead.':'Mở kế hoạch để thêm khách cụ thể.'}')),
    ]),
   );
  }
