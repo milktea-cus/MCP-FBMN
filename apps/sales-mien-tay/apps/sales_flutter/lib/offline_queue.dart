@@ -220,8 +220,10 @@ class OfflineQueue extends ChangeNotifier {
  /// comparison must be exact before acknowledging anything in local storage.
  bool isRouteDuplicateConflict(Map<String,dynamic> row){
   final path=row['path']?.toString()??'';
-  final code=row['error']?.toString()??'';
-  return row['status']=='blocked'&&code.contains('409')&&
+  // Legacy PWA versions stored only the Vietnamese error text, not HTTP 409.
+  // A read-only comparison is safe for every blocked create route/stop,
+  // because acknowledgement still requires exact owner + payload equality.
+  return row['status']=='blocked'&&
    (path=='/api/v1/day-routes'||
     RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}/stops
  Future<void> retryBlocked(String key)async{
