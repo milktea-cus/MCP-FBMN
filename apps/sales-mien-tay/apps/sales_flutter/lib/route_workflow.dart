@@ -9,6 +9,7 @@ import 'models.dart';
 import 'offline_queue.dart';
 import 'session.dart';
 import 'survey_media.dart';
+import 'work_session_identity.dart';
 
 List<Map<String,dynamic>> routeTemplateStops(
  List<Map<String,dynamic>> stops,List<Map<String,dynamic>> pending
@@ -205,7 +206,8 @@ class _AreaEvidencePageState extends State<AreaEvidencePage>{
  String get areaFilter=>routeMarket?'route_id':'stop_id';
  String get cacheVisit=>'area-visits:${areaFilter}:$areaId';
  String get cacheLead=>'area-prospects:${areaFilter}:$areaId';
- bool get own=>widget.route['owner_sub']==widget.queue.identity;
+ bool get own=>widget.route['owner_sub']==widget.queue.identity&&
+  workSessionState(widget.route,widget.queue.pending)=='ongoing';
  List<Map<String,dynamic>> get queuedVisits=>widget.queue.pending.where((r)=>
   r['path']=='/api/v1/area-visits'&&
    (r['payload'] as Map)[routeMarket?'day_route_id':'day_route_stop_id']==areaId).toList();
