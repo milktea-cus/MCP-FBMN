@@ -25,3 +25,12 @@
 - Không có migration Neon, không đổi Cloudflare bindings, không đụng production data.
 - **Không xóa IndexedDB, không logout/xóa app/xóa dữ liệu Safari để xử lý**, vì row đang chờ chỉ nằm trong điện thoại.
 - Không thể biết chính xác row đang chờ của Owner từ server; phải dùng dialog mới trên PWA để xem loại thao tác + mã lỗi sau khi máy tải mã web mới. 401/403/409 do quyền hoặc dữ liệu thực tế có thể vẫn cần xử lý từng bản ghi, không được báo đã giải quyết nếu hàng đợi chưa nhận được ACK.
+
+
+## Bổ sung khẩn — iPhone nhấn đồng bộ không phản hồi (14/11/2026)
+
+- **Lỗi UI đã tìm thấy:** nút xoay góc phải của banner dùng `onPressed: _queue.syncing ? null : ...`; khi thấy `Đang đồng bộ` nó **bị vô hiệu hóa** và không có phản hồi. Dù toàn bộ `ListTile` có `onTap` mở dialog, người dùng thường nhấn đúng biểu tượng bên phải.
+- **Sửa:** thay phần tương tác bằng `SyncQueueBanner` có nút **Chi tiết** luôn bật, **toàn bộ dải màu** cũng mở chẩn đoán; hiển thị thông điệp lượt đồng bộ treo, không gửi POST song song. `showSyncQueueDetails` tách khỏi trạng thái màn hình để kiểm tra thực tế; dialog có chiều rộng thích ứng trên iPhone.
+- **Kiểm thử:** `test/sync_banner_test.dart` kiểm tra màn 320, 360, 390 px, giả lập queue `syncing=true` >2 phút, nhấn nút **Chi tiết** và nhấn dải trạng thái đều mở **hộp thoại thực** chứa tên thao tác, số lượng, nút thử lại.
+- **PWA cập nhật:** `scripts/build_offline_shell.py` yêu cầu cập nhật service worker và ưu tiên lấy code Flutter/bootstrap từ mạng khi có kết nối, fallback cache khi offline. `vercel.json` vô hiệu hóa CDN/browser stale caching riêng cho index, main.dart.js, flutter_bootstrap.js và worker script. Không xóa bất kỳ IndexedDB, session hoặc file ảnh nào.
+- **Nghiệm thu còn mở:** Chưa đọc được tác vụ offline cục bộ của iPhone từ server; sau khi bản web production được xác nhận, Owner cần mở lại PWA để thấy nút **Chi tiết**. Nếu vẫn không thao tác, cần kiểm tra có phải cả Flutter runtime bị treo hoặc PWA vẫn dùng code cũ; tuyệt đối không khuyến nghị gỡ app/xóa dữ liệu Safari.
