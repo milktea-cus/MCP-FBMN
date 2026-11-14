@@ -19,6 +19,7 @@ python3 scripts/generate_app_icons.py
 python3 scripts/check_app_icons.py
 flutter analyze --no-fatal-infos
 flutter test
-flutter build web --release --pwa-strategy=none --no-web-resources-cdn --dart-define=API_BASE_URL=https://field-sales-api.milktea-cus.workers.dev
+export FBMN_BUILD_SHA="${VERCEL_GIT_COMMIT_SHA:-${GITHUB_SHA:-unknown}}"
+flutter build web --release --pwa-strategy=none --no-web-resources-cdn --dart-define=API_BASE_URL=https://field-sales-api.milktea-cus.workers.dev --dart-define=FBMN_BUILD_SHA="$FBMN_BUILD_SHA"
 
 python3 scripts/build_offline_shell.py
