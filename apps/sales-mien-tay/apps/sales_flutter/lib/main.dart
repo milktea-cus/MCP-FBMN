@@ -358,7 +358,10 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
    context:context,
    builder:(dialogContext)=>AlertDialog(
     title:const Text('Hàng đợi đồng bộ trên máy'),
-    content:SizedBox(width:420,child:AnimatedBuilder(animation:_queue,
+    // The iPhone dialog must fit inside the system safe area and keyboard.
+    content:SizedBox(
+     width:(MediaQuery.sizeOf(dialogContext).width-96).clamp(200,420).toDouble(),
+     child:AnimatedBuilder(animation:_queue,
      builder:(context,_)=>ConstrainedBox(constraints:const BoxConstraints(maxHeight:460),
       child:ListView(shrinkWrap:true,children:[
        Text('Tác vụ chờ: ${_queue.pending.length} · Bị từ chối: ${_queue.blockedCount}'
