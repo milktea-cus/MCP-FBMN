@@ -23,7 +23,7 @@
 
 - `test/route_duplicate_reconcile_test.dart`: 6 kiểm thử mới cho tuyến trùng đúng nội dung, chuyển các điểm ghé phụ thuộc, tuyến khác mục đích, khác chủ quyền, điểm ghé trùng, bảo toàn bản nháp survey và tình huống server từ chối 403. Bao gồm kiểm tra **không POST lại** khi đang đối chiếu, cả lỗi 409 lưu bằng text cũ.
 - `flutter analyze --no-fatal-infos` và TypeScript backend `tsc --noEmit` đạt; **192/192 bài Flutter test đạt** ở lần build sửa mã hợp lệ.
-- Frontend Flutter Web production: deployment `dpl_4kMt4XP8Sq2LigNt1ut5fqSJq5XE`, SHA `1e07364bb9873177743efba0f3097c6336f30727`. Trạng thái READY và alias production cần xác nhận riêng trước khi bàn giao.
+- Frontend Flutter Web production: deployment `dpl_4kMt4XP8Sq2LigNt1ut5fqSJq5XE`, SHA `1e07364bb9873177743efba0f3097c6336f30727`. **READY, target production**, đã xác nhận alias chính thức `https://sales-mien-tay.vercel.app` bằng API Vercel. Build Web release PASS; offline shell 42 assets, không cache API.
 
 ## UAT còn mở
 
