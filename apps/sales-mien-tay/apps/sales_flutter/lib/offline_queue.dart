@@ -578,89 +578,12 @@ class OfflineQueue extends ChangeNotifier {
        decodeApi(upload);
      }
      if(result['already_saved']==true&&result['item'] is Map&&
-         row['method']=='POST'&&
-         (row['path']=='/api/v1/day-routes'||
-          RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}/stops
-    }catch(e){
-     final path=row['path']?.toString()??'';
-     if(e is ApiFailure&&e.status==409&&row['method']=='POST'&&
-      (path=='/api/v1/day-routes'||
-       RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}/stops$',
-        caseSensitive:false).hasMatch(path))){
-      try{
-       if(await _resolveDuplicate(row)){
-        matchedDuplicate=true;
-        lastSuccessAt=DateTime.now();error=null;
-        break; // Re-read remapped dependencies before continuing.
-       }
-      }catch(_){}
-     }
-     final blocked=e is ApiFailure&&[400,401,403,404,409,413,415,422].contains(e.status);
-     await _updateIfPresent({...row,
-      'status':blocked?'blocked':'pending',
-      'attempts':((row['attempts'] as num?)?.toInt()??0)+1,
-      'error':describeFailure(e),
-      'last_error_at':DateTime.now().toIso8601String(),
-     });
-     error='${describe(row)}: ${describeFailure(e)}';
-     if(!blocked){
-      transientFailures++;
-      nextRetryAt=DateTime.now().add(retryDelay);
-      break;
-     }
-    }
-   }
-   if(error==null&&waitingDependencies>0){
-    error='Đang chờ $waitingDependencies thao tác liên quan được hoàn tất.';
-   }
-  }catch(e){
-   error='Không kiểm tra/gửi được dữ liệu: ${describeFailure(e)}';
-   transientFailures++;
-   nextRetryAt=DateTime.now().add(retryDelay);
-  }
-  finally{
-   activePath=null;
-   try{await reload();}catch(e){error='Không đọc được hàng đợi lưu máy: $e';}
-   syncing=false;_notify();
-   if(matchedDuplicate&&!_closed&&readyCount>0)unawaited(sync(manual:true));
-  }
- }
- /// Manual retry first compares blocked routes without resending them.
- Future<void> retryNow()async{
-  if(!_closed&&!syncing)await reconcileBlockedRoutes();
-  await sync(manual:true);
- }
- @override void dispose(){_closed=true;_timer?.cancel();super.dispose();}
-}
-class OfflineLease {
- static const duration=Duration(hours:12);
- static Future<void> remember(Map<String,dynamic> me,Map<String,List<String>> districts) async{
-  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);
-  if(await t.objectStore('cache').getObject('logout_pending')!=null){await t.completed;return;}
-  await t.objectStore('cache').put({'key':'active_lease','me':me,'districts':districts,'expires':DateTime.now().add(duration).millisecondsSinceEpoch});await t.completed;
- }
- static Future<Map<String,dynamic>?> read() async{
-  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('active_lease');await t.completed;
-  if(row==null)return null;final v=Map<String,dynamic>.from(row as Map);
-  return (v['expires'] as int)>DateTime.now().millisecondsSinceEpoch?v:null;
- }
- static Future<void> markLogout() async{
-  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);final s=t.objectStore('cache');await s.delete('active_lease');await s.put({'key':'logout_pending'});await t.completed;
- }
- static Future<bool> logoutPending() async{
-  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('logout_pending');await t.completed;return row!=null;
- }
- static Future<void> finishLogout() async{
-  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('logout_pending');await t.completed;
- }
- static Future<void> clear() async{
-  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('active_lease');await t.completed;
- }
-}
-,
-           caseSensitive:false).hasMatch(row['path']?.toString()??''))){
-      // A second offline UUID points at the existing canonical server ID.
-      // Atomically rewrite child references before acknowledging the write.
+        row['method']=='POST'&&
+        (row['path']=='/api/v1/day-routes'||
+         RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}/stops$',
+          caseSensitive:false).hasMatch(row['path']?.toString()??''))){
+      // Canonical UUID differs from the local draft. First atomically remap
+      // dependent stops/visits, then restart the queue from persisted state.
       if(!await _ackMatchedRouteRow(row,
         Map<String,dynamic>.from(result['item'] as Map),
         isStop:row['path']!='/api/v1/day-routes')){
@@ -668,7 +591,7 @@ class OfflineLease {
       }
       matchedDuplicate=true;
       lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;
-      break; // Child references changed; re-read the durable queue first.
+      break;
      }else if(row['session_id']!=null){
       await _ackSurvey(row,item);
      }else{
