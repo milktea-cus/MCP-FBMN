@@ -45,7 +45,7 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
  Map<String,dynamic>? template;
  Map<String,dynamic> answers={};
  List<Map<String,dynamic>> history=[];
- bool loading=true,saving=false,denied=false;
+ bool loading=true,saving=false,denied=false,brandsChecked=false;
  String? message;
  Future<void> pendingWrites=Future<void>.value();
  String get cid=>widget.customer['customer_id'].toString();
@@ -72,7 +72,8 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
   catch(_){return [];}
  }
  Future<void> persistDraft(){
-  final saved={'note':note.text,'answers':Map<String,dynamic>.from(answers)};
+  final saved={'note':note.text,'answers':Map<String,dynamic>.from(answers),
+  'brands_checked':brandsChecked};
   pendingWrites=pendingWrites.catchError((_){})
    .then((_)=>widget.queue.cache(draftKey,[saved]));
   return pendingWrites;
@@ -86,6 +87,7 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
     setState((){
      note.text=drafts.first['note']?.toString()??'';
      if(a is Map)answers=Map<String,dynamic>.from(a);
+     brandsChecked=drafts.first['brands_checked']==true || answers['brands'] is List;
     });
    }
    final cached=await cache('customer-work-profile:$cid');
@@ -138,7 +140,10 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
  }
  void answer(String id,dynamic value){
   if(!writable||saving)return;
-  setState(()=>answers={...answers,id:value});
+  setState((){
+   answers={...answers,id:value};
+   if(fields.any((q)=>q['id']==id&&q['catalog_source']=='brands'))brandsChecked=true;
+  });
   unawaited(persistDraft().catchError((Object e){inform('Không lưu được nháp: $e');}));
  }
  bool get hasConfiguredBrands=>fields.any((f)=>f['catalog_source']=='brands');
@@ -192,12 +197,12 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
   final selected=chosenMarketBrands;
   final hasAnswers=answers.values.any((v)=>v!=null&&v!=''&&
    (v is! List||v.isNotEmpty));
-  if(trimmed.isEmpty&&!hasAnswers&&selected.isEmpty){
+  if(trimmed.isEmpty&&!hasAnswers&&!brandsChecked){
    inform('Chọn một hạng mục hoặc nhập ghi chú để lưu lần ghé.');return;
   }
   try{await persistDraft();}catch(e){inform('Chưa lưu được nháp: $e');return;}
   await record('form',noteText:trimmed,form:Map<String,dynamic>.from(answers),
-   brands:hasConfiguredBrands?selected:null);
+   brands:hasConfiguredBrands&&brandsChecked?selected:null);
  }
  Future<void> checkIn()async{
   if(!writable||saving)return;
@@ -355,7 +360,18 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
       style:Theme.of(context).textTheme.titleMedium),
      const SizedBox(height:8),
      for(final q in fields)...[
-      question(q),const SizedBox(height:12),
+      if(q['catalog_source']=='brands')...[
+       CheckboxListTile(contentPadding:EdgeInsets.zero,
+        title:const Text('Đã kiểm tra nhãn hàng tại khách'),
+        subtitle:const Text('Chỉ cập nhật danh sách nhãn khi đã đánh dấu kiểm tra.'),
+        value:brandsChecked,
+        onChanged:!writable||saving?null:(checked){
+         setState(()=>brandsChecked=checked==true);
+         unawaited(persistDraft());
+        }),
+       if(brandsChecked)question(q),
+      ]else question(q),
+      const SizedBox(height:12),
      ],
     ],
     TextField(controller:note,enabled:writable&&!saving,
