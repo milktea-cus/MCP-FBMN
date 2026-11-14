@@ -479,6 +479,1709 @@ class OfflineLease {
   await t.completed;
   return true;
  }
+ Future<bool> _ackEquivalentStop(Map<String,dynamic> row,String actualStopId)async{
+  final payload=Map<String,dynamic>.from(row['payload'] as Map);
+  final localId=payload['client_ref']?.toString()??'';
+  if(!RegExp(r'^[a-f0-9-]{36}
+  if(_closed||row['namespace']!=namespace||row['method']!='POST')return false;
+  final path=row['path']?.toString()??'';
+  final payload=Map<String,dynamic>.from(row['payload'] as Map);
+  if(path=='/api/v1/day-routes'){
+   final date=payload['route_date']?.toString()??'';
+   final id=payload['client_ref']?.toString()??'';
+   if(!RegExp(r'^\d{4}-\d{2}-\d{2}
+ Future<void> retryBlocked(String key)async{
+  if(_closed||syncing||!key.startsWith('$namespace:'))return;
+  final d=await db,t=d.transaction('outbox',idbModeReadWrite),store=t.objectStore('outbox');
+  final raw=await store.getObject(key);
+  if(raw is Map&&raw['namespace']==namespace&&raw['status']=='blocked'){
+   await store.put({...Map<String,dynamic>.from(raw),'status':'pending','error':null});
+  }
+  await t.completed;await reload();await retryNow();
+ }
+ Future<void> start() async{
+  try{await reload();}catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
+  if(_closed)return;
+  _timer=Timer.periodic(const Duration(seconds:30),(_)=>unawaited(sync()));
+  unawaited(sync());
+ }
+ Future<void> sync({bool manual=false}) async{
+  if(_closed)return;
+  if(syncing){
+   // iOS may suspend an in-flight IndexedDB/network Future when PWA sleeps.
+   // Do not start a concurrent write: tell the user how to resume safely.
+   if(isStalled){
+    error='Lượt đồng bộ đã quá 2 phút không phản hồi. Đóng rồi mở lại '
+     'Field Work để tiếp tục; dữ liệu chưa gửi vẫn nằm trên máy.';
+    _notify();
+   }
+   return;
+  }
+  final now=DateTime.now();
+  if(!manual&&nextRetryAt!=null&&now.isBefore(nextRetryAt!))return;
+  if(manual){nextRetryAt=null;transientFailures=0;}
+  // 4xx rejects stay on disk for the user, without retrying endlessly.
+  if(pending.isNotEmpty&&readyCount==0){
+   error='Có $blockedCount thao tác bị từ chối. Nhấn vào thanh đồng bộ để xem lỗi.';
+   _notify();return;
+  }
+  syncing=true;error=null;activePath=null;lastAttemptAt=now;_notify();
+  try{
+   await reload();
+   if(pending.isEmpty){nextRetryAt=null;transientFailures=0;return;}
+   if(readyCount==0){
+    error='Có $blockedCount thao tác bị từ chối. Mở chi tiết để thử lại.';
+    return;
+   }
+   final me=await session.get('/api/v1/me');
+   if(_closed||me['identity']!=identity||me['scope_revision'].toString()!=revision){
+    error='Phiên đăng nhập hoặc phạm vi quyền đã thay đổi. Dữ liệu vẫn lưu trên máy.';
+    nextRetryAt=DateTime.now().add(const Duration(minutes:5));return;
+   }
+   var waitingDependencies=0;
+   for(final row in List.of(pending)){
+    if(_closed)break;
+    if(row['status']=='blocked')continue;
+    if(await _dependencyPending(row)){waitingDependencies++;continue;}
+    activePath=describe(row);_notify();
+    try{
+     final payload=Map<String,dynamic>.from(row['payload'] as Map);
+     final headers={...sessionHeaders(session.cookie),'X-Sync-Identity':identity,'X-Sync-Revision':revision};
+     final uri=session.uri(row['path'] as String);
+     if((row['path'] as String).endsWith('/photos')){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      final thumb=row['thumbnail'];final modern=thumb is List;
+      final upload=await (networkClient?.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)??http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)).timeout(const Duration(seconds:30));
+      final result=decodeApi(upload);
+      if(row['session_id']!=null){await _ackSurvey(row,result['item'] as Map);}else{await _remove(row['key'] as String);}continue;
+     }
+     final response=await (row['method']=='PATCH'
+       ?(networkClient?.patch(uri,headers:headers,body:jsonEncode(payload))??
+          http.patch(uri,headers:headers,body:jsonEncode(payload)))
+       :(networkClient?.post(uri,headers:headers,body:jsonEncode(payload))??
+          http.post(uri,headers:headers,body:jsonEncode(payload)))
+      ).timeout(const Duration(seconds:30));
+     final result=decodeApi(response);
+     // Some successful endpoints only acknowledge the write; entity is optional.
+     final item=(row['session_id']!=null||row['photo']!=null)
+       ?(result['item'] as Map):<String,dynamic>{};
+     if(row['photo']!=null){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      if(_closed)break;
+      final thumb=row['thumbnail'],modern=thumb is List;
+       final upload=await (networkClient?.post(session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)??http.post(
+        session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)
+       ).timeout(const Duration(seconds:30));
+       decodeApi(upload);
+     }
+     if(row['session_id']!=null){await _ackSurvey(row,item);}else{await _remove(row['key'] as String);}
+     lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;
+    }catch(e){
+     final blocked=e is ApiFailure&&[400,401,403,404,409,413,415,422].contains(e.status);
+     await _updateIfPresent({...row,
+      'status':blocked?'blocked':'pending',
+      'attempts':((row['attempts'] as num?)?.toInt()??0)+1,
+      'error':describeFailure(e),
+      'last_error_at':DateTime.now().toIso8601String(),
+     });
+     error='${describe(row)}: ${describeFailure(e)}';
+     if(!blocked){
+      transientFailures++;
+      nextRetryAt=DateTime.now().add(retryDelay);
+      break;
+     }
+    }
+   }
+   if(error==null&&waitingDependencies>0){
+    error='Đang chờ $waitingDependencies thao tác liên quan được hoàn tất.';
+   }
+  }catch(e){
+   error='Không kiểm tra/gửi được dữ liệu: ${describeFailure(e)}';
+   transientFailures++;
+   nextRetryAt=DateTime.now().add(retryDelay);
+  }
+  finally{
+   activePath=null;
+   try{await reload();}catch(e){error='Không đọc được hàng đợi lưu máy: $e';}
+   syncing=false;_notify();
+  }
+ }
+ /// Explicit retry bypasses the background cooldown, without deleting rows.
+ Future<void> retryNow()=>sync(manual:true);
+ @override void dispose(){_closed=true;_timer?.cancel();super.dispose();}
+}
+class OfflineLease {
+ static const duration=Duration(hours:12);
+ static Future<void> remember(Map<String,dynamic> me,Map<String,List<String>> districts) async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);
+  if(await t.objectStore('cache').getObject('logout_pending')!=null){await t.completed;return;}
+  await t.objectStore('cache').put({'key':'active_lease','me':me,'districts':districts,'expires':DateTime.now().add(duration).millisecondsSinceEpoch});await t.completed;
+ }
+ static Future<Map<String,dynamic>?> read() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('active_lease');await t.completed;
+  if(row==null)return null;final v=Map<String,dynamic>.from(row as Map);
+  return (v['expires'] as int)>DateTime.now().millisecondsSinceEpoch?v:null;
+ }
+ static Future<void> markLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);final s=t.objectStore('cache');await s.delete('active_lease');await s.put({'key':'logout_pending'});await t.completed;
+ }
+ static Future<bool> logoutPending() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('logout_pending');await t.completed;return row!=null;
+ }
+ static Future<void> finishLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('logout_pending');await t.completed;
+ }
+ static Future<void> clear() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('active_lease');await t.completed;
+ }
+}
+).hasMatch(date)||
+      !RegExp(r'^[a-f0-9-]{36}
+ Future<void> retryBlocked(String key)async{
+  if(_closed||syncing||!key.startsWith('$namespace:'))return;
+  final d=await db,t=d.transaction('outbox',idbModeReadWrite),store=t.objectStore('outbox');
+  final raw=await store.getObject(key);
+  if(raw is Map&&raw['namespace']==namespace&&raw['status']=='blocked'){
+   await store.put({...Map<String,dynamic>.from(raw),'status':'pending','error':null});
+  }
+  await t.completed;await reload();await retryNow();
+ }
+ Future<void> start() async{
+  try{await reload();}catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
+  if(_closed)return;
+  _timer=Timer.periodic(const Duration(seconds:30),(_)=>unawaited(sync()));
+  unawaited(sync());
+ }
+ Future<void> sync({bool manual=false}) async{
+  if(_closed)return;
+  if(syncing){
+   // iOS may suspend an in-flight IndexedDB/network Future when PWA sleeps.
+   // Do not start a concurrent write: tell the user how to resume safely.
+   if(isStalled){
+    error='Lượt đồng bộ đã quá 2 phút không phản hồi. Đóng rồi mở lại '
+     'Field Work để tiếp tục; dữ liệu chưa gửi vẫn nằm trên máy.';
+    _notify();
+   }
+   return;
+  }
+  final now=DateTime.now();
+  if(!manual&&nextRetryAt!=null&&now.isBefore(nextRetryAt!))return;
+  if(manual){nextRetryAt=null;transientFailures=0;}
+  // 4xx rejects stay on disk for the user, without retrying endlessly.
+  if(pending.isNotEmpty&&readyCount==0){
+   error='Có $blockedCount thao tác bị từ chối. Nhấn vào thanh đồng bộ để xem lỗi.';
+   _notify();return;
+  }
+  syncing=true;error=null;activePath=null;lastAttemptAt=now;_notify();
+  try{
+   await reload();
+   if(pending.isEmpty){nextRetryAt=null;transientFailures=0;return;}
+   if(readyCount==0){
+    error='Có $blockedCount thao tác bị từ chối. Mở chi tiết để thử lại.';
+    return;
+   }
+   final me=await session.get('/api/v1/me');
+   if(_closed||me['identity']!=identity||me['scope_revision'].toString()!=revision){
+    error='Phiên đăng nhập hoặc phạm vi quyền đã thay đổi. Dữ liệu vẫn lưu trên máy.';
+    nextRetryAt=DateTime.now().add(const Duration(minutes:5));return;
+   }
+   var waitingDependencies=0;
+   for(final row in List.of(pending)){
+    if(_closed)break;
+    if(row['status']=='blocked')continue;
+    if(await _dependencyPending(row)){waitingDependencies++;continue;}
+    activePath=describe(row);_notify();
+    try{
+     final payload=Map<String,dynamic>.from(row['payload'] as Map);
+     final headers={...sessionHeaders(session.cookie),'X-Sync-Identity':identity,'X-Sync-Revision':revision};
+     final uri=session.uri(row['path'] as String);
+     if((row['path'] as String).endsWith('/photos')){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      final thumb=row['thumbnail'];final modern=thumb is List;
+      final upload=await (networkClient?.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)??http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)).timeout(const Duration(seconds:30));
+      final result=decodeApi(upload);
+      if(row['session_id']!=null){await _ackSurvey(row,result['item'] as Map);}else{await _remove(row['key'] as String);}continue;
+     }
+     final response=await (row['method']=='PATCH'
+       ?(networkClient?.patch(uri,headers:headers,body:jsonEncode(payload))??
+          http.patch(uri,headers:headers,body:jsonEncode(payload)))
+       :(networkClient?.post(uri,headers:headers,body:jsonEncode(payload))??
+          http.post(uri,headers:headers,body:jsonEncode(payload)))
+      ).timeout(const Duration(seconds:30));
+     final result=decodeApi(response);
+     // Some successful endpoints only acknowledge the write; entity is optional.
+     final item=(row['session_id']!=null||row['photo']!=null)
+       ?(result['item'] as Map):<String,dynamic>{};
+     if(row['photo']!=null){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      if(_closed)break;
+      final thumb=row['thumbnail'],modern=thumb is List;
+       final upload=await (networkClient?.post(session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)??http.post(
+        session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)
+       ).timeout(const Duration(seconds:30));
+       decodeApi(upload);
+     }
+     if(row['session_id']!=null){await _ackSurvey(row,item);}else{await _remove(row['key'] as String);}
+     lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;
+    }catch(e){
+     final blocked=e is ApiFailure&&[400,401,403,404,409,413,415,422].contains(e.status);
+     await _updateIfPresent({...row,
+      'status':blocked?'blocked':'pending',
+      'attempts':((row['attempts'] as num?)?.toInt()??0)+1,
+      'error':describeFailure(e),
+      'last_error_at':DateTime.now().toIso8601String(),
+     });
+     error='${describe(row)}: ${describeFailure(e)}';
+     if(!blocked){
+      transientFailures++;
+      nextRetryAt=DateTime.now().add(retryDelay);
+      break;
+     }
+    }
+   }
+   if(error==null&&waitingDependencies>0){
+    error='Đang chờ $waitingDependencies thao tác liên quan được hoàn tất.';
+   }
+  }catch(e){
+   error='Không kiểm tra/gửi được dữ liệu: ${describeFailure(e)}';
+   transientFailures++;
+   nextRetryAt=DateTime.now().add(retryDelay);
+  }
+  finally{
+   activePath=null;
+   try{await reload();}catch(e){error='Không đọc được hàng đợi lưu máy: $e';}
+   syncing=false;_notify();
+  }
+ }
+ /// Explicit retry bypasses the background cooldown, without deleting rows.
+ Future<void> retryNow()=>sync(manual:true);
+ @override void dispose(){_closed=true;_timer?.cancel();super.dispose();}
+}
+class OfflineLease {
+ static const duration=Duration(hours:12);
+ static Future<void> remember(Map<String,dynamic> me,Map<String,List<String>> districts) async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);
+  if(await t.objectStore('cache').getObject('logout_pending')!=null){await t.completed;return;}
+  await t.objectStore('cache').put({'key':'active_lease','me':me,'districts':districts,'expires':DateTime.now().add(duration).millisecondsSinceEpoch});await t.completed;
+ }
+ static Future<Map<String,dynamic>?> read() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('active_lease');await t.completed;
+  if(row==null)return null;final v=Map<String,dynamic>.from(row as Map);
+  return (v['expires'] as int)>DateTime.now().millisecondsSinceEpoch?v:null;
+ }
+ static Future<void> markLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);final s=t.objectStore('cache');await s.delete('active_lease');await s.put({'key':'logout_pending'});await t.completed;
+ }
+ static Future<bool> logoutPending() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('logout_pending');await t.completed;return row!=null;
+ }
+ static Future<void> finishLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('logout_pending');await t.completed;
+ }
+ static Future<void> clear() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('active_lease');await t.completed;
+ }
+}
+,caseSensitive:false).hasMatch(id))return false;
+   final data=await _serverGet('/api/v1/day-routes?month='+date.substring(0,7));
+   final rows=data['items'] as List? ?? [];
+   for(final v in rows){
+    if(v is! Map)continue;
+    final candidate=Map<String,dynamic>.from(v);
+    if(!_sameDayRoute(candidate,payload,identity))continue;
+    final canonicalId=candidate['id']?.toString()??'';
+    if(!RegExp(r'^[a-f0-9-]{36}
+ Future<void> retryBlocked(String key)async{
+  if(_closed||syncing||!key.startsWith('$namespace:'))return;
+  final d=await db,t=d.transaction('outbox',idbModeReadWrite),store=t.objectStore('outbox');
+  final raw=await store.getObject(key);
+  if(raw is Map&&raw['namespace']==namespace&&raw['status']=='blocked'){
+   await store.put({...Map<String,dynamic>.from(raw),'status':'pending','error':null});
+  }
+  await t.completed;await reload();await retryNow();
+ }
+ Future<void> start() async{
+  try{await reload();}catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
+  if(_closed)return;
+  _timer=Timer.periodic(const Duration(seconds:30),(_)=>unawaited(sync()));
+  unawaited(sync());
+ }
+ Future<void> sync({bool manual=false}) async{
+  if(_closed)return;
+  if(syncing){
+   // iOS may suspend an in-flight IndexedDB/network Future when PWA sleeps.
+   // Do not start a concurrent write: tell the user how to resume safely.
+   if(isStalled){
+    error='Lượt đồng bộ đã quá 2 phút không phản hồi. Đóng rồi mở lại '
+     'Field Work để tiếp tục; dữ liệu chưa gửi vẫn nằm trên máy.';
+    _notify();
+   }
+   return;
+  }
+  final now=DateTime.now();
+  if(!manual&&nextRetryAt!=null&&now.isBefore(nextRetryAt!))return;
+  if(manual){nextRetryAt=null;transientFailures=0;}
+  // 4xx rejects stay on disk for the user, without retrying endlessly.
+  if(pending.isNotEmpty&&readyCount==0){
+   error='Có $blockedCount thao tác bị từ chối. Nhấn vào thanh đồng bộ để xem lỗi.';
+   _notify();return;
+  }
+  syncing=true;error=null;activePath=null;lastAttemptAt=now;_notify();
+  try{
+   await reload();
+   if(pending.isEmpty){nextRetryAt=null;transientFailures=0;return;}
+   if(readyCount==0){
+    error='Có $blockedCount thao tác bị từ chối. Mở chi tiết để thử lại.';
+    return;
+   }
+   final me=await session.get('/api/v1/me');
+   if(_closed||me['identity']!=identity||me['scope_revision'].toString()!=revision){
+    error='Phiên đăng nhập hoặc phạm vi quyền đã thay đổi. Dữ liệu vẫn lưu trên máy.';
+    nextRetryAt=DateTime.now().add(const Duration(minutes:5));return;
+   }
+   var waitingDependencies=0;
+   for(final row in List.of(pending)){
+    if(_closed)break;
+    if(row['status']=='blocked')continue;
+    if(await _dependencyPending(row)){waitingDependencies++;continue;}
+    activePath=describe(row);_notify();
+    try{
+     final payload=Map<String,dynamic>.from(row['payload'] as Map);
+     final headers={...sessionHeaders(session.cookie),'X-Sync-Identity':identity,'X-Sync-Revision':revision};
+     final uri=session.uri(row['path'] as String);
+     if((row['path'] as String).endsWith('/photos')){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      final thumb=row['thumbnail'];final modern=thumb is List;
+      final upload=await (networkClient?.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)??http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)).timeout(const Duration(seconds:30));
+      final result=decodeApi(upload);
+      if(row['session_id']!=null){await _ackSurvey(row,result['item'] as Map);}else{await _remove(row['key'] as String);}continue;
+     }
+     final response=await (row['method']=='PATCH'
+       ?(networkClient?.patch(uri,headers:headers,body:jsonEncode(payload))??
+          http.patch(uri,headers:headers,body:jsonEncode(payload)))
+       :(networkClient?.post(uri,headers:headers,body:jsonEncode(payload))??
+          http.post(uri,headers:headers,body:jsonEncode(payload)))
+      ).timeout(const Duration(seconds:30));
+     final result=decodeApi(response);
+     // Some successful endpoints only acknowledge the write; entity is optional.
+     final item=(row['session_id']!=null||row['photo']!=null)
+       ?(result['item'] as Map):<String,dynamic>{};
+     if(row['photo']!=null){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      if(_closed)break;
+      final thumb=row['thumbnail'],modern=thumb is List;
+       final upload=await (networkClient?.post(session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)??http.post(
+        session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)
+       ).timeout(const Duration(seconds:30));
+       decodeApi(upload);
+     }
+     if(row['session_id']!=null){await _ackSurvey(row,item);}else{await _remove(row['key'] as String);}
+     lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;
+    }catch(e){
+     final blocked=e is ApiFailure&&[400,401,403,404,409,413,415,422].contains(e.status);
+     await _updateIfPresent({...row,
+      'status':blocked?'blocked':'pending',
+      'attempts':((row['attempts'] as num?)?.toInt()??0)+1,
+      'error':describeFailure(e),
+      'last_error_at':DateTime.now().toIso8601String(),
+     });
+     error='${describe(row)}: ${describeFailure(e)}';
+     if(!blocked){
+      transientFailures++;
+      nextRetryAt=DateTime.now().add(retryDelay);
+      break;
+     }
+    }
+   }
+   if(error==null&&waitingDependencies>0){
+    error='Đang chờ $waitingDependencies thao tác liên quan được hoàn tất.';
+   }
+  }catch(e){
+   error='Không kiểm tra/gửi được dữ liệu: ${describeFailure(e)}';
+   transientFailures++;
+   nextRetryAt=DateTime.now().add(retryDelay);
+  }
+  finally{
+   activePath=null;
+   try{await reload();}catch(e){error='Không đọc được hàng đợi lưu máy: $e';}
+   syncing=false;_notify();
+  }
+ }
+ /// Explicit retry bypasses the background cooldown, without deleting rows.
+ Future<void> retryNow()=>sync(manual:true);
+ @override void dispose(){_closed=true;_timer?.cancel();super.dispose();}
+}
+class OfflineLease {
+ static const duration=Duration(hours:12);
+ static Future<void> remember(Map<String,dynamic> me,Map<String,List<String>> districts) async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);
+  if(await t.objectStore('cache').getObject('logout_pending')!=null){await t.completed;return;}
+  await t.objectStore('cache').put({'key':'active_lease','me':me,'districts':districts,'expires':DateTime.now().add(duration).millisecondsSinceEpoch});await t.completed;
+ }
+ static Future<Map<String,dynamic>?> read() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('active_lease');await t.completed;
+  if(row==null)return null;final v=Map<String,dynamic>.from(row as Map);
+  return (v['expires'] as int)>DateTime.now().millisecondsSinceEpoch?v:null;
+ }
+ static Future<void> markLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);final s=t.objectStore('cache');await s.delete('active_lease');await s.put({'key':'logout_pending'});await t.completed;
+ }
+ static Future<bool> logoutPending() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('logout_pending');await t.completed;return row!=null;
+ }
+ static Future<void> finishLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('logout_pending');await t.completed;
+ }
+ static Future<void> clear() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('active_lease');await t.completed;
+ }
+}
+,caseSensitive:false)
+      .hasMatch(canonicalId))return false;
+    return _ackEquivalentRoute(row,canonicalId);
+   }
+   return false;
+  }
+  final match=RegExp(r'^/api/v1/day-routes/([a-f0-9-]{36})/stops
+ Future<void> retryBlocked(String key)async{
+  if(_closed||syncing||!key.startsWith('$namespace:'))return;
+  final d=await db,t=d.transaction('outbox',idbModeReadWrite),store=t.objectStore('outbox');
+  final raw=await store.getObject(key);
+  if(raw is Map&&raw['namespace']==namespace&&raw['status']=='blocked'){
+   await store.put({...Map<String,dynamic>.from(raw),'status':'pending','error':null});
+  }
+  await t.completed;await reload();await retryNow();
+ }
+ Future<void> start() async{
+  try{await reload();}catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
+  if(_closed)return;
+  _timer=Timer.periodic(const Duration(seconds:30),(_)=>unawaited(sync()));
+  unawaited(sync());
+ }
+ Future<void> sync({bool manual=false}) async{
+  if(_closed)return;
+  if(syncing){
+   // iOS may suspend an in-flight IndexedDB/network Future when PWA sleeps.
+   // Do not start a concurrent write: tell the user how to resume safely.
+   if(isStalled){
+    error='Lượt đồng bộ đã quá 2 phút không phản hồi. Đóng rồi mở lại '
+     'Field Work để tiếp tục; dữ liệu chưa gửi vẫn nằm trên máy.';
+    _notify();
+   }
+   return;
+  }
+  final now=DateTime.now();
+  if(!manual&&nextRetryAt!=null&&now.isBefore(nextRetryAt!))return;
+  if(manual){nextRetryAt=null;transientFailures=0;}
+  // 4xx rejects stay on disk for the user, without retrying endlessly.
+  if(pending.isNotEmpty&&readyCount==0){
+   error='Có $blockedCount thao tác bị từ chối. Nhấn vào thanh đồng bộ để xem lỗi.';
+   _notify();return;
+  }
+  syncing=true;error=null;activePath=null;lastAttemptAt=now;_notify();
+  try{
+   await reload();
+   if(pending.isEmpty){nextRetryAt=null;transientFailures=0;return;}
+   if(readyCount==0){
+    error='Có $blockedCount thao tác bị từ chối. Mở chi tiết để thử lại.';
+    return;
+   }
+   final me=await session.get('/api/v1/me');
+   if(_closed||me['identity']!=identity||me['scope_revision'].toString()!=revision){
+    error='Phiên đăng nhập hoặc phạm vi quyền đã thay đổi. Dữ liệu vẫn lưu trên máy.';
+    nextRetryAt=DateTime.now().add(const Duration(minutes:5));return;
+   }
+   var waitingDependencies=0;
+   for(final row in List.of(pending)){
+    if(_closed)break;
+    if(row['status']=='blocked')continue;
+    if(await _dependencyPending(row)){waitingDependencies++;continue;}
+    activePath=describe(row);_notify();
+    try{
+     final payload=Map<String,dynamic>.from(row['payload'] as Map);
+     final headers={...sessionHeaders(session.cookie),'X-Sync-Identity':identity,'X-Sync-Revision':revision};
+     final uri=session.uri(row['path'] as String);
+     if((row['path'] as String).endsWith('/photos')){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      final thumb=row['thumbnail'];final modern=thumb is List;
+      final upload=await (networkClient?.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)??http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)).timeout(const Duration(seconds:30));
+      final result=decodeApi(upload);
+      if(row['session_id']!=null){await _ackSurvey(row,result['item'] as Map);}else{await _remove(row['key'] as String);}continue;
+     }
+     final response=await (row['method']=='PATCH'
+       ?(networkClient?.patch(uri,headers:headers,body:jsonEncode(payload))??
+          http.patch(uri,headers:headers,body:jsonEncode(payload)))
+       :(networkClient?.post(uri,headers:headers,body:jsonEncode(payload))??
+          http.post(uri,headers:headers,body:jsonEncode(payload)))
+      ).timeout(const Duration(seconds:30));
+     final result=decodeApi(response);
+     // Some successful endpoints only acknowledge the write; entity is optional.
+     final item=(row['session_id']!=null||row['photo']!=null)
+       ?(result['item'] as Map):<String,dynamic>{};
+     if(row['photo']!=null){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      if(_closed)break;
+      final thumb=row['thumbnail'],modern=thumb is List;
+       final upload=await (networkClient?.post(session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)??http.post(
+        session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)
+       ).timeout(const Duration(seconds:30));
+       decodeApi(upload);
+     }
+     if(row['session_id']!=null){await _ackSurvey(row,item);}else{await _remove(row['key'] as String);}
+     lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;
+    }catch(e){
+     final blocked=e is ApiFailure&&[400,401,403,404,409,413,415,422].contains(e.status);
+     await _updateIfPresent({...row,
+      'status':blocked?'blocked':'pending',
+      'attempts':((row['attempts'] as num?)?.toInt()??0)+1,
+      'error':describeFailure(e),
+      'last_error_at':DateTime.now().toIso8601String(),
+     });
+     error='${describe(row)}: ${describeFailure(e)}';
+     if(!blocked){
+      transientFailures++;
+      nextRetryAt=DateTime.now().add(retryDelay);
+      break;
+     }
+    }
+   }
+   if(error==null&&waitingDependencies>0){
+    error='Đang chờ $waitingDependencies thao tác liên quan được hoàn tất.';
+   }
+  }catch(e){
+   error='Không kiểm tra/gửi được dữ liệu: ${describeFailure(e)}';
+   transientFailures++;
+   nextRetryAt=DateTime.now().add(retryDelay);
+  }
+  finally{
+   activePath=null;
+   try{await reload();}catch(e){error='Không đọc được hàng đợi lưu máy: $e';}
+   syncing=false;_notify();
+  }
+ }
+ /// Explicit retry bypasses the background cooldown, without deleting rows.
+ Future<void> retryNow()=>sync(manual:true);
+ @override void dispose(){_closed=true;_timer?.cancel();super.dispose();}
+}
+class OfflineLease {
+ static const duration=Duration(hours:12);
+ static Future<void> remember(Map<String,dynamic> me,Map<String,List<String>> districts) async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);
+  if(await t.objectStore('cache').getObject('logout_pending')!=null){await t.completed;return;}
+  await t.objectStore('cache').put({'key':'active_lease','me':me,'districts':districts,'expires':DateTime.now().add(duration).millisecondsSinceEpoch});await t.completed;
+ }
+ static Future<Map<String,dynamic>?> read() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('active_lease');await t.completed;
+  if(row==null)return null;final v=Map<String,dynamic>.from(row as Map);
+  return (v['expires'] as int)>DateTime.now().millisecondsSinceEpoch?v:null;
+ }
+ static Future<void> markLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);final s=t.objectStore('cache');await s.delete('active_lease');await s.put({'key':'logout_pending'});await t.completed;
+ }
+ static Future<bool> logoutPending() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('logout_pending');await t.completed;return row!=null;
+ }
+ static Future<void> finishLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('logout_pending');await t.completed;
+ }
+ static Future<void> clear() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('active_lease');await t.completed;
+ }
+}
+,
+    caseSensitive:false).firstMatch(path);
+  if(match!=null){
+   final routeId=match.group(1)!;
+   final info=await _serverGet('/api/v1/day-routes/'+routeId);
+   if(info['item'] is! Map||
+      (info['item'] as Map)['owner_sub']!=identity)return false;
+   for(final v in info['stops'] as List? ?? []){
+    if(v is Map&&_sameRouteStop(
+       Map<String,dynamic>.from(v),payload,identity,routeId)){
+     return _ackEquivalentStop(row,v['id'].toString());
+    }
+   }
+  }
+  return false;
+ }
+ bool _reconciling=false;
+ /// Safe to call after PWA restart. Reads permitted server records only and
+ /// never resends a duplicate INSERT or drops a differing operation.
+ Future<void> reconcileBlockedRoutes()async{
+  if(_closed||syncing||_reconciling)return;
+  _reconciling=true;
+  try{
+   await reload();
+   var fixed=false;
+   for(final row in List<Map<String,dynamic>>.of(pending)){
+    if(!isRouteDuplicateConflict(row))continue;
+    try{if(await _resolveRouteDuplicate(row))fixed=true;}
+    catch(_){
+     // Network/auth/scope errors are not proof of equivalence. Keep the 409.
+    }
+   }
+   if(fixed){
+    error=null;lastSuccessAt=DateTime.now();
+    await reload();
+   }
+  }finally{_reconciling=false;_notify();}
+ }
+ /// Explicit user retry; errors and 409 conflicts are never discarded.
+ Future<void> retryBlocked(String key)async{
+  if(_closed||syncing||!key.startsWith('$namespace:'))return;
+  final d=await db,t=d.transaction('outbox',idbModeReadWrite),store=t.objectStore('outbox');
+  final raw=await store.getObject(key);
+  if(raw is Map&&raw['namespace']==namespace&&raw['status']=='blocked'){
+   await store.put({...Map<String,dynamic>.from(raw),'status':'pending','error':null});
+  }
+  await t.completed;await reload();await retryNow();
+ }
+ Future<void> start() async{
+  try{await reload();}catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
+  if(_closed)return;
+  _timer=Timer.periodic(const Duration(seconds:30),(_)=>unawaited(sync()));
+  unawaited(sync());
+ }
+ Future<void> sync({bool manual=false}) async{
+  if(_closed)return;
+  if(syncing){
+   // iOS may suspend an in-flight IndexedDB/network Future when PWA sleeps.
+   // Do not start a concurrent write: tell the user how to resume safely.
+   if(isStalled){
+    error='Lượt đồng bộ đã quá 2 phút không phản hồi. Đóng rồi mở lại '
+     'Field Work để tiếp tục; dữ liệu chưa gửi vẫn nằm trên máy.';
+    _notify();
+   }
+   return;
+  }
+  final now=DateTime.now();
+  if(!manual&&nextRetryAt!=null&&now.isBefore(nextRetryAt!))return;
+  if(manual){nextRetryAt=null;transientFailures=0;}
+  // 4xx rejects stay on disk for the user, without retrying endlessly.
+  if(pending.isNotEmpty&&readyCount==0){
+   error='Có $blockedCount thao tác bị từ chối. Nhấn vào thanh đồng bộ để xem lỗi.';
+   _notify();return;
+  }
+  syncing=true;error=null;activePath=null;lastAttemptAt=now;_notify();
+  try{
+   await reload();
+   if(pending.isEmpty){nextRetryAt=null;transientFailures=0;return;}
+   if(readyCount==0){
+    error='Có $blockedCount thao tác bị từ chối. Mở chi tiết để thử lại.';
+    return;
+   }
+   final me=await session.get('/api/v1/me');
+   if(_closed||me['identity']!=identity||me['scope_revision'].toString()!=revision){
+    error='Phiên đăng nhập hoặc phạm vi quyền đã thay đổi. Dữ liệu vẫn lưu trên máy.';
+    nextRetryAt=DateTime.now().add(const Duration(minutes:5));return;
+   }
+   var waitingDependencies=0;
+   for(final row in List.of(pending)){
+    if(_closed)break;
+    if(row['status']=='blocked')continue;
+    if(await _dependencyPending(row)){waitingDependencies++;continue;}
+    activePath=describe(row);_notify();
+    try{
+     final payload=Map<String,dynamic>.from(row['payload'] as Map);
+     final headers={...sessionHeaders(session.cookie),'X-Sync-Identity':identity,'X-Sync-Revision':revision};
+     final uri=session.uri(row['path'] as String);
+     if((row['path'] as String).endsWith('/photos')){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      final thumb=row['thumbnail'];final modern=thumb is List;
+      final upload=await (networkClient?.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)??http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)).timeout(const Duration(seconds:30));
+      final result=decodeApi(upload);
+      if(row['session_id']!=null){await _ackSurvey(row,result['item'] as Map);}else{await _remove(row['key'] as String);}continue;
+     }
+     final response=await (row['method']=='PATCH'
+       ?(networkClient?.patch(uri,headers:headers,body:jsonEncode(payload))??
+          http.patch(uri,headers:headers,body:jsonEncode(payload)))
+       :(networkClient?.post(uri,headers:headers,body:jsonEncode(payload))??
+          http.post(uri,headers:headers,body:jsonEncode(payload)))
+      ).timeout(const Duration(seconds:30));
+     final result=decodeApi(response);
+     // Some successful endpoints only acknowledge the write; entity is optional.
+     final item=(row['session_id']!=null||row['photo']!=null)
+       ?(result['item'] as Map):<String,dynamic>{};
+     if(row['photo']!=null){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      if(_closed)break;
+      final thumb=row['thumbnail'],modern=thumb is List;
+       final upload=await (networkClient?.post(session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)??http.post(
+        session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)
+       ).timeout(const Duration(seconds:30));
+       decodeApi(upload);
+     }
+     if(row['session_id']!=null){await _ackSurvey(row,item);}else{await _remove(row['key'] as String);}
+     lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;
+    }catch(e){
+     final blocked=e is ApiFailure&&[400,401,403,404,409,413,415,422].contains(e.status);
+     await _updateIfPresent({...row,
+      'status':blocked?'blocked':'pending',
+      'attempts':((row['attempts'] as num?)?.toInt()??0)+1,
+      'error':describeFailure(e),
+      'last_error_at':DateTime.now().toIso8601String(),
+     });
+     error='${describe(row)}: ${describeFailure(e)}';
+     if(!blocked){
+      transientFailures++;
+      nextRetryAt=DateTime.now().add(retryDelay);
+      break;
+     }
+    }
+   }
+   if(error==null&&waitingDependencies>0){
+    error='Đang chờ $waitingDependencies thao tác liên quan được hoàn tất.';
+   }
+  }catch(e){
+   error='Không kiểm tra/gửi được dữ liệu: ${describeFailure(e)}';
+   transientFailures++;
+   nextRetryAt=DateTime.now().add(retryDelay);
+  }
+  finally{
+   activePath=null;
+   try{await reload();}catch(e){error='Không đọc được hàng đợi lưu máy: $e';}
+   syncing=false;_notify();
+  }
+ }
+ /// Explicit retry bypasses the background cooldown, without deleting rows.
+ Future<void> retryNow()=>sync(manual:true);
+ @override void dispose(){_closed=true;_timer?.cancel();super.dispose();}
+}
+class OfflineLease {
+ static const duration=Duration(hours:12);
+ static Future<void> remember(Map<String,dynamic> me,Map<String,List<String>> districts) async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);
+  if(await t.objectStore('cache').getObject('logout_pending')!=null){await t.completed;return;}
+  await t.objectStore('cache').put({'key':'active_lease','me':me,'districts':districts,'expires':DateTime.now().add(duration).millisecondsSinceEpoch});await t.completed;
+ }
+ static Future<Map<String,dynamic>?> read() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('active_lease');await t.completed;
+  if(row==null)return null;final v=Map<String,dynamic>.from(row as Map);
+  return (v['expires'] as int)>DateTime.now().millisecondsSinceEpoch?v:null;
+ }
+ static Future<void> markLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);final s=t.objectStore('cache');await s.delete('active_lease');await s.put({'key':'logout_pending'});await t.completed;
+ }
+ static Future<bool> logoutPending() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('logout_pending');await t.completed;return row!=null;
+ }
+ static Future<void> finishLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('logout_pending');await t.completed;
+ }
+ static Future<void> clear() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('active_lease');await t.completed;
+ }
+}
+,caseSensitive:false).hasMatch(localId)||
+     !RegExp(r'^[a-f0-9-]{36}
+  if(_closed||row['namespace']!=namespace||row['method']!='POST')return false;
+  final path=row['path']?.toString()??'';
+  final payload=Map<String,dynamic>.from(row['payload'] as Map);
+  if(path=='/api/v1/day-routes'){
+   final date=payload['route_date']?.toString()??'';
+   final id=payload['client_ref']?.toString()??'';
+   if(!RegExp(r'^\d{4}-\d{2}-\d{2}
+ Future<void> retryBlocked(String key)async{
+  if(_closed||syncing||!key.startsWith('$namespace:'))return;
+  final d=await db,t=d.transaction('outbox',idbModeReadWrite),store=t.objectStore('outbox');
+  final raw=await store.getObject(key);
+  if(raw is Map&&raw['namespace']==namespace&&raw['status']=='blocked'){
+   await store.put({...Map<String,dynamic>.from(raw),'status':'pending','error':null});
+  }
+  await t.completed;await reload();await retryNow();
+ }
+ Future<void> start() async{
+  try{await reload();}catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
+  if(_closed)return;
+  _timer=Timer.periodic(const Duration(seconds:30),(_)=>unawaited(sync()));
+  unawaited(sync());
+ }
+ Future<void> sync({bool manual=false}) async{
+  if(_closed)return;
+  if(syncing){
+   // iOS may suspend an in-flight IndexedDB/network Future when PWA sleeps.
+   // Do not start a concurrent write: tell the user how to resume safely.
+   if(isStalled){
+    error='Lượt đồng bộ đã quá 2 phút không phản hồi. Đóng rồi mở lại '
+     'Field Work để tiếp tục; dữ liệu chưa gửi vẫn nằm trên máy.';
+    _notify();
+   }
+   return;
+  }
+  final now=DateTime.now();
+  if(!manual&&nextRetryAt!=null&&now.isBefore(nextRetryAt!))return;
+  if(manual){nextRetryAt=null;transientFailures=0;}
+  // 4xx rejects stay on disk for the user, without retrying endlessly.
+  if(pending.isNotEmpty&&readyCount==0){
+   error='Có $blockedCount thao tác bị từ chối. Nhấn vào thanh đồng bộ để xem lỗi.';
+   _notify();return;
+  }
+  syncing=true;error=null;activePath=null;lastAttemptAt=now;_notify();
+  try{
+   await reload();
+   if(pending.isEmpty){nextRetryAt=null;transientFailures=0;return;}
+   if(readyCount==0){
+    error='Có $blockedCount thao tác bị từ chối. Mở chi tiết để thử lại.';
+    return;
+   }
+   final me=await session.get('/api/v1/me');
+   if(_closed||me['identity']!=identity||me['scope_revision'].toString()!=revision){
+    error='Phiên đăng nhập hoặc phạm vi quyền đã thay đổi. Dữ liệu vẫn lưu trên máy.';
+    nextRetryAt=DateTime.now().add(const Duration(minutes:5));return;
+   }
+   var waitingDependencies=0;
+   for(final row in List.of(pending)){
+    if(_closed)break;
+    if(row['status']=='blocked')continue;
+    if(await _dependencyPending(row)){waitingDependencies++;continue;}
+    activePath=describe(row);_notify();
+    try{
+     final payload=Map<String,dynamic>.from(row['payload'] as Map);
+     final headers={...sessionHeaders(session.cookie),'X-Sync-Identity':identity,'X-Sync-Revision':revision};
+     final uri=session.uri(row['path'] as String);
+     if((row['path'] as String).endsWith('/photos')){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      final thumb=row['thumbnail'];final modern=thumb is List;
+      final upload=await (networkClient?.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)??http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)).timeout(const Duration(seconds:30));
+      final result=decodeApi(upload);
+      if(row['session_id']!=null){await _ackSurvey(row,result['item'] as Map);}else{await _remove(row['key'] as String);}continue;
+     }
+     final response=await (row['method']=='PATCH'
+       ?(networkClient?.patch(uri,headers:headers,body:jsonEncode(payload))??
+          http.patch(uri,headers:headers,body:jsonEncode(payload)))
+       :(networkClient?.post(uri,headers:headers,body:jsonEncode(payload))??
+          http.post(uri,headers:headers,body:jsonEncode(payload)))
+      ).timeout(const Duration(seconds:30));
+     final result=decodeApi(response);
+     // Some successful endpoints only acknowledge the write; entity is optional.
+     final item=(row['session_id']!=null||row['photo']!=null)
+       ?(result['item'] as Map):<String,dynamic>{};
+     if(row['photo']!=null){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      if(_closed)break;
+      final thumb=row['thumbnail'],modern=thumb is List;
+       final upload=await (networkClient?.post(session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)??http.post(
+        session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)
+       ).timeout(const Duration(seconds:30));
+       decodeApi(upload);
+     }
+     if(row['session_id']!=null){await _ackSurvey(row,item);}else{await _remove(row['key'] as String);}
+     lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;
+    }catch(e){
+     final blocked=e is ApiFailure&&[400,401,403,404,409,413,415,422].contains(e.status);
+     await _updateIfPresent({...row,
+      'status':blocked?'blocked':'pending',
+      'attempts':((row['attempts'] as num?)?.toInt()??0)+1,
+      'error':describeFailure(e),
+      'last_error_at':DateTime.now().toIso8601String(),
+     });
+     error='${describe(row)}: ${describeFailure(e)}';
+     if(!blocked){
+      transientFailures++;
+      nextRetryAt=DateTime.now().add(retryDelay);
+      break;
+     }
+    }
+   }
+   if(error==null&&waitingDependencies>0){
+    error='Đang chờ $waitingDependencies thao tác liên quan được hoàn tất.';
+   }
+  }catch(e){
+   error='Không kiểm tra/gửi được dữ liệu: ${describeFailure(e)}';
+   transientFailures++;
+   nextRetryAt=DateTime.now().add(retryDelay);
+  }
+  finally{
+   activePath=null;
+   try{await reload();}catch(e){error='Không đọc được hàng đợi lưu máy: $e';}
+   syncing=false;_notify();
+  }
+ }
+ /// Explicit retry bypasses the background cooldown, without deleting rows.
+ Future<void> retryNow()=>sync(manual:true);
+ @override void dispose(){_closed=true;_timer?.cancel();super.dispose();}
+}
+class OfflineLease {
+ static const duration=Duration(hours:12);
+ static Future<void> remember(Map<String,dynamic> me,Map<String,List<String>> districts) async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);
+  if(await t.objectStore('cache').getObject('logout_pending')!=null){await t.completed;return;}
+  await t.objectStore('cache').put({'key':'active_lease','me':me,'districts':districts,'expires':DateTime.now().add(duration).millisecondsSinceEpoch});await t.completed;
+ }
+ static Future<Map<String,dynamic>?> read() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('active_lease');await t.completed;
+  if(row==null)return null;final v=Map<String,dynamic>.from(row as Map);
+  return (v['expires'] as int)>DateTime.now().millisecondsSinceEpoch?v:null;
+ }
+ static Future<void> markLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);final s=t.objectStore('cache');await s.delete('active_lease');await s.put({'key':'logout_pending'});await t.completed;
+ }
+ static Future<bool> logoutPending() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('logout_pending');await t.completed;return row!=null;
+ }
+ static Future<void> finishLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('logout_pending');await t.completed;
+ }
+ static Future<void> clear() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('active_lease');await t.completed;
+ }
+}
+).hasMatch(date)||
+      !RegExp(r'^[a-f0-9-]{36}
+ Future<void> retryBlocked(String key)async{
+  if(_closed||syncing||!key.startsWith('$namespace:'))return;
+  final d=await db,t=d.transaction('outbox',idbModeReadWrite),store=t.objectStore('outbox');
+  final raw=await store.getObject(key);
+  if(raw is Map&&raw['namespace']==namespace&&raw['status']=='blocked'){
+   await store.put({...Map<String,dynamic>.from(raw),'status':'pending','error':null});
+  }
+  await t.completed;await reload();await retryNow();
+ }
+ Future<void> start() async{
+  try{await reload();}catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
+  if(_closed)return;
+  _timer=Timer.periodic(const Duration(seconds:30),(_)=>unawaited(sync()));
+  unawaited(sync());
+ }
+ Future<void> sync({bool manual=false}) async{
+  if(_closed)return;
+  if(syncing){
+   // iOS may suspend an in-flight IndexedDB/network Future when PWA sleeps.
+   // Do not start a concurrent write: tell the user how to resume safely.
+   if(isStalled){
+    error='Lượt đồng bộ đã quá 2 phút không phản hồi. Đóng rồi mở lại '
+     'Field Work để tiếp tục; dữ liệu chưa gửi vẫn nằm trên máy.';
+    _notify();
+   }
+   return;
+  }
+  final now=DateTime.now();
+  if(!manual&&nextRetryAt!=null&&now.isBefore(nextRetryAt!))return;
+  if(manual){nextRetryAt=null;transientFailures=0;}
+  // 4xx rejects stay on disk for the user, without retrying endlessly.
+  if(pending.isNotEmpty&&readyCount==0){
+   error='Có $blockedCount thao tác bị từ chối. Nhấn vào thanh đồng bộ để xem lỗi.';
+   _notify();return;
+  }
+  syncing=true;error=null;activePath=null;lastAttemptAt=now;_notify();
+  try{
+   await reload();
+   if(pending.isEmpty){nextRetryAt=null;transientFailures=0;return;}
+   if(readyCount==0){
+    error='Có $blockedCount thao tác bị từ chối. Mở chi tiết để thử lại.';
+    return;
+   }
+   final me=await session.get('/api/v1/me');
+   if(_closed||me['identity']!=identity||me['scope_revision'].toString()!=revision){
+    error='Phiên đăng nhập hoặc phạm vi quyền đã thay đổi. Dữ liệu vẫn lưu trên máy.';
+    nextRetryAt=DateTime.now().add(const Duration(minutes:5));return;
+   }
+   var waitingDependencies=0;
+   for(final row in List.of(pending)){
+    if(_closed)break;
+    if(row['status']=='blocked')continue;
+    if(await _dependencyPending(row)){waitingDependencies++;continue;}
+    activePath=describe(row);_notify();
+    try{
+     final payload=Map<String,dynamic>.from(row['payload'] as Map);
+     final headers={...sessionHeaders(session.cookie),'X-Sync-Identity':identity,'X-Sync-Revision':revision};
+     final uri=session.uri(row['path'] as String);
+     if((row['path'] as String).endsWith('/photos')){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      final thumb=row['thumbnail'];final modern=thumb is List;
+      final upload=await (networkClient?.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)??http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)).timeout(const Duration(seconds:30));
+      final result=decodeApi(upload);
+      if(row['session_id']!=null){await _ackSurvey(row,result['item'] as Map);}else{await _remove(row['key'] as String);}continue;
+     }
+     final response=await (row['method']=='PATCH'
+       ?(networkClient?.patch(uri,headers:headers,body:jsonEncode(payload))??
+          http.patch(uri,headers:headers,body:jsonEncode(payload)))
+       :(networkClient?.post(uri,headers:headers,body:jsonEncode(payload))??
+          http.post(uri,headers:headers,body:jsonEncode(payload)))
+      ).timeout(const Duration(seconds:30));
+     final result=decodeApi(response);
+     // Some successful endpoints only acknowledge the write; entity is optional.
+     final item=(row['session_id']!=null||row['photo']!=null)
+       ?(result['item'] as Map):<String,dynamic>{};
+     if(row['photo']!=null){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      if(_closed)break;
+      final thumb=row['thumbnail'],modern=thumb is List;
+       final upload=await (networkClient?.post(session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)??http.post(
+        session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)
+       ).timeout(const Duration(seconds:30));
+       decodeApi(upload);
+     }
+     if(row['session_id']!=null){await _ackSurvey(row,item);}else{await _remove(row['key'] as String);}
+     lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;
+    }catch(e){
+     final blocked=e is ApiFailure&&[400,401,403,404,409,413,415,422].contains(e.status);
+     await _updateIfPresent({...row,
+      'status':blocked?'blocked':'pending',
+      'attempts':((row['attempts'] as num?)?.toInt()??0)+1,
+      'error':describeFailure(e),
+      'last_error_at':DateTime.now().toIso8601String(),
+     });
+     error='${describe(row)}: ${describeFailure(e)}';
+     if(!blocked){
+      transientFailures++;
+      nextRetryAt=DateTime.now().add(retryDelay);
+      break;
+     }
+    }
+   }
+   if(error==null&&waitingDependencies>0){
+    error='Đang chờ $waitingDependencies thao tác liên quan được hoàn tất.';
+   }
+  }catch(e){
+   error='Không kiểm tra/gửi được dữ liệu: ${describeFailure(e)}';
+   transientFailures++;
+   nextRetryAt=DateTime.now().add(retryDelay);
+  }
+  finally{
+   activePath=null;
+   try{await reload();}catch(e){error='Không đọc được hàng đợi lưu máy: $e';}
+   syncing=false;_notify();
+  }
+ }
+ /// Explicit retry bypasses the background cooldown, without deleting rows.
+ Future<void> retryNow()=>sync(manual:true);
+ @override void dispose(){_closed=true;_timer?.cancel();super.dispose();}
+}
+class OfflineLease {
+ static const duration=Duration(hours:12);
+ static Future<void> remember(Map<String,dynamic> me,Map<String,List<String>> districts) async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);
+  if(await t.objectStore('cache').getObject('logout_pending')!=null){await t.completed;return;}
+  await t.objectStore('cache').put({'key':'active_lease','me':me,'districts':districts,'expires':DateTime.now().add(duration).millisecondsSinceEpoch});await t.completed;
+ }
+ static Future<Map<String,dynamic>?> read() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('active_lease');await t.completed;
+  if(row==null)return null;final v=Map<String,dynamic>.from(row as Map);
+  return (v['expires'] as int)>DateTime.now().millisecondsSinceEpoch?v:null;
+ }
+ static Future<void> markLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);final s=t.objectStore('cache');await s.delete('active_lease');await s.put({'key':'logout_pending'});await t.completed;
+ }
+ static Future<bool> logoutPending() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('logout_pending');await t.completed;return row!=null;
+ }
+ static Future<void> finishLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('logout_pending');await t.completed;
+ }
+ static Future<void> clear() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('active_lease');await t.completed;
+ }
+}
+,caseSensitive:false).hasMatch(id))return false;
+   final data=await _serverGet('/api/v1/day-routes?month='+date.substring(0,7));
+   final rows=data['items'] as List? ?? [];
+   for(final v in rows){
+    if(v is! Map)continue;
+    final candidate=Map<String,dynamic>.from(v);
+    if(!_sameDayRoute(candidate,payload,identity))continue;
+    final canonicalId=candidate['id']?.toString()??'';
+    if(!RegExp(r'^[a-f0-9-]{36}
+ Future<void> retryBlocked(String key)async{
+  if(_closed||syncing||!key.startsWith('$namespace:'))return;
+  final d=await db,t=d.transaction('outbox',idbModeReadWrite),store=t.objectStore('outbox');
+  final raw=await store.getObject(key);
+  if(raw is Map&&raw['namespace']==namespace&&raw['status']=='blocked'){
+   await store.put({...Map<String,dynamic>.from(raw),'status':'pending','error':null});
+  }
+  await t.completed;await reload();await retryNow();
+ }
+ Future<void> start() async{
+  try{await reload();}catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
+  if(_closed)return;
+  _timer=Timer.periodic(const Duration(seconds:30),(_)=>unawaited(sync()));
+  unawaited(sync());
+ }
+ Future<void> sync({bool manual=false}) async{
+  if(_closed)return;
+  if(syncing){
+   // iOS may suspend an in-flight IndexedDB/network Future when PWA sleeps.
+   // Do not start a concurrent write: tell the user how to resume safely.
+   if(isStalled){
+    error='Lượt đồng bộ đã quá 2 phút không phản hồi. Đóng rồi mở lại '
+     'Field Work để tiếp tục; dữ liệu chưa gửi vẫn nằm trên máy.';
+    _notify();
+   }
+   return;
+  }
+  final now=DateTime.now();
+  if(!manual&&nextRetryAt!=null&&now.isBefore(nextRetryAt!))return;
+  if(manual){nextRetryAt=null;transientFailures=0;}
+  // 4xx rejects stay on disk for the user, without retrying endlessly.
+  if(pending.isNotEmpty&&readyCount==0){
+   error='Có $blockedCount thao tác bị từ chối. Nhấn vào thanh đồng bộ để xem lỗi.';
+   _notify();return;
+  }
+  syncing=true;error=null;activePath=null;lastAttemptAt=now;_notify();
+  try{
+   await reload();
+   if(pending.isEmpty){nextRetryAt=null;transientFailures=0;return;}
+   if(readyCount==0){
+    error='Có $blockedCount thao tác bị từ chối. Mở chi tiết để thử lại.';
+    return;
+   }
+   final me=await session.get('/api/v1/me');
+   if(_closed||me['identity']!=identity||me['scope_revision'].toString()!=revision){
+    error='Phiên đăng nhập hoặc phạm vi quyền đã thay đổi. Dữ liệu vẫn lưu trên máy.';
+    nextRetryAt=DateTime.now().add(const Duration(minutes:5));return;
+   }
+   var waitingDependencies=0;
+   for(final row in List.of(pending)){
+    if(_closed)break;
+    if(row['status']=='blocked')continue;
+    if(await _dependencyPending(row)){waitingDependencies++;continue;}
+    activePath=describe(row);_notify();
+    try{
+     final payload=Map<String,dynamic>.from(row['payload'] as Map);
+     final headers={...sessionHeaders(session.cookie),'X-Sync-Identity':identity,'X-Sync-Revision':revision};
+     final uri=session.uri(row['path'] as String);
+     if((row['path'] as String).endsWith('/photos')){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      final thumb=row['thumbnail'];final modern=thumb is List;
+      final upload=await (networkClient?.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)??http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)).timeout(const Duration(seconds:30));
+      final result=decodeApi(upload);
+      if(row['session_id']!=null){await _ackSurvey(row,result['item'] as Map);}else{await _remove(row['key'] as String);}continue;
+     }
+     final response=await (row['method']=='PATCH'
+       ?(networkClient?.patch(uri,headers:headers,body:jsonEncode(payload))??
+          http.patch(uri,headers:headers,body:jsonEncode(payload)))
+       :(networkClient?.post(uri,headers:headers,body:jsonEncode(payload))??
+          http.post(uri,headers:headers,body:jsonEncode(payload)))
+      ).timeout(const Duration(seconds:30));
+     final result=decodeApi(response);
+     // Some successful endpoints only acknowledge the write; entity is optional.
+     final item=(row['session_id']!=null||row['photo']!=null)
+       ?(result['item'] as Map):<String,dynamic>{};
+     if(row['photo']!=null){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      if(_closed)break;
+      final thumb=row['thumbnail'],modern=thumb is List;
+       final upload=await (networkClient?.post(session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)??http.post(
+        session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)
+       ).timeout(const Duration(seconds:30));
+       decodeApi(upload);
+     }
+     if(row['session_id']!=null){await _ackSurvey(row,item);}else{await _remove(row['key'] as String);}
+     lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;
+    }catch(e){
+     final blocked=e is ApiFailure&&[400,401,403,404,409,413,415,422].contains(e.status);
+     await _updateIfPresent({...row,
+      'status':blocked?'blocked':'pending',
+      'attempts':((row['attempts'] as num?)?.toInt()??0)+1,
+      'error':describeFailure(e),
+      'last_error_at':DateTime.now().toIso8601String(),
+     });
+     error='${describe(row)}: ${describeFailure(e)}';
+     if(!blocked){
+      transientFailures++;
+      nextRetryAt=DateTime.now().add(retryDelay);
+      break;
+     }
+    }
+   }
+   if(error==null&&waitingDependencies>0){
+    error='Đang chờ $waitingDependencies thao tác liên quan được hoàn tất.';
+   }
+  }catch(e){
+   error='Không kiểm tra/gửi được dữ liệu: ${describeFailure(e)}';
+   transientFailures++;
+   nextRetryAt=DateTime.now().add(retryDelay);
+  }
+  finally{
+   activePath=null;
+   try{await reload();}catch(e){error='Không đọc được hàng đợi lưu máy: $e';}
+   syncing=false;_notify();
+  }
+ }
+ /// Explicit retry bypasses the background cooldown, without deleting rows.
+ Future<void> retryNow()=>sync(manual:true);
+ @override void dispose(){_closed=true;_timer?.cancel();super.dispose();}
+}
+class OfflineLease {
+ static const duration=Duration(hours:12);
+ static Future<void> remember(Map<String,dynamic> me,Map<String,List<String>> districts) async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);
+  if(await t.objectStore('cache').getObject('logout_pending')!=null){await t.completed;return;}
+  await t.objectStore('cache').put({'key':'active_lease','me':me,'districts':districts,'expires':DateTime.now().add(duration).millisecondsSinceEpoch});await t.completed;
+ }
+ static Future<Map<String,dynamic>?> read() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('active_lease');await t.completed;
+  if(row==null)return null;final v=Map<String,dynamic>.from(row as Map);
+  return (v['expires'] as int)>DateTime.now().millisecondsSinceEpoch?v:null;
+ }
+ static Future<void> markLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);final s=t.objectStore('cache');await s.delete('active_lease');await s.put({'key':'logout_pending'});await t.completed;
+ }
+ static Future<bool> logoutPending() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('logout_pending');await t.completed;return row!=null;
+ }
+ static Future<void> finishLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('logout_pending');await t.completed;
+ }
+ static Future<void> clear() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('active_lease');await t.completed;
+ }
+}
+,caseSensitive:false)
+      .hasMatch(canonicalId))return false;
+    return _ackEquivalentRoute(row,canonicalId);
+   }
+   return false;
+  }
+  final match=RegExp(r'^/api/v1/day-routes/([a-f0-9-]{36})/stops
+ Future<void> retryBlocked(String key)async{
+  if(_closed||syncing||!key.startsWith('$namespace:'))return;
+  final d=await db,t=d.transaction('outbox',idbModeReadWrite),store=t.objectStore('outbox');
+  final raw=await store.getObject(key);
+  if(raw is Map&&raw['namespace']==namespace&&raw['status']=='blocked'){
+   await store.put({...Map<String,dynamic>.from(raw),'status':'pending','error':null});
+  }
+  await t.completed;await reload();await retryNow();
+ }
+ Future<void> start() async{
+  try{await reload();}catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
+  if(_closed)return;
+  _timer=Timer.periodic(const Duration(seconds:30),(_)=>unawaited(sync()));
+  unawaited(sync());
+ }
+ Future<void> sync({bool manual=false}) async{
+  if(_closed)return;
+  if(syncing){
+   // iOS may suspend an in-flight IndexedDB/network Future when PWA sleeps.
+   // Do not start a concurrent write: tell the user how to resume safely.
+   if(isStalled){
+    error='Lượt đồng bộ đã quá 2 phút không phản hồi. Đóng rồi mở lại '
+     'Field Work để tiếp tục; dữ liệu chưa gửi vẫn nằm trên máy.';
+    _notify();
+   }
+   return;
+  }
+  final now=DateTime.now();
+  if(!manual&&nextRetryAt!=null&&now.isBefore(nextRetryAt!))return;
+  if(manual){nextRetryAt=null;transientFailures=0;}
+  // 4xx rejects stay on disk for the user, without retrying endlessly.
+  if(pending.isNotEmpty&&readyCount==0){
+   error='Có $blockedCount thao tác bị từ chối. Nhấn vào thanh đồng bộ để xem lỗi.';
+   _notify();return;
+  }
+  syncing=true;error=null;activePath=null;lastAttemptAt=now;_notify();
+  try{
+   await reload();
+   if(pending.isEmpty){nextRetryAt=null;transientFailures=0;return;}
+   if(readyCount==0){
+    error='Có $blockedCount thao tác bị từ chối. Mở chi tiết để thử lại.';
+    return;
+   }
+   final me=await session.get('/api/v1/me');
+   if(_closed||me['identity']!=identity||me['scope_revision'].toString()!=revision){
+    error='Phiên đăng nhập hoặc phạm vi quyền đã thay đổi. Dữ liệu vẫn lưu trên máy.';
+    nextRetryAt=DateTime.now().add(const Duration(minutes:5));return;
+   }
+   var waitingDependencies=0;
+   for(final row in List.of(pending)){
+    if(_closed)break;
+    if(row['status']=='blocked')continue;
+    if(await _dependencyPending(row)){waitingDependencies++;continue;}
+    activePath=describe(row);_notify();
+    try{
+     final payload=Map<String,dynamic>.from(row['payload'] as Map);
+     final headers={...sessionHeaders(session.cookie),'X-Sync-Identity':identity,'X-Sync-Revision':revision};
+     final uri=session.uri(row['path'] as String);
+     if((row['path'] as String).endsWith('/photos')){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      final thumb=row['thumbnail'];final modern=thumb is List;
+      final upload=await (networkClient?.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)??http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)).timeout(const Duration(seconds:30));
+      final result=decodeApi(upload);
+      if(row['session_id']!=null){await _ackSurvey(row,result['item'] as Map);}else{await _remove(row['key'] as String);}continue;
+     }
+     final response=await (row['method']=='PATCH'
+       ?(networkClient?.patch(uri,headers:headers,body:jsonEncode(payload))??
+          http.patch(uri,headers:headers,body:jsonEncode(payload)))
+       :(networkClient?.post(uri,headers:headers,body:jsonEncode(payload))??
+          http.post(uri,headers:headers,body:jsonEncode(payload)))
+      ).timeout(const Duration(seconds:30));
+     final result=decodeApi(response);
+     // Some successful endpoints only acknowledge the write; entity is optional.
+     final item=(row['session_id']!=null||row['photo']!=null)
+       ?(result['item'] as Map):<String,dynamic>{};
+     if(row['photo']!=null){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      if(_closed)break;
+      final thumb=row['thumbnail'],modern=thumb is List;
+       final upload=await (networkClient?.post(session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)??http.post(
+        session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)
+       ).timeout(const Duration(seconds:30));
+       decodeApi(upload);
+     }
+     if(row['session_id']!=null){await _ackSurvey(row,item);}else{await _remove(row['key'] as String);}
+     lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;
+    }catch(e){
+     final blocked=e is ApiFailure&&[400,401,403,404,409,413,415,422].contains(e.status);
+     await _updateIfPresent({...row,
+      'status':blocked?'blocked':'pending',
+      'attempts':((row['attempts'] as num?)?.toInt()??0)+1,
+      'error':describeFailure(e),
+      'last_error_at':DateTime.now().toIso8601String(),
+     });
+     error='${describe(row)}: ${describeFailure(e)}';
+     if(!blocked){
+      transientFailures++;
+      nextRetryAt=DateTime.now().add(retryDelay);
+      break;
+     }
+    }
+   }
+   if(error==null&&waitingDependencies>0){
+    error='Đang chờ $waitingDependencies thao tác liên quan được hoàn tất.';
+   }
+  }catch(e){
+   error='Không kiểm tra/gửi được dữ liệu: ${describeFailure(e)}';
+   transientFailures++;
+   nextRetryAt=DateTime.now().add(retryDelay);
+  }
+  finally{
+   activePath=null;
+   try{await reload();}catch(e){error='Không đọc được hàng đợi lưu máy: $e';}
+   syncing=false;_notify();
+  }
+ }
+ /// Explicit retry bypasses the background cooldown, without deleting rows.
+ Future<void> retryNow()=>sync(manual:true);
+ @override void dispose(){_closed=true;_timer?.cancel();super.dispose();}
+}
+class OfflineLease {
+ static const duration=Duration(hours:12);
+ static Future<void> remember(Map<String,dynamic> me,Map<String,List<String>> districts) async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);
+  if(await t.objectStore('cache').getObject('logout_pending')!=null){await t.completed;return;}
+  await t.objectStore('cache').put({'key':'active_lease','me':me,'districts':districts,'expires':DateTime.now().add(duration).millisecondsSinceEpoch});await t.completed;
+ }
+ static Future<Map<String,dynamic>?> read() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('active_lease');await t.completed;
+  if(row==null)return null;final v=Map<String,dynamic>.from(row as Map);
+  return (v['expires'] as int)>DateTime.now().millisecondsSinceEpoch?v:null;
+ }
+ static Future<void> markLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);final s=t.objectStore('cache');await s.delete('active_lease');await s.put({'key':'logout_pending'});await t.completed;
+ }
+ static Future<bool> logoutPending() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('logout_pending');await t.completed;return row!=null;
+ }
+ static Future<void> finishLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('logout_pending');await t.completed;
+ }
+ static Future<void> clear() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('active_lease');await t.completed;
+ }
+}
+,
+    caseSensitive:false).firstMatch(path);
+  if(match!=null){
+   final routeId=match.group(1)!;
+   final info=await _serverGet('/api/v1/day-routes/'+routeId);
+   if(info['item'] is! Map||
+      (info['item'] as Map)['owner_sub']!=identity)return false;
+   for(final v in info['stops'] as List? ?? []){
+    if(v is Map&&_sameRouteStop(
+       Map<String,dynamic>.from(v),payload,identity,routeId)){
+     await _remove(row['key'] as String);
+     return true;
+    }
+   }
+  }
+  return false;
+ }
+ bool _reconciling=false;
+ /// Safe to call after PWA restart. Reads permitted server records only and
+ /// never resends a duplicate INSERT or drops a differing operation.
+ Future<void> reconcileBlockedRoutes()async{
+  if(_closed||syncing||_reconciling)return;
+  _reconciling=true;
+  try{
+   await reload();
+   var fixed=false;
+   for(final row in List<Map<String,dynamic>>.of(pending)){
+    if(!isRouteDuplicateConflict(row))continue;
+    try{if(await _resolveRouteDuplicate(row))fixed=true;}
+    catch(_){
+     // Network/auth/scope errors are not proof of equivalence. Keep the 409.
+    }
+   }
+   if(fixed){
+    error=null;lastSuccessAt=DateTime.now();
+    await reload();
+   }
+  }finally{_reconciling=false;_notify();}
+ }
+ /// Explicit user retry; errors and 409 conflicts are never discarded.
+ Future<void> retryBlocked(String key)async{
+  if(_closed||syncing||!key.startsWith('$namespace:'))return;
+  final d=await db,t=d.transaction('outbox',idbModeReadWrite),store=t.objectStore('outbox');
+  final raw=await store.getObject(key);
+  if(raw is Map&&raw['namespace']==namespace&&raw['status']=='blocked'){
+   await store.put({...Map<String,dynamic>.from(raw),'status':'pending','error':null});
+  }
+  await t.completed;await reload();await retryNow();
+ }
+ Future<void> start() async{
+  try{await reload();}catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
+  if(_closed)return;
+  _timer=Timer.periodic(const Duration(seconds:30),(_)=>unawaited(sync()));
+  unawaited(sync());
+ }
+ Future<void> sync({bool manual=false}) async{
+  if(_closed)return;
+  if(syncing){
+   // iOS may suspend an in-flight IndexedDB/network Future when PWA sleeps.
+   // Do not start a concurrent write: tell the user how to resume safely.
+   if(isStalled){
+    error='Lượt đồng bộ đã quá 2 phút không phản hồi. Đóng rồi mở lại '
+     'Field Work để tiếp tục; dữ liệu chưa gửi vẫn nằm trên máy.';
+    _notify();
+   }
+   return;
+  }
+  final now=DateTime.now();
+  if(!manual&&nextRetryAt!=null&&now.isBefore(nextRetryAt!))return;
+  if(manual){nextRetryAt=null;transientFailures=0;}
+  // 4xx rejects stay on disk for the user, without retrying endlessly.
+  if(pending.isNotEmpty&&readyCount==0){
+   error='Có $blockedCount thao tác bị từ chối. Nhấn vào thanh đồng bộ để xem lỗi.';
+   _notify();return;
+  }
+  syncing=true;error=null;activePath=null;lastAttemptAt=now;_notify();
+  try{
+   await reload();
+   if(pending.isEmpty){nextRetryAt=null;transientFailures=0;return;}
+   if(readyCount==0){
+    error='Có $blockedCount thao tác bị từ chối. Mở chi tiết để thử lại.';
+    return;
+   }
+   final me=await session.get('/api/v1/me');
+   if(_closed||me['identity']!=identity||me['scope_revision'].toString()!=revision){
+    error='Phiên đăng nhập hoặc phạm vi quyền đã thay đổi. Dữ liệu vẫn lưu trên máy.';
+    nextRetryAt=DateTime.now().add(const Duration(minutes:5));return;
+   }
+   var waitingDependencies=0;
+   for(final row in List.of(pending)){
+    if(_closed)break;
+    if(row['status']=='blocked')continue;
+    if(await _dependencyPending(row)){waitingDependencies++;continue;}
+    activePath=describe(row);_notify();
+    try{
+     final payload=Map<String,dynamic>.from(row['payload'] as Map);
+     final headers={...sessionHeaders(session.cookie),'X-Sync-Identity':identity,'X-Sync-Revision':revision};
+     final uri=session.uri(row['path'] as String);
+     if((row['path'] as String).endsWith('/photos')){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      final thumb=row['thumbnail'];final modern=thumb is List;
+      final upload=await (networkClient?.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)??http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)).timeout(const Duration(seconds:30));
+      final result=decodeApi(upload);
+      if(row['session_id']!=null){await _ackSurvey(row,result['item'] as Map);}else{await _remove(row['key'] as String);}continue;
+     }
+     final response=await (row['method']=='PATCH'
+       ?(networkClient?.patch(uri,headers:headers,body:jsonEncode(payload))??
+          http.patch(uri,headers:headers,body:jsonEncode(payload)))
+       :(networkClient?.post(uri,headers:headers,body:jsonEncode(payload))??
+          http.post(uri,headers:headers,body:jsonEncode(payload)))
+      ).timeout(const Duration(seconds:30));
+     final result=decodeApi(response);
+     // Some successful endpoints only acknowledge the write; entity is optional.
+     final item=(row['session_id']!=null||row['photo']!=null)
+       ?(result['item'] as Map):<String,dynamic>{};
+     if(row['photo']!=null){
+      final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
+      if(_closed)break;
+      final thumb=row['thumbnail'],modern=thumb is List;
+       final upload=await (networkClient?.post(session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)??http.post(
+        session.uri('/api/v1/customers/${item['id']}/photos'),
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
+          'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)
+       ).timeout(const Duration(seconds:30));
+       decodeApi(upload);
+     }
+     if(row['session_id']!=null){await _ackSurvey(row,item);}else{await _remove(row['key'] as String);}
+     lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;
+    }catch(e){
+     final blocked=e is ApiFailure&&[400,401,403,404,409,413,415,422].contains(e.status);
+     await _updateIfPresent({...row,
+      'status':blocked?'blocked':'pending',
+      'attempts':((row['attempts'] as num?)?.toInt()??0)+1,
+      'error':describeFailure(e),
+      'last_error_at':DateTime.now().toIso8601String(),
+     });
+     error='${describe(row)}: ${describeFailure(e)}';
+     if(!blocked){
+      transientFailures++;
+      nextRetryAt=DateTime.now().add(retryDelay);
+      break;
+     }
+    }
+   }
+   if(error==null&&waitingDependencies>0){
+    error='Đang chờ $waitingDependencies thao tác liên quan được hoàn tất.';
+   }
+  }catch(e){
+   error='Không kiểm tra/gửi được dữ liệu: ${describeFailure(e)}';
+   transientFailures++;
+   nextRetryAt=DateTime.now().add(retryDelay);
+  }
+  finally{
+   activePath=null;
+   try{await reload();}catch(e){error='Không đọc được hàng đợi lưu máy: $e';}
+   syncing=false;_notify();
+  }
+ }
+ /// Explicit retry bypasses the background cooldown, without deleting rows.
+ Future<void> retryNow()=>sync(manual:true);
+ @override void dispose(){_closed=true;_timer?.cancel();super.dispose();}
+}
+class OfflineLease {
+ static const duration=Duration(hours:12);
+ static Future<void> remember(Map<String,dynamic> me,Map<String,List<String>> districts) async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);
+  if(await t.objectStore('cache').getObject('logout_pending')!=null){await t.completed;return;}
+  await t.objectStore('cache').put({'key':'active_lease','me':me,'districts':districts,'expires':DateTime.now().add(duration).millisecondsSinceEpoch});await t.completed;
+ }
+ static Future<Map<String,dynamic>?> read() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('active_lease');await t.completed;
+  if(row==null)return null;final v=Map<String,dynamic>.from(row as Map);
+  return (v['expires'] as int)>DateTime.now().millisecondsSinceEpoch?v:null;
+ }
+ static Future<void> markLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);final s=t.objectStore('cache');await s.delete('active_lease');await s.put({'key':'logout_pending'});await t.completed;
+ }
+ static Future<bool> logoutPending() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('logout_pending');await t.completed;return row!=null;
+ }
+ static Future<void> finishLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('logout_pending');await t.completed;
+ }
+ static Future<void> clear() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('active_lease');await t.completed;
+ }
+}
+,caseSensitive:false).hasMatch(actualStopId)){
+   return false;
+  }
+  final d=await db,t=d.transactionList(['cache','outbox'],idbModeReadWrite);
+  final store=t.objectStore('outbox');
+  final actual=await store.getObject(row['key'] as String);
+  if(actual is! Map||actual['namespace']!=namespace||
+     actual['path']!=row['path']||
+     (actual['payload'] as Map)['client_ref']!=localId){
+   await t.completed;return false;
+  }
+  if(localId!=actualStopId){
+   final siblings=await store.index('account').getAll(identity);
+   final oldSegment='/stops/$localId/';
+   final newSegment='/stops/$actualStopId/';
+   for(final raw in siblings){
+    if(raw is! Map||raw['namespace']!=namespace||raw['key']==row['key'])continue;
+    final sibling=Map<String,dynamic>.from(raw);
+    var changed=false;
+    final path=sibling['path']?.toString()??'';
+    if(path.contains(oldSegment)&&path.startsWith('/api/v1/day-routes/')){
+     sibling['path']=path.replaceFirst(oldSegment,newSegment);changed=true;
+    }
+    final deps=(sibling['depends_on'] as List?)??[];
+    if(deps.contains(localId)){
+     sibling['depends_on']=deps.where((x)=>x!=localId).toList();
+     changed=true;
+    }
+    if(sibling['payload'] is Map){
+     final data=Map<String,dynamic>.from(sibling['payload'] as Map);
+     for(final key in ['route_stop_id','day_route_stop_id']){
+      if(data[key]==localId){data[key]=actualStopId;changed=true;}
+     }
+     if(changed)sibling['payload']=data;
+    }
+    if(changed)await store.put(sibling);
+   }
+   // The draft of a survey referencing an offline stop must follow the
+   // canonical server stop as well. Keep its answers/photos untouched.
+   final cache=t.objectStore('cache');
+   final name='$namespace:survey-drafts';
+   final raw=await cache.getObject(name);
+   if(raw is Map&&raw['items'] is List){
+    final drafts=(raw['items'] as List)
+      .map((v)=>Map<String,dynamic>.from(v as Map)).toList();
+    var edited=false;
+    for(final draft in drafts){
+     if(draft['day_route_stop_id']==localId){
+      draft['day_route_stop_id']=actualStopId;edited=true;
+     }
+    }
+    if(edited)await cache.put({'key':name,'items':drafts});
+   }
+  }
+  await store.delete(row['key'] as String);
+  await t.completed;
+  return true;
+ }
  Future<bool> _resolveRouteDuplicate(Map<String,dynamic> row)async{
   if(_closed||row['namespace']!=namespace||row['method']!='POST')return false;
   final path=row['path']?.toString()??'';
