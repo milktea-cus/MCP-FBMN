@@ -236,7 +236,7 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
    },photo:media.image,thumbnail:media.thumbnail,
     sha256:media.hash,thumbnailSha256:media.thumbnailHash,
     mime:'image/jpeg',dependsOn:dependenciesFor(stop));
-   await record('photo',additionalDeps:[photoRef]);
+   await record('photo',form:{'photo_id':photoRef},additionalDeps:[photoRef]);
    widget.onSaved?.call();
    inform('Ảnh tại cửa hàng đã lưu máy · chờ đồng bộ, chưa thay ảnh đại diện.');
   }catch(e){inform('Không lưu được ảnh: $e');}
@@ -263,7 +263,7 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
      'field_code':customer['field_code'],
      'export_code':customer['code']},
     onOrderSaved:(orderId)async{
-     await record('order',noteText:'Đã lưu đơn $orderId');
+     await record('order',form:{'order_id':orderId},noteText:'Đã lưu đơn $orderId');
     }),
   )));
   if(mounted)setState((){});

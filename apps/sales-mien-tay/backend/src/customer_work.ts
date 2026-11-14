@@ -23,6 +23,9 @@ export function validateCustomerWorkInput(v:Body):string|null{
  const names=v.market_brands;
  if(names!==null&&names!==undefined&&(!Array.isArray(names)||names.length>50||
   names.some(x=>typeof x!=='string'||!x.trim()||x.length>100)))return 'Nhãn hàng không hợp lệ';
+ if(v.kind==='photo'&&!isUuid((v.answers as Body).photo_id)||
+    v.kind==='order'&&!isUuid((v.answers as Body).order_id))
+  return 'Thiếu mã ảnh hoặc đơn hàng được xác nhận';
  if(v.kind==='form'&&!String(v.note??'').trim()&&
   !Object.keys(v.answers as Body).length&&!(names as string[]|null|undefined)?.length)
   return 'Hãy nhập ghi chú, chọn nhãn hàng hoặc một hạng mục công việc';
