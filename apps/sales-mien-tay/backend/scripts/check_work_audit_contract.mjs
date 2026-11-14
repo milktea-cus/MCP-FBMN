@@ -21,7 +21,9 @@ const checks=[
  ['route creation protects idempotent already-saved trips',
   /saved\.plan_status==='cancelled'[\s\S]*?already_saved:true/.test(routeRouter)],
  ['stop creation protects idempotent already-saved stops',
-  /duplicate\.length\)return reply\(\{item:duplicate\[0\],already_saved:true\},200\)/.test(routeRouter)],
+  /if\(duplicate\.length\)[\s\S]{0,350}?return reply\(\{item:duplicate\[0\],already_saved:true\},200\)/.test(routeRouter)],
+ ['old clients do not silently discard canonical UUIDs without support',
+  routeRouter.includes("req.headers.get('X-Sync-Protocol')!=='2'")],
 ];
 for(const [name,pass] of checks){
  if(!pass){console.error('FAIL work audit contract: '+name);process.exitCode=1;}
