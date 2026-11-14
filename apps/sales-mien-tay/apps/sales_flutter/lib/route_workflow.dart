@@ -16,7 +16,7 @@ List<Map<String,dynamic>> routeTemplateStops(
  final result=<Map<String,dynamic>>[];
  void add(Map<String,dynamic> s){
   final kind=s['stop_kind']?.toString();
-  if(!['customer','area','chain'].contains(kind))return;
+  if(kind!='customer')return; // Scope context is never a template stop.
   result.add(<String,dynamic>{
    'stop_kind':kind,'sequence':(s['sequence'] as num).toInt(),
    'purpose':s['purpose']?.toString()??'',
@@ -124,7 +124,8 @@ class _RouteTemplatePageState extends State<RouteTemplatePage>{
   }
   final raw=selected['stops'];
   if(raw is! List||raw.length>100)return;
-  final records=raw.map((x)=>Map<String,dynamic>.from(x as Map)).toList();
+  final records=raw.map((x)=>Map<String,dynamic>.from(x as Map))
+    .where((x)=>x['stop_kind']=='customer').toList();
   final taken=<String>{
    for(final s in widget.stops)routeStopIdentity(s),
    for(final op in pendingStops)
@@ -188,21 +189,26 @@ class _RouteTemplatePageState extends State<RouteTemplatePage>{
 class AreaEvidencePage extends StatefulWidget{
  final OfflineQueue queue;
  final CustomerService service;
- final Map<String,dynamic> route,stop;
+ final Map<String,dynamic> route;
+ final Map<String,dynamic>? stop;
  const AreaEvidencePage({super.key,required this.queue,required this.service,
-  required this.route,required this.stop});
+  required this.route,this.stop});
  @override State<AreaEvidencePage> createState()=>_AreaEvidencePageState();
 }
 class _AreaEvidencePageState extends State<AreaEvidencePage>{
  List<Map<String,dynamic>> visits=[],prospects=[];
  bool loading=false,offline=false;
  String? error;
- String get stopId=>widget.stop['id'].toString();
- String get cacheVisit=>'area-visits:$stopId';
- String get cacheLead=>'area-prospects:$stopId';
+ bool get routeMarket=>widget.stop==null;
+ String get stopId=>widget.stop?['id']?.toString()??'';
+ String get areaId=>routeMarket?widget.route['id'].toString():stopId;
+ String get areaFilter=>routeMarket?'route_id':'stop_id';
+ String get cacheVisit=>'area-visits:${areaFilter}:$areaId';
+ String get cacheLead=>'area-prospects:${areaFilter}:$areaId';
  bool get own=>widget.route['owner_sub']==widget.queue.identity;
  List<Map<String,dynamic>> get queuedVisits=>widget.queue.pending.where((r)=>
-  r['path']=='/api/v1/area-visits'&&(r['payload'] as Map)['day_route_stop_id']==stopId).toList();
+  r['path']=='/api/v1/area-visits'&&
+   (r['payload'] as Map)[routeMarket?'day_route_id':'day_route_stop_id']==areaId).toList();
  List<Map<String,dynamic>> get photoJobs=>widget.queue.pending.where((r)=>
   (r['path']?.toString()??'').startsWith('/api/v1/area-visits/')&&
   (r['path']?.toString()??'').endsWith('/photos')&&
@@ -219,9 +225,9 @@ class _AreaEvidencePageState extends State<AreaEvidencePage>{
    if(mounted)setState((){visits=savedVisits;prospects=savedLeads;offline=true;});
    final results=await Future.wait([
     http.get(widget.service.uri('/api/v1/area-visits').replace(
-     queryParameters:{'stop_id':stopId}),headers:widget.service.headers).timeout(const Duration(seconds:20)),
+     queryParameters:{areaFilter:areaId}),headers:widget.service.headers).timeout(const Duration(seconds:20)),
     http.get(widget.service.uri('/api/v1/prospects').replace(
-     queryParameters:{'stop_id':stopId}),headers:widget.service.headers).timeout(const Duration(seconds:20)),
+     queryParameters:{areaFilter:areaId}),headers:widget.service.headers).timeout(const Duration(seconds:20)),
    ]);
    final a=decodeApi(results[0]),b=decodeApi(results[1]);
    final confirmed=(a['items'] as List).map((x)=>Map<String,dynamic>.from(x as Map)).toList(),
@@ -304,10 +310,11 @@ class _AreaEvidencePageState extends State<AreaEvidencePage>{
    IconButton(tooltip:'Làm mới',onPressed:loading?null:load,icon:const Icon(Icons.refresh)),
   ]),
   body:ListView(padding:const EdgeInsets.all(12),children:[
-   Text(widget.stop['stop_kind']=='chain'?'Công tác chuỗi':'Địa bàn tìm khách mới',
+   Text(routeMarket?'Thực địa · ${widget.route['scope_kind']=='chain'?'Chuỗi':'Địa bàn'}'
+    :widget.stop?['stop_kind']=='chain'?'Công tác chuỗi':'Địa bàn tìm khách mới',
     style:Theme.of(context).textTheme.titleMedium),
    const SizedBox(height:5),
-   Text('Các lần GPS ở điểm này không tự tạo khách hàng và không tự hoàn thành khảo sát.'),
+   Text('GPS thực địa gắn trực tiếp với ${routeMarket?'lịch công tác':'điểm ghé cũ'}; không tự tạo khách và không tự hoàn thành khảo sát.'),
    if(loading)const LinearProgressIndicator(),
    if(offline)const Text('Dữ liệu lưu trên máy · đang ngoại tuyến.'),
    if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
@@ -335,7 +342,7 @@ class _AreaEvidencePageState extends State<AreaEvidencePage>{
    const Divider(),
    Text('Lead tìm được',style:Theme.of(context).textTheme.titleMedium),
    if(prospects.isEmpty)const Padding(padding:EdgeInsets.all(8),
-    child:Text('Chưa có lead xác nhận. Chọn GPS tại điểm công tác để ghi nhận.')),
+    child:Text('Chưa có lead xác nhận. Quay về lịch công tác và chọn Tìm khách mới để ghi nhận GPS.')),
    for(final p in prospects)Card(child:ListTile(
     title:Text(p['name'].toString()),
     subtitle:Text('${p['address_line']}\n${p['status']=='converted'?'Đã liên kết khách thật':'Chưa chuyển thành khách'}'),
