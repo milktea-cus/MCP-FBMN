@@ -12,10 +12,13 @@ import 'surveys.dart';
 import 'route_workflow.dart';
 import 'schedule_archive.dart';
 import 'work_session_identity.dart';
+import 'planning_periods.dart';
 import 'dart:convert';
 
 bool scopeSupportsExtra(Map<String,dynamic> route)=>
- route['scope_kind']=='territory'||route['scope_kind']=='chain';
+ route['scope_kind']=='territory'||route['scope_kind']=='chain'||
+ ((route['scopes'] as List?)?.any((s)=>
+   s is Map&&(s['scope_kind']=='territory'||s['scope_kind']=='chain'))??false);
 String missedReasonLabel(Object? value)=>switch(value){
  'closed'=>'Khách đóng cửa',
  'unavailable'=>'Không gặp được khách',
@@ -182,6 +185,13 @@ class _DayRoutePageState extends State<DayRoutePage>{
    path=='/api/v1/day-routes/${widget.routeId}/unplanned-stops';
  }).toList();
  bool get isTodayRoute{
+  if(route?['trip_id']!=null){
+   final now=DateTime.now().toUtc().add(const Duration(hours:7));
+   final today=dayKey(now);
+   final begin=route?['trip_start_date']?.toString().substring(0,10)??'';
+   final end=route?['trip_end_date']?.toString().substring(0,10)??'';
+   return route?['trip_closed_at']==null&&today.compareTo(begin)>=0&&today.compareTo(end)<=0;
+  }
   final date=DateTime.tryParse(route?['route_date']?.toString()??'');
   final today=DateTime.now().toUtc().add(const Duration(hours:7));
   return date!=null&&date.year==today.year&&date.month==today.month&&date.day==today.day;
@@ -199,8 +209,8 @@ class _DayRoutePageState extends State<DayRoutePage>{
  String get workState=>route==null?'open':workSessionState(route!,widget.queue.pending);
  String get sessionId=>route==null?'':workSessionRouteId(route!,widget.queue.identity);
  bool get sessionActive=>workState=='ongoing';
- bool get canExecute=>canModify&&sessionActive&&isTodayRoute;
- bool get canEditPlannedStops=>canModify&&workState=='open'&&!hasRecordedActivity;
+ bool get canExecute=>canModify&&isTodayRoute&&(route?['trip_id']!=null||sessionActive);
+ bool get canEditPlannedStops=>canModify&&route?['trip_id']==null&&workState=='open'&&!hasRecordedActivity;
  bool missedPending(String id)=>widget.queue.pending.any((op)=>
   op['path']=='/api/v1/day-routes/${widget.routeId}/stops/$id/missed');
  bool activityPending(String id)=>widget.queue.pending.any((op){
@@ -223,7 +233,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
  bool get isOwner=>route!=null&&route!['owner_sub']==widget.queue.identity;
  bool get canModify=>isOwner&&route!['status']=='ready'
    &&route!['plan_status']!='cancelled'&&
-   workState!='done'&&workState!='cancelled'&&!busy;
+   workState!='done'&&workState!='cancelled'&&route?['trip_closed_at']==null&&!busy;
  List<String> _routeDependencies()=>[
   for(final op in widget.queue.pending)
    if(op['path']=='/api/v1/day-routes'&&
@@ -232,6 +242,10 @@ class _DayRoutePageState extends State<DayRoutePage>{
   for(final op in widget.queue.pending)
    if(op['path']=='/api/v1/day-routes/${widget.routeId}/work-session')
     sessionId,
+  for(final op in widget.queue.pending)
+   if(op['path']=='/api/v1/trips'&&
+     (op['payload'] as Map?)?['day_route_id']==widget.routeId)
+    (op['payload'] as Map)['client_ref'].toString(),
  ];
  Future<void> createCustomer()async{
   if(!canExecute||!scopeSupportsExtra(route!))return;
@@ -240,8 +254,8 @@ class _DayRoutePageState extends State<DayRoutePage>{
   final current=route!;
   final created=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>
    CustomerEditor(service:widget.service,regions:regions,queue:widget.queue,
-    defaultProvince:current['scope_kind']=='territory'?current['province']?.toString():null,
-    defaultDistrict:current['scope_kind']=='territory'?current['district']?.toString():null,
+    defaultProvince:current['trip_id']==null&&current['scope_kind']=='territory'?current['province']?.toString():null,
+    defaultDistrict:current['trip_id']==null&&current['scope_kind']=='territory'?current['district']?.toString():null,
     onCreated:(id)async{
      await widget.queue.enqueue('/api/v1/day-routes/${widget.routeId}/unplanned-stops',{
       'client_ref':const Uuid().v4(),'stop_kind':'customer','customer_id':id,
@@ -290,7 +304,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
    customer:selected,
    ensureStop:ensureCustomerStop,
    dependencies:_routeDependencies,
-   editable:canModify,
+   editable:canExecute,
    onSaved:(){if(mounted)setState((){});},
   )));
   if(mounted)await load();
@@ -531,7 +545,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
  /// For scheduled customer stops, open the existing survey linked by
  /// day_route_stop_id. SurveyPage handles its own GPS first verification.
  Future<void> openCustomerSurvey(Map<String,dynamic> stop)async{
-  if(!sessionActive||!isOwner||!isTodayRoute){
+  if(!canExecute){
    notice('Khảo sát chỉ được bắt đầu/tiếp tục trong phiên đang đi hôm nay.');return;
   }
   if(stop['missed_code']!=null||missedPending(stop['id'].toString())){
@@ -546,7 +560,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
   final regions=await RegionCatalog.load();
   if(!mounted)return;
   await Navigator.push(context,MaterialPageRoute(builder:(_)=>SurveyPage(
-   queue:widget.queue,service:widget.service,regions:regions,initialCustomer:customerId,initialStop:{...stop,'route_date':route?['route_date'],'day_route_id':widget.routeId})));
+   queue:widget.queue,service:widget.service,regions:regions,initialCustomer:customerId,initialStop:{...stop,'route_date':route?['trip_id']!=null?dayKey(DateTime.now().toUtc().add(const Duration(hours:7))):route?['route_date'],'day_route_id':widget.routeId})));
   if(mounted)await load();
  }
  Future<void> openTemplates()async{
@@ -756,7 +770,7 @@ class _DayRoutePageState extends State<DayRoutePage>{
    ]),
    body:ListView(padding:const EdgeInsets.all(12),children:[
     if(route!=null)...[
-     Text('${route!['route_date']?.toString().substring(0,10)} · ${route!['purpose']}',
+     Text('${route!['trip_id']!=null?'${route!['trip_start_date']} – ${route!['trip_end_date']}':route!['route_date']?.toString().substring(0,10)} · ${route!['purpose']}',
        style:Theme.of(context).textTheme.titleMedium),
      Text('${route!['scope_kind']=='chain'?'Chuỗi':route!['scope_kind']=='customer'?'Khách cụ thể':'Địa bàn'}: ${route!['scope_key']} · Đã ghé $count/${customerRows.length} khách · GPS thị trường ${route!['market_visit_count']??0}'),
      Text('Phiên: ${switch(workState){'ongoing'=>'Đang đi','done'=>'Đã kết thúc','cancelled'=>'Đã hủy',_=>'Trong lịch'}}',
@@ -767,11 +781,11 @@ class _DayRoutePageState extends State<DayRoutePage>{
        key:const ValueKey('route-create-customer'),
        onPressed:canExecute?createCustomer:null,
        icon:const Icon(Icons.person_add_alt_1_outlined),label:const Text('Thêm khách')),
-      if(canExecute)OutlinedButton.icon(
+      if(canExecute&&route!['trip_id']==null)OutlinedButton.icon(
        key:const ValueKey('work-session-finish'),
        onPressed:endWorkSession,
        icon:const Icon(Icons.flag_outlined),label:const Text('Kết thúc sớm')),
-      if(isOwner&&['done','cancelled'].contains(workState)&&
+      if(route!['trip_id']==null&&isOwner&&['done','cancelled'].contains(workState)&&
         !hasRecordedActivity&&widget.queue.pending.isEmpty)
        TextButton.icon(key:const ValueKey('work-session-delete-empty'),
         onPressed:deleteEmptyWorkSession,

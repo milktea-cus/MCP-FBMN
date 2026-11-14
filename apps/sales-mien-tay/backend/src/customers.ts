@@ -268,7 +268,12 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
          WHERE s.id=${stop??null}::uuid AND s.customer_id=${id}::uuid AND s.stop_kind='customer'
            AND s.owner_sub=${actor.sub} AND r.owner_sub=${actor.sub}
            AND r.status='ready' AND p.status='planned'
-           AND r.route_date=(${new Date(captured).toISOString()}::timestamptz AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+           AND ((r.route_date=(${new Date(captured).toISOString()}::timestamptz AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+            AND NOT EXISTS(SELECT 1 FROM public.field_trips t WHERE t.day_route_id=r.id))
+             OR EXISTS(SELECT 1 FROM public.field_trips t WHERE t.day_route_id=r.id
+              AND (${new Date(captured).toISOString()}::timestamptz AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN t.start_date AND t.end_date
+              AND (t.closed_at IS NULL OR ${new Date(captured).toISOString()}::timestamptz<=t.closed_at)
+              AND public.sales_trip_customer_allowed(${actor.sub},t.id,${id}::uuid)))
            AND public.sales_monthly_plan_scope_allowed(${actor.sub},p.scope_kind,p.scope_key,p.province,p.district)))
       ON CONFLICT(owner_sub,client_ref) DO NOTHING RETURNING *`;
     const existing=rows.length?rows:await db`SELECT * FROM field_visits WHERE owner_sub=${actor.sub} AND client_ref=${String(data.client_ref)}::uuid AND customer_id=${id}::uuid`;

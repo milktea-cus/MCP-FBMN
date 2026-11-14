@@ -10,6 +10,7 @@ import {monthlyPlanRoutes} from './monthly_plans';
 import {dayRouteRoutes} from './day_routes';
 import {customerWorkRoutes} from './customer_work';
 import {workSessionRoutes} from './work_sessions';
+import {tripRoutes} from './trips';
 import {areaVisitRoutes} from './area_visits';
 import {areaVisitMediaRoutes} from './area_visit_media';
 import {routeTemplateRoutes} from './route_templates';
@@ -188,6 +189,8 @@ export default {
       if(monthlyResponse)return monthlyResponse;
       const templateResponse=await routeTemplateRoutes(req,env,user,url);
       if(templateResponse)return templateResponse;
+      const tripResponse=await tripRoutes(req,env,user,url);
+      if(tripResponse)return tripResponse;
       const workSessionResponse=await workSessionRoutes(req,env,user,url);
       if(workSessionResponse)return workSessionResponse;
       const customerWorkResponse=await customerWorkRoutes(req,env,user,url);

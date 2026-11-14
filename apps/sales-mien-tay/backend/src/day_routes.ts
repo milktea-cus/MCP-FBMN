@@ -58,6 +58,11 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
     new Date(day).toISOString().slice(0,10)!==day))
    return fail('Ngày tuyến không hợp lệ',400);
   const items=await db`SELECT r.*,p.period_ym,p.scope_kind,p.scope_key,p.province,p.district,p.status AS plan_status,
+    t.id AS trip_id,t.start_date AS trip_start_date,t.end_date AS trip_end_date,
+    t.closed_at AS trip_closed_at,t.version AS trip_version,t.priority_customer_ids AS trip_priorities,
+    (SELECT coalesce(jsonb_agg(jsonb_build_object('scope_kind',sc.scope_kind,'scope_key',sc.scope_key,
+      'province',sc.province,'district',sc.district) ORDER BY sc.scope_kind,sc.scope_key),'[]'::jsonb)
+     FROM public.field_trip_scopes sc WHERE sc.trip_id=t.id) AS scopes,
     (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id AND NOT s.is_unplanned)::integer AS stop_count,
     (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id AND s.is_unplanned)::integer AS unplanned_count,
     (SELECT count(*) FROM public.field_route_stops s WHERE s.day_route_id=r.id AND NOT s.is_unplanned
@@ -83,6 +88,7 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
     w.id AS work_session_id,w.version AS work_session_version
    FROM public.field_day_routes r JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id
    LEFT JOIN public.field_work_sessions w ON w.day_route_id=r.id
+   LEFT JOIN public.field_trips t ON t.day_route_id=r.id
    WHERE p.period_ym=${month} AND
     (${day||null}::date IS NULL OR r.route_date=${day||null}::date) AND
     (r.owner_sub=${actor.sub} OR ${actor.admin} OR
@@ -122,6 +128,27 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
    return fail('Thời gian phát sinh không hợp lệ');
   const customer=String(v.customer_id);
   const chain=null,province=null,district=null;
+  const trip=await db`SELECT t.id FROM public.field_trips t
+    WHERE t.day_route_id=${extra[1]}::uuid AND t.owner_sub=${actor.sub} LIMIT 1`;
+  if(trip.length){
+   try{
+    const created=await db`SELECT public.sales_add_trip_customer_stop(${actor.sub},
+      ${String(trip[0].id)}::uuid,${String(v.client_ref)}::uuid,${customer}::uuid,
+      ${Number(v.sequence)},${String(v.purpose??'')},
+      ${String(v.captured_at)}::timestamptz) AS item`;
+    const item=created[0].item as Record<string,unknown>;
+    return reply({item,already_saved:item.already_saved===true},item.already_saved?200:201);
+   }catch(e){
+    const message=(e as {message?:string}).message??'';
+    if(message.includes('TRIP_SCOPE_REVOKED'))return reply({
+      code:'TRIP_SCOPE_REVOKED',error:'Khách ngoài phạm vi hoặc chuyến đã kết thúc.'},403);
+    if(message.includes('TRIP_CUSTOMER_ALREADY_ADDED'))return reply({
+      code:'TRIP_CUSTOMER_ALREADY_ADDED',error:'Khách đã có điểm ghé trong chuyến; giữ bản chờ để đối chiếu.'},409);
+    if(message.includes('TRIP_MUTATION_REPLAY_MISMATCH'))return reply({
+      code:'TRIP_MUTATION_REPLAY_MISMATCH',error:'UUID đồng bộ xung đột; giữ bản chờ.'},409);
+    return saveError(e);
+   }
+  }
   // Two offline devices can submit the same business stop. Check its owner
   // and scope before acknowledging the canonical UUID; never create a twin.
   const existing=await db`SELECT s.* FROM public.field_route_stops s
@@ -168,11 +195,17 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
  const routeId=path?.[1]??'';
  if(path&&(req.method==='GET')){
   const routes=await db`SELECT r.*,p.period_ym,p.scope_kind,p.scope_key,p.province,p.district,p.status AS plan_status,
+    t.id AS trip_id,t.start_date AS trip_start_date,t.end_date AS trip_end_date,
+    t.closed_at AS trip_closed_at,t.version AS trip_version,t.priority_customer_ids AS trip_priorities,
+    (SELECT coalesce(jsonb_agg(jsonb_build_object('scope_kind',sc.scope_kind,'scope_key',sc.scope_key,
+      'province',sc.province,'district',sc.district) ORDER BY sc.scope_kind,sc.scope_key),'[]'::jsonb)
+     FROM public.field_trip_scopes sc WHERE sc.trip_id=t.id) AS scopes,
     (SELECT count(*)::integer FROM public.field_area_visits v WHERE v.day_route_id=r.id) AS market_visit_count,
     coalesce(w.state,'open') AS work_session_state,
     w.id AS work_session_id,w.version AS work_session_version
    FROM public.field_day_routes r JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id
    LEFT JOIN public.field_work_sessions w ON w.day_route_id=r.id
+   LEFT JOIN public.field_trips t ON t.day_route_id=r.id
    WHERE r.id=${routeId}::uuid AND
     (r.owner_sub=${actor.sub} OR ${actor.admin} OR
       (${actor.manager} AND public.sales_staff_in_subtree(${actor.sub},r.owner_sub))) LIMIT 1`;
@@ -188,7 +221,14 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
        OR (${route.scope_kind==='chain'} AND EXISTS(
          SELECT 1 FROM public.customer_scope_bindings b WHERE b.customer_id=c.id
          AND b.active AND b.scope_kind='chain' AND b.scope_key=${route.scope_key}))
-        OR (${route.scope_kind==='customer'} AND c.id::text=${route.scope_key}))
+        OR (${route.scope_kind==='customer'} AND c.id::text=${route.scope_key})
+        OR EXISTS(SELECT 1 FROM public.field_trips t JOIN public.field_trip_scopes sc ON sc.trip_id=t.id
+          WHERE t.day_route_id=${routeId}::uuid
+            AND public.sales_monthly_plan_scope_allowed(${actor.sub},sc.scope_kind,sc.scope_key,sc.province,sc.district)
+            AND ((sc.scope_kind='territory' AND c.province=sc.province AND (sc.district='' OR c.district=sc.district))
+             OR (sc.scope_kind='customer' AND c.id::text=sc.scope_key)
+             OR (sc.scope_kind='chain' AND EXISTS(SELECT 1 FROM public.customer_scope_bindings b
+              WHERE b.customer_id=c.id AND b.active AND b.scope_kind='chain' AND b.scope_key=sc.scope_key)))))
     ORDER BY c.name,c.id LIMIT 1000`;
    return reply({items:customers,truncated:customers.length===1000});
   }

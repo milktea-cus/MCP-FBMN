@@ -134,8 +134,49 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
     _toast('Chưa tải được tuyến ngày nên chưa thể đổi lịch an toàn. Hãy tải lại rồi thử lại.');
     return;
    }
+   // One canonical multi-day trip, one compatibility route for evidence.
+   // Do not create a second work-with-customer flow or duplicate fake stops.
+   if(original==null){
+    final primary=selection.scopes.first;
+    final planId=const Uuid().v4(),routeId=const Uuid().v4(),tripId=const Uuid().v4();
+    final kind=primary['scope_kind'].toString();
+    final chosenScopes=<Map<String,dynamic>>[
+     for(final sc in selection.scopes)<String,dynamic>{
+      'scope_kind':sc['scope_kind'],'scope_key':sc['scope_key'],
+      'province':sc['scope_kind']=='territory'?sc['province']:null,
+      'district':sc['scope_kind']=='territory'?sc['district']:null,
+     }
+    ];
+    final priorityIds=<String>{
+     for(final byScope in selection.customersByScope.values)...byScope,
+    }.toList();
+    await widget.queue.enqueue('/api/v1/monthly-plans',{
+      'client_ref':planId,'period_ym':monthKey(selection.date),
+      'work_date':dayKey(selection.date),
+      'scope_kind':primary['scope_kind'],'scope_key':primary['scope_key'],
+      'province':kind=='territory'?primary['province']:null,
+      'district':kind=='territory'?primary['district']:null,
+      'purpose':selection.purpose,'target_new_customers':selection.target,
+      'note':selection.note,'status':'planned',
+    });
+    await widget.queue.enqueue('/api/v1/day-routes',{
+      'client_ref':routeId,'monthly_plan_id':planId,
+      'route_date':dayKey(selection.date),'purpose':selection.purpose,
+      'note':selection.note,'status':'ready',
+    },dependsOn:[planId]);
+    await widget.queue.enqueue('/api/v1/trips',{
+      'client_ref':tripId,'mutation_ref':tripId,
+      'day_route_id':routeId,'start_date':dayKey(selection.date),
+      'end_date':dayKey(selection.endDate),
+      'purpose':selection.purpose,'note':selection.note,
+      'scopes':chosenScopes,'priorities':priorityIds,
+    },dependsOn:[routeId]);
+    _toast('Đã lưu một chuyến ${dayKey(selection.date)} – ${dayKey(selection.endDate)} trên máy · chờ đồng bộ');
+    if(mounted)await _reload();
+    return;
+   }
    for(final scope in selection.scopes){
-    final editing=original!=null,ref=const Uuid().v4();
+    final editing=original['id']!=null,ref=const Uuid().v4();
     final kind=scope['scope_kind'].toString(),key=scope['scope_key'].toString();
     final date=dayKey(selection.date);
     // Existing and queued work on that date/scope is not recreated.
@@ -400,12 +441,12 @@ class MonthlyPeriodActions extends StatelessWidget {
 
 class MonthlyPlanSelection {
  final List<Map<String,dynamic>> scopes;
- final DateTime date;
+ final DateTime date,endDate;
  final String purpose,note,status;
  final int target;
  final Map<String,List<String>> customersByScope;
  final Map<String,List<Map<String,dynamic>>> availableByScope;
- const MonthlyPlanSelection(this.scopes,this.date,this.purpose,this.note,
+ const MonthlyPlanSelection(this.scopes,this.date,this.endDate,this.purpose,this.note,
    this.status,this.target,this.customersByScope,this.availableByScope);
 }
 class MonthlyPlanEditor extends StatefulWidget {
@@ -419,7 +460,7 @@ class MonthlyPlanEditor extends StatefulWidget {
  @override State<MonthlyPlanEditor> createState()=>_MonthlyPlanEditorState();
 }
 class _MonthlyPlanEditorState extends State<MonthlyPlanEditor>{
- late DateTime date;
+ late DateTime date,endDate;
  late final TextEditingController purpose,note,target,search;
  final selected=<String>{};
  final selectedCustomers=<String,Set<String>>{};
@@ -438,6 +479,7 @@ class _MonthlyPlanEditorState extends State<MonthlyPlanEditor>{
      ?DateTime(today.year,today.month,today.day)
      :DateTime(widget.month.year,widget.month.month,1))
    :DateTime.tryParse(row['work_date'].toString())??widget.month;
+  endDate=date;
   purpose=TextEditingController(text:row?['purpose']?.toString()??'');
   note=TextEditingController(text:row?['note']?.toString()??'');
   target=TextEditingController(text:row?['target_new_customers']?.toString()??'0');
@@ -490,19 +532,19 @@ class _MonthlyPlanEditorState extends State<MonthlyPlanEditor>{
  void submit(){
   final scopes=widget.scopes.where((o)=>selected.contains("${o['scope_kind']}:${o['scope_key']}")).toList();
   final number=int.tryParse(target.text.trim());
-  if(scopes.isEmpty||purpose.text.trim().length<2||purpose.text.length>500||number==null||number<0||number>9999||note.text.length>2000){
+  if(endDate.isBefore(date)||endDate.difference(date).inDays>90||scopes.isEmpty||purpose.text.trim().length<2||purpose.text.length>500||number==null||number<0||number>9999||note.text.length>2000){
    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Chọn phạm vi; nhập mục đích (từ 2 ký tự) và số khách mới hợp lệ.')));
    return;
   }
-  Navigator.pop(context,MonthlyPlanSelection(scopes,date,purpose.text.trim(),note.text.trim(),status,number,
+  Navigator.pop(context,MonthlyPlanSelection(scopes,date,endDate,purpose.text.trim(),note.text.trim(),status,number,
    {for(final scope in scopes)scopeId(scope):(
     scope['scope_kind']=='customer'?[scope['scope_key'].toString()]:
     (selectedCustomers[scopeId(scope)]??<String>{}).toList())},
    {for(final scope in scopes)scopeId(scope):available[scopeId(scope)]??<Map<String,dynamic>>[]}));
  }
  Future<void> pickDate()async{
-  final d=await showDatePicker(context:context,initialDate:date,firstDate:DateTime(widget.month.year,widget.month.month,1),lastDate:monthEnd(widget.month));
-  if(d!=null&&mounted)setState(()=>date=d);
+  final d=await showDatePicker(context:context,initialDate:date,firstDate:DateTime(widget.month.year,widget.month.month,1),lastDate:DateTime(2100));
+  if(d!=null&&mounted)setState((){date=d;if(endDate.isBefore(date))endDate=date;});
  }
  @override Widget build(BuildContext context){
   final q=search.text.trim().toLowerCase();
@@ -513,7 +555,17 @@ class _MonthlyPlanEditorState extends State<MonthlyPlanEditor>{
     TextButton(onPressed:submit,child:const Text('Lưu')),
    ]),
    body:ListView(padding:const EdgeInsets.all(16),children:[
-    OutlinedButton.icon(onPressed:pickDate,icon:const Icon(Icons.calendar_today),label:Text('Ngày đi: ${dayKey(date)}')),
+    OutlinedButton.icon(onPressed:pickDate,icon:const Icon(Icons.calendar_today),label:Text('Từ ngày: ${dayKey(date)}')),
+    if(widget.original==null)OutlinedButton.icon(
+     onPressed:()async{
+      final chosen=await showDatePicker(context:context,
+       initialDate:endDate.isBefore(date)?date:endDate,
+       firstDate:date,lastDate:date.add(const Duration(days:90)));
+      if(chosen!=null&&mounted)setState(()=>endDate=chosen);
+     },icon:const Icon(Icons.event_available_outlined),
+     label:Text('Đến ngày: ${dayKey(endDate)}')),
+    if(widget.original==null)Text('${endDate.difference(date).inDays+1} ngày · Khách ưu tiên chỉ để xếp lịch, không giới hạn khách được ghé.',
+     style:Theme.of(context).textTheme.bodySmall),
     const SizedBox(height:12),
     TextField(controller:purpose,maxLength:500,decoration:const InputDecoration(labelText:'Mục đích công tác *',hintText:'Ví dụ: tìm điểm bán mới, chăm sóc chuỗi')),
     TextField(controller:target,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Chỉ tiêu phát triển khách mới',helperText:'Số lượng khách hàng mới dự kiến, có thể bằng 0')),

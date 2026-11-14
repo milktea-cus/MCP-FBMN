@@ -108,6 +108,17 @@ export async function areaVisitRoutes(req:Request,env:AuthEnv,actor:Actor,url:UR
     AND w.state='ongoing' AND
     public.sales_monthly_plan_scope_allowed(
       ${actor.sub},m.scope_kind,m.scope_key,m.province,m.district)
+   UNION ALL
+   SELECT t.id FROM public.field_trips t
+   JOIN public.field_day_routes r ON r.id=t.day_route_id
+   WHERE t.day_route_id=${route}::uuid AND t.owner_sub=${actor.sub}
+    AND r.owner_sub=${actor.sub} AND r.status='ready'
+    AND (${at}::timestamptz AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+      BETWEEN t.start_date AND t.end_date
+    AND (t.closed_at IS NULL OR ${at}::timestamptz<=t.closed_at)
+    AND EXISTS(SELECT 1 FROM public.field_trip_scopes sc
+      WHERE sc.trip_id=t.id AND sc.scope_kind IN ('territory','chain')
+        AND public.sales_monthly_plan_scope_allowed(${actor.sub},sc.scope_kind,sc.scope_key,sc.province,sc.district))
    LIMIT 1`;
   if(!active.length)return json({
     code:'WORK_SESSION_NOT_ACTIVE',
