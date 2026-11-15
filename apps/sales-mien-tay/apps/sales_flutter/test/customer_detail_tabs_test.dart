@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'package:sales_mien_tay/customer_photo_cache.dart';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -35,6 +37,22 @@ class FakeService extends CustomerService {
     {bool thumbnail=true})async=>base64Decode(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/hoUAAAAASUVORK5CYII=');
 }
+
+class PendingMediaService extends FakeService {
+ final Completer<List<Map<String,dynamic>>> galleryResponse=Completer();
+ final Completer<List<Map<String,dynamic>>> visitResponse=Completer();
+ int downloadCount=0;
+ @override Future<List<Map<String,dynamic>>> media(String id)=>
+  galleryResponse.future;
+ @override Future<List<Map<String,dynamic>>> visits(String id)=>
+  visitResponse.future;
+ @override Future<Uint8List> mediaBytes(String id,Map<String,dynamic> media,
+  {bool thumbnail=true})async{
+   downloadCount++;
+   throw StateError('Unexpected R2 download while warm cache exists');
+  }
+}
+
 class CaptureDialLauncher extends UrlLauncherPlatform {
   String? lastUrl;
   // Ignore uncalled platform-specific members in this fake; only launchUrl is used.
@@ -346,4 +364,67 @@ void main(){
     expect(other.pending,isEmpty);
     queue.dispose();restored.dispose();other.dispose();
   });
+  testWidgets('P1-N warm profile renders scoped thumbnail without waiting for gallery/visits HTTP',
+    (tester)async{
+   tester.view.devicePixelRatio=1;
+   tester.view.physicalSize=const Size(390,870);
+   addTearDown(tester.view.resetPhysicalSize);
+   addTearDown(tester.view.resetDevicePixelRatio);
+   final factory=newIdbFactoryMemory();
+   final queue=OfflineQueue(SalesSession(),'sales-1','scope-1',factory:factory);
+   await queue.cache('customer-media:$customerId',[images.first]);
+   await queue.cache('visits:$customerId',[]);
+   final png=base64Decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/hoUAAAAASUVORK5CYII=');
+   await CustomerPhotoCache(queue).put(customerId,'customer',coverId,png);
+   final service=PendingMediaService();
+   await tester.pumpWidget(MaterialApp(home:CustomerDetail(
+    service:service,customer:customer(),queue:queue,
+    regions:const RegionCatalog(<String,List<String>>{}))));
+   await tester.pump();
+   await tester.pump();
+   await tester.tap(find.text('Hình ảnh'));
+   await tester.pump();
+   await tester.pump();
+   expect(find.text('Hình ảnh cửa hàng · 1'),findsOneWidget,
+    reason:'Cached metadata must be rendered while both network requests hang');
+   expect(find.byType(Image),findsWidgets);
+   expect(service.downloadCount,0,reason:'Warm thumbnail must not call R2');
+   service.galleryResponse.complete(images);
+   service.visitResponse.complete([]);
+   await tester.pump();
+   await tester.pump();
+   await tester.pumpWidget(const SizedBox.shrink());
+   queue.dispose();
+  });
+
+  testWidgets('P1-N HTTP 403 clears cached profile, gallery and image bytes',
+    (tester)async{
+   final factory=newIdbFactoryMemory();
+   final queue=OfflineQueue(SalesSession(),'sales-1','scope-1',factory:factory);
+   await queue.cache('customer-media:$customerId',[images.first]);
+   await CustomerPhotoCache(queue).put(customerId,'customer',coverId,
+    Uint8List.fromList([1,2,3]));
+   final service=PendingMediaService();
+   await tester.pumpWidget(MaterialApp(home:CustomerDetail(
+    service:service,customer:customer(),queue:queue,
+    regions:const RegionCatalog(<String,List<String>>{}))));
+   await tester.pump();
+   await tester.pump();
+   service.galleryResponse.completeError(
+    const ApiFailure(403,'Quyền xem ảnh đã thu hồi'));
+   service.visitResponse.complete([]);
+   await tester.pump();
+   await tester.pump();
+   await tester.runAsync(()async{
+    await Future<void>.delayed(const Duration(milliseconds:40));
+   });
+   await tester.pump();
+   expect(await queue.cached('customer-media:$customerId'),isEmpty);
+   expect((await CustomerPhotoCache(queue).usage())['entries'],0);
+   expect(find.text('Không có quyền xem dữ liệu này'),findsOneWidget);
+   await tester.pumpWidget(const SizedBox.shrink());
+   queue.dispose();
+  });
+
 }
