@@ -158,7 +158,13 @@ void main(){
   await tester.scrollUntilVisible(find.text('Lưu trên máy · Đồng bộ khi có mạng'),240,
    scrollable:find.byType(Scrollable).first);
   await tester.tap(find.text('Lưu trên máy · Đồng bộ khi có mạng'));
-  await tester.pumpAndSettle();
+  // A busy indicator may animate indefinitely while the DB future resolves.
+  // A bounded pump proves the durable write, without a hanging pumpAndSettle.
+  for(var i=0;i<30;i++){
+    await tester.pump(const Duration(milliseconds:50));
+    if(queue.pending.length==1 &&
+      queue.pending.single['payload']['data']['title']=='Bản nháp đã sửa')break;
+  }
   expect(queue.pending.length,1);
   expect(queue.pending.single['method'],'POST');
   expect(queue.pending.single['payload']['client_ref'],id);
