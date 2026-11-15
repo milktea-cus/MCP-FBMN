@@ -198,40 +198,12 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   }
   // Publish and switch the active snapshot atomically. Historical answers
   // retain their original template_id; a scope is a property of the form.
-  const rows=await db`WITH current_form AS (
-     SELECT id FROM public.field_survey_forms
-     WHERE id=${formId}::uuid AND revision=${expected} AND ${expected}>0
-     FOR UPDATE
-   ), fresh AS (
-     INSERT INTO public.field_survey_forms
-      (id,name,provinces,status,revision,created_by,updated_by)
-     SELECT ${formId}::uuid,${name},${provinces}::text[],'active',0,
-       ${actor.sub},${actor.sub}
-     WHERE ${expected}=0
-     ON CONFLICT(id) DO NOTHING RETURNING id
-   ), allowed AS (
-     SELECT id FROM current_form UNION ALL SELECT id FROM fresh
-   ), published AS (
-     INSERT INTO public.field_survey_templates
-      (id,province,title,version,questions,created_by,form_id)
-     SELECT ${ref}::uuid,'*',${name},
-       nextval('public.field_survey_template_version_seq'),
-       ${JSON.stringify(qs)}::jsonb,${actor.sub},allowed.id
-     FROM allowed
-     ON CONFLICT DO NOTHING RETURNING id,form_id
-   )
-   UPDATE public.field_survey_forms f SET
-      name=${name},provinces=${provinces}::text[],
-      current_template_id=published.id,revision=f.revision+1,
-      updated_by=${actor.sub},updated_at=now(),
-      last_mutation_ref=${ref}::uuid
-   FROM published WHERE f.id=published.form_id AND f.revision=${expected}
-   RETURNING f.id AS form_id,f.name AS title,f.provinces,f.status,
-     f.revision,f.current_template_id`;
-  if(!rows.length)return bad('Mẫu đã được người khác sửa; tải lại để tiếp tục',409);
-  const snapshots=await db`SELECT t.id,t.version,t.questions,t.created_at
-    FROM public.field_survey_templates t WHERE t.id=${ref}::uuid`;
-  return json({item:{...rows[0],...snapshots[0]}},expected===0?201:200);
+  const rows=await db`SELECT public.sales_publish_survey_form(
+   ${actor.sub},${formId}::uuid,${ref}::uuid,${name},
+   ${provinces}::text[],${JSON.stringify(qs)}::jsonb,${expected}) AS item`;
+  if(!rows[0]?.item)return bad('Mẫu đã được người khác sửa; tải lại để tiếp tục',409);
+  return json({item:rows[0].item},expected===0?201:200);
+
  }
  if(path==='/api/v1/sessions'&&req.method==='GET'){
   const province=url.searchParams.get('province')??'',customer=url.searchParams.get('customer_id')??'';

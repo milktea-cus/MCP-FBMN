@@ -74,3 +74,46 @@ CREATE TRIGGER trg_survey_form_scope_session BEFORE INSERT ON public.field_surve
  FOR EACH ROW EXECUTE FUNCTION public.sales_guard_survey_form_scope();
 CREATE TRIGGER trg_survey_form_scope_work BEFORE INSERT ON public.field_customer_work_actions
  FOR EACH ROW EXECUTE FUNCTION public.sales_guard_survey_form_scope();
+
+-- A single transaction per publication. Insert + snapshot + active-pointer
+-- update must not be done as sibling writable CTEs (same-row ambiguity).
+CREATE OR REPLACE FUNCTION public.sales_publish_survey_form(
+ p_actor text,p_form_id uuid,p_ref uuid,p_name text,
+ p_provinces text[],p_questions jsonb,p_expected integer
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,public AS $fbmn$
+DECLARE f public.field_survey_forms%ROWTYPE;
+ snap public.field_survey_templates%ROWTYPE;
+BEGIN
+ IF p_expected=0 THEN
+  INSERT INTO public.field_survey_forms
+   (id,name,provinces,status,revision,created_by,updated_by)
+  VALUES(p_form_id,p_name,p_provinces,'active',0,p_actor,p_actor)
+  ON CONFLICT(id) DO NOTHING RETURNING * INTO f;
+ ELSE
+  SELECT * INTO f FROM public.field_survey_forms
+   WHERE id=p_form_id AND revision=p_expected FOR UPDATE;
+ END IF;
+ IF NOT FOUND THEN RETURN NULL; END IF;
+ INSERT INTO public.field_survey_templates
+   (id,province,title,version,questions,created_by,form_id)
+ VALUES(p_ref,'*',p_name,
+   nextval('public.field_survey_template_version_seq'),
+   p_questions,p_actor,p_form_id)
+ RETURNING * INTO snap;
+ UPDATE public.field_survey_forms SET
+  name=p_name,provinces=p_provinces,current_template_id=snap.id,
+  revision=p_expected+1,updated_by=p_actor,updated_at=now(),
+  last_mutation_ref=p_ref
+ WHERE id=p_form_id AND revision=p_expected
+ RETURNING * INTO f;
+ IF NOT FOUND THEN RAISE EXCEPTION 'SURVEY_FORM_REVISION_CONFLICT'; END IF;
+ RETURN jsonb_build_object(
+  'form_id',f.id,'title',f.name,'provinces',f.provinces,
+  'revision',f.revision,'status',f.status,
+  'id',snap.id,'version',snap.version,'questions',snap.questions);
+END $fbmn$;
+REVOKE ALL ON FUNCTION public.sales_publish_survey_form(
+ text,uuid,uuid,text,text[],jsonb,integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.sales_publish_survey_form(
+ text,uuid,uuid,text,text[],jsonb,integer) TO sales_api;
