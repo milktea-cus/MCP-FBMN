@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'session.dart';
 import 'models.dart';
 import 'main.dart';
@@ -19,11 +20,14 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
  bool recovering=false, connectionNotice=false;
  bool _logoutStateChecked=false;
  DateTime? leaseExpires;
+ DateTime? _lastServerValidationAt;
  Timer? timer;
  @override void initState(){
   super.initState();WidgetsBinding.instance.addObserver(this);
   onSessionRejected=(){if(me!=null)unawaited(revalidate());};
-  timer=Timer.periodic(const Duration(seconds:30),(_){if(me!=null||recovering)unawaited(revalidate());});
+  // Background 30-second checks amplified Neon Auth throttling; only check
+  // periodically and on a sufficiently stale app resume.
+  timer=Timer.periodic(const Duration(minutes:5),(_){if(me!=null||recovering)unawaited(revalidate());});
   unawaited(start());
  }
  /// A failed offline SQLite read must not be mistaken for an expired login.
@@ -63,6 +67,16 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     }
     return;
    }
+   if(!kIsWeb&&session.cookie.isEmpty){
+    // A missing Android Keystore value is not proof of server revocation.
+    // Keep local drafts/lease intact; never authenticate without a cookie.
+    try{
+      final saved=await OfflineLease.read();
+      if(saved!=null&&mounted)setState(()=>error='Không đọc được phiên đăng nhập đã lưu. '
+        'Dữ liệu trên máy vẫn giữ nguyên, hãy đăng nhập lại.');
+    }catch(_){}
+    return;
+   }
    await revalidate();
   }catch(_){
    if(mounted)setState(()=>error='Chưa hoàn tất bước khôi phục. '
@@ -71,7 +85,13 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
    if(mounted)setState(()=>busy=false);
   }
  }
- @override void didChangeAppLifecycleState(AppLifecycleState state){if(state==AppLifecycleState.resumed&&me!=null)unawaited(revalidate());}
+ @override void didChangeAppLifecycleState(AppLifecycleState state){
+   if(state!=AppLifecycleState.resumed||me==null||checking)return;
+   final last=_lastServerValidationAt;
+   if(last==null||DateTime.now().difference(last)>=const Duration(minutes:2)){
+     unawaited(revalidate());
+   }
+ }
  Future<void> revalidate() async{
   if(checking||logoutPending)return;checking=true;
   try{
@@ -90,14 +110,17 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     }
     _logoutStateChecked=true;
    }
-   final next=await session.get('/api/v1/me');
+   final next=await probeAuthenticatedSession(()=>session.get('/api/v1/me'));
    if(!mounted||logoutPending)return;
+   _lastServerValidationAt=DateTime.now();
    if(connectionNotice||recovering){if(mounted)setState((){connectionNotice=false;recovering=false;error=null;});}
    final changed=me==null||me!['identity']!=next['identity']||me!['scope_revision']!=next['scope_revision']||me!['role']!=next['role'];
    if(changed){
     // Cache/lease I/O is best-effort; server-authenticated users must not be
     // sent to the login page solely because an offline database is unavailable.
-    try{await OfflineLease.clear();}catch(_){}
+    // A restored session must not erase the durable offline lease before
+    // its metadata has been loaded. Identity changes still clear stale data.
+    if(me!=null){try{await OfflineLease.clear();}catch(_){}}
     if(me!=null){if(!mounted)return;Navigator.of(context).popUntil((r)=>r.isFirst);setState((){me=null;catalog=null;});}
     // /me already authenticated the actor. A temporary metadata outage must
     // not force logout; public province labels are bundled with the app.
@@ -106,8 +129,9 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
      final meta=await session.get('/api/v1/meta');
      regions=RegionCatalog((meta['districts'] as Map<String,dynamic>)
        .map((k,v)=>MapEntry(k,(v as List).cast<String>())));
-    }catch(e){
-     if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;
+    }catch(_){
+     // /me already authenticated the session: /meta permission/transient
+     // errors cannot be interpreted as a fresh login rejection.
      regions=await RegionCatalog.load();
     }
     if(!mounted||logoutPending)return;
@@ -151,7 +175,8 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
  Future<void> login() async{
   if(busy||logoutPending||email.text.trim().isEmpty||password.text.isEmpty)return;
   setState((){busy=true;error=null;});
-  try{await OfflineLease.clear();await session.login(email.text.trim(),password.text,otp:otpMode);await revalidate();}
+  try{await session.login(email.text.trim(),password.text,otp:otpMode);
+    await OfflineLease.clear();await revalidate();}
   catch(e){if(mounted)setState(()=>error=e.toString());}
   finally{password.clear();if(mounted)setState(()=>busy=false);}
  }
