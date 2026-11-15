@@ -39,6 +39,8 @@ jobs:
           node-version: '22'
       - run: npm install --no-audit --no-fund
       - run: npm run typecheck
+      - name: Verify auth provider transient/invalid status separation
+        run: node --experimental-strip-types --test tests/auth_session_policy.test.mjs
       - name: Bundle Worker for deployment (no credentials)
         run: npx wrangler deploy --dry-run --minify --outdir .release
       - name: Export verified public Worker bundle for plugin deployment
