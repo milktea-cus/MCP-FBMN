@@ -15,6 +15,7 @@ import 'theme.dart';
 import 'responsive_controls.dart';
 import 'customer_location.dart';
 import 'survey_media.dart';
+import 'customer_photo_cache.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// A contact action accepts telephone numbers only, never arbitrary URLs.
@@ -218,6 +219,55 @@ class CustomerService {
   }
 }
 
+
+/// The visible customer directory preloads at most four authorized cover
+/// thumbnails. Tiles beyond that budget continue showing the category icon;
+/// opening the profile loads that specific customer. No bulk photo API calls.
+class CustomerDirectoryCover extends StatefulWidget {
+ final CustomerService service;
+ final FieldCustomer customer;
+ final OfflineQueue queue;
+ const CustomerDirectoryCover({super.key,required this.service,
+  required this.customer,required this.queue});
+ @override State<CustomerDirectoryCover> createState()=>_CustomerDirectoryCoverState();
+}
+class _CustomerDirectoryCoverState extends State<CustomerDirectoryCover>{
+ Uint8List? bytes;
+ @override void initState(){super.initState();unawaited(_load());}
+ Future<void> _load()async{
+  final c=widget.customer,photo=c.coverPhotoId;
+  if(photo==null||photo.isEmpty)return;
+  final cache=CustomerPhotoCache(widget.queue);
+  if(widget.service.identity!=null&&widget.service.identity!=widget.queue.identity)return;
+  if(widget.service.revision!=null&&widget.service.revision!=widget.queue.revision)return;
+  try{
+   final cached=await cache.get(c.id,'customer',photo);
+   if(cached!=null){
+    if(mounted)setState(()=>bytes=cached);
+    return; // warmed thumbnails are displayed without a network request
+   }
+   final image=await widget.service.mediaBytes(c.id,
+    {'id':photo,'source':'customer'});
+   if(!mounted)return;
+   await cache.put(c.id,'customer',photo,image);
+   if(mounted)setState(()=>bytes=image);
+  }on ApiFailure catch(e){
+   if(e.status==401||e.status==403)await cache.revokeCustomer(c.id);
+  }catch(_){
+   // A slow or offline thumbnail must not block the customer directory.
+  }
+ }
+ @override Widget build(BuildContext context){
+  final img=bytes;
+  return ClipRRect(borderRadius:BorderRadius.circular(9),
+   child:SizedBox.square(dimension:44,child:img==null
+    ?CustomerCategoryAvatar(category:widget.customer.category)
+    :Image.memory(img,fit:BoxFit.cover,cacheWidth:128,
+      gaplessPlayback:true,errorBuilder:(_,__,___)=>
+        CustomerCategoryAvatar(category:widget.customer.category))));
+ }
+}
+
 Future<Position> captureGps(BuildContext context) async {
   final confirmed = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
     title: const Text('Sử dụng vị trí'),
@@ -372,7 +422,11 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
           child:Padding(padding:const EdgeInsets.fromLTRB(10,8,8,8),
             child:Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
               Padding(padding:const EdgeInsets.only(top:4),
-                child:CustomerCategoryAvatar(category:c.category)),
+                child:i<4&&c.coverPhotoId!=null&&widget.queue!=null
+                  ?CustomerDirectoryCover(
+                     key:ValueKey('customer-cover:'+c.id+':'+c.coverPhotoId!),
+                     service:widget.service,customer:c,queue:widget.queue!)
+                  :CustomerCategoryAvatar(category:c.category)),
               const SizedBox(width:8),
               Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
                 Text(c.name,maxLines:2,overflow:TextOverflow.ellipsis,
@@ -766,6 +820,9 @@ class _CustomerDetailState extends State<CustomerDetail> {
   List<Map<String,dynamic>> gallery=[],visits=[];
   String? selectedCoverId;
   final Map<String,Future<Uint8List>> imageTasks={};
+  int _loadEpoch=0;
+  bool _accessDenied=false;
+  CustomerPhotoCache? get photoCache=>widget.queue==null?null:CustomerPhotoCache(widget.queue!);
   String? message;
   bool busy=false;
   @override void initState(){
@@ -790,49 +847,125 @@ class _CustomerDetailState extends State<CustomerDetail> {
     return (widget.queue?.pending??[]).where((r)=>
       r['photo'] is List && (r['path']=='$prefix/photos'||r['path']==prefix)).toList();
   }
-  Future<void> load() async {
-    final cid=widget.customer.id;
-    try{
-      final pictures=await widget.service.media(cid);
-      final history=await widget.service.visits(cid);
-      final queue=widget.queue;
-      if(queue!=null){
-        await queue.cache('customer-media:$cid',pictures);
-        await queue.cache('visits:$cid',history);
-      }
-      if(mounted)setState((){gallery=pictures;visits=history;selectedCoverId=null;imageTasks.clear();message=null;});
-    }catch(e){
-      if(e is ApiFailure&&(e.status==401||e.status==403)){
-        if(mounted)setState((){gallery=[];visits=[];imageTasks.clear();message='Không có quyền xem dữ liệu này';});
-        return;
-      }
-      final queue=widget.queue;
-      if(queue!=null){
-        try{
-          final cachedMedia=await queue.cached('customer-media:$cid');
-          final cachedVisits=await queue.cached('visits:$cid');
-          if(mounted)setState((){gallery=cachedMedia;visits=cachedVisits;message='Đang ngoại tuyến · hiển thị dữ liệu đã lưu trên máy';});
-          return;
-        }catch(_){}
-      }
-      if(mounted)setState(()=>message='$e');
-    }
+
+  bool get _scopeMatches{
+   final q=widget.queue;
+   return q!=null&&(widget.service.identity==null||
+     widget.service.identity==q.identity)&&
+     (widget.service.revision==null||
+      widget.service.revision==q.revision);
   }
+  Future<void> _revokeCustomer()async{
+   _loadEpoch++;
+   _accessDenied=true;
+   imageTasks.clear();
+   if(mounted)setState((){
+    gallery=[];visits=[];selectedCoverId=null;
+    message='Không có quyền xem dữ liệu này';
+   });
+   try{await photoCache?.revokeCustomer(widget.customer.id);}catch(_){}
+  }
+  /// 1. Restore scoped metadata before any API call. 2. Refresh gallery and
+  /// visits independently and concurrently. Previously the profile waited
+  /// for both HTTP requests before displaying ANY cached image.
+  Future<void> load()async{
+   final epoch=++_loadEpoch,cid=widget.customer.id,q=widget.queue;
+   if(_accessDenied)return;
+   if(_scopeMatches){
+    try{
+     final cached=await Future.wait([
+      q!.cached('customer-media:$cid'),q.cached('visits:$cid')]);
+     if(!mounted||epoch!=_loadEpoch||_accessDenied)return;
+     setState((){
+      if(cached[0].isNotEmpty)gallery=cached[0];
+      visits=cached[1];
+      message=gallery.isEmpty?null:'Ảnh lưu trên máy · đang kiểm tra cập nhật';
+     });
+    }catch(_){}
+   }
+   if(!mounted||epoch!=_loadEpoch||_accessDenied)return;
+   await Future.wait([_refreshGallery(epoch,cid),_refreshVisits(epoch,cid)]);
+  }
+  Future<void> _refreshGallery(int epoch,String cid)async{
+   try{
+    final pictures=await widget.service.media(cid);
+    if(!mounted||epoch!=_loadEpoch||_accessDenied)return;
+    final keep={for(final x in pictures)if(x['id']!=null)x['id'].toString()};
+    imageTasks.removeWhere((key,_)=>!keep.contains(key.split(':').last));
+    setState((){
+     gallery=pictures;
+     message=null;
+    });
+    if(_scopeMatches){
+     try{
+      await widget.queue!.cache('customer-media:$cid',pictures);
+      await photoCache?.pruneCustomer(cid,keep);
+     }catch(_){}
+    }
+   }on ApiFailure catch(e){
+    if(e.status==401||e.status==403){await _revokeCustomer();return;}
+    if(mounted&&epoch==_loadEpoch&&gallery.isEmpty)
+     setState(()=>message='Không tải được ảnh mới. Kiểm tra kết nối.');
+   }catch(_){
+    if(mounted&&epoch==_loadEpoch&&gallery.isEmpty)
+     setState(()=>message='Không tải được ảnh mới. Kiểm tra kết nối.');
+   }
+  }
+  Future<void> _refreshVisits(int epoch,String cid)async{
+   try{
+    final history=await widget.service.visits(cid);
+    if(!mounted||epoch!=_loadEpoch||_accessDenied)return;
+    setState(()=>visits=history);
+    if(_scopeMatches)try{
+     await widget.queue!.cache('visits:$cid',history);
+    }catch(_){}
+   }on ApiFailure catch(e){
+    if(e.status==401||e.status==403){await _revokeCustomer();}
+   }catch(_){
+    // Historic visits are independent of the photo metadata.
+   }
+  }
+  /// Thumbnail bytes are read from local IndexedDB/SQLite BEFORE R2.
+  /// Full 1600px photo is fetched only on explicit full-screen request.
   Future<Uint8List> _bytes(Map<String,dynamic> item,{bool thumbnail=true})async{
-    final cid=widget.customer.id;
-    final key='customer-image:$cid:${item['source']}:${item['id']}:${thumbnail?'thumb':'full'}';
-    final queue=widget.queue;
-    if(queue!=null){
-      final cached=await queue.cached(key);
-      if(cached.isNotEmpty&&cached.first['bytes'] is List){
-        return Uint8List.fromList((cached.first['bytes'] as List).cast<int>());
+   final cid=widget.customer.id,source=item['source']?.toString()??'',
+    id=item['id']?.toString()??'';
+   if(_accessDenied||id.isEmpty||source.isEmpty)
+    throw const ApiFailure(403,'Không có quyền xem ảnh');
+   final cache=photoCache;
+   final sha=(thumbnail?item['thumbnail_sha256']:item['sha256'])?.toString();
+   if(cache!=null&&_scopeMatches){
+    final known=await cache.get(cid,source,id,
+     thumbnail:thumbnail,expectedSha:sha);
+    if(known!=null)return known;
+    // Migrate legacy unbounded per-image rows once; the new bounded index
+    // owns all subsequent reads and expiration rules.
+    final oldKey='customer-image:$cid:$source:$id:${thumbnail?'thumb':'full'}';
+    try{
+     final old=await widget.queue!.cached(oldKey);
+     if(old.isNotEmpty&&old.first['bytes'] is List){
+      final bytes=Uint8List.fromList((old.first['bytes'] as List).cast<int>());
+      if(bytes.length<=2*1024*1024&&bytes.isNotEmpty){
+       await cache.put(cid,source,id,bytes,
+        thumbnail:thumbnail,expectedSha:sha);
+       await widget.queue!.cache(oldKey,[]);
+       return bytes;
       }
-    }
+     }
+    }catch(_){}
+   }
+   try{
     final bytes=await widget.service.mediaBytes(cid,item,thumbnail:thumbnail);
-    if(queue!=null){
-      try{await queue.cache(key,[{'bytes':bytes}]);}catch(_){}
-    }
+    if(_accessDenied)throw const ApiFailure(403,'Không có quyền xem ảnh');
+    if(cache!=null&&_scopeMatches)try{
+     await cache.put(cid,source,id,bytes,
+      thumbnail:thumbnail,expectedSha:sha);
+    }catch(_){}
     return bytes;
+   }on ApiFailure catch(e){
+    if(e.status==401||e.status==403)await _revokeCustomer();
+    rethrow;
+   }
   }
   Future<Uint8List> _thumbnail(Map<String,dynamic> item)=>
     imageTasks.putIfAbsent('${item['source']}:${item['id']}',()=>_bytes(item));
