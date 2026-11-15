@@ -51,7 +51,7 @@ RouteProgress routeProgress(Map<String,dynamic> route,
  if(route['work_session_state']=='ongoing'||
     (trip.isNotEmpty&&start.length>=10&&
      start.substring(0,10).compareTo(today)<=0&&
-     end.substring(0,10).compareTo(today)>=0)){
+     end.length>=10&&end.substring(0,10).compareTo(today)>=0)){
   return RouteProgress.running;
  }
  return RouteProgress.planned;

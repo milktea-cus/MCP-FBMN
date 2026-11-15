@@ -1,3 +1,4 @@
+import 'route_status.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -298,6 +299,10 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
   final tripJob=widget.queue.pending.where((r)=>
    r['path']=='/api/v1/trips'&&
    (r['payload'] as Map?)?['day_route_id']?.toString()==routeId).firstOrNull;
+  if(existing?['work_session_state']=='done'||existing?['trip_closed_at']!=null)
+   return 'Tuyến đã hoàn thành, xem trong Kết quả';
+  if(existing?['work_session_state']=='ongoing')
+   return 'Phiên đang chạy; vào Hôm nay để chốt tuyến';
   if(existing?['trip_id']!=null)return 'Chuyến đã liên kết';
   if(tripJob!=null)return tripJob['status']=='blocked'
    ?'LỖI: Chuyến bị từ chối, kiểm tra Chi tiết đồng bộ'
@@ -375,8 +380,24 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
     for(final r in visible)Card(child:ListTile(
      leading:CircleAvatar(child:Text(DateTime.tryParse(r['work_date'].toString())?.day.toString()??'–')),
      title:Text(r['purpose']?.toString()??''),
-     subtitle:Text("${r['work_date'].toString().substring(0,10)} · ${r['scope_kind']=='chain'?'Chuỗi':r['district']==''?'Toàn tỉnh':'Địa bàn'}: ${r['scope_kind']=='chain'?scopes.where((s)=>s['scope_key']==r['scope_key']).map((s)=>s['label']).firstOrNull??'Chuỗi':r['scope_key']}\nMục tiêu khách mới: ${r['target_new_customers']} · ${r['status']=='cancelled'?'Đã hủy':'Đã lập kế hoạch'}\n${r['status']=='cancelled'?'Đã hủy':planGraphStatus(r)}"),
-     isThreeLine:true,
+     subtitle:Builder(builder:(ctx){
+      final route=dayRoutes.where((x)=>x['monthly_plan_id']==r['id']).firstOrNull;
+      final today=dayKey(DateTime.now().toUtc().add(const Duration(hours:7)));
+      final progress=r['status']=='cancelled'?RouteProgress.cancelled:
+       route!=null?routeProgress(route,widget.queue.pending,today):
+       (r['work_date'].toString().substring(0,10).compareTo(today)<0
+         ?RouteProgress.overdue:RouteProgress.planned);
+      return Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+       const SizedBox(height:6),
+       RouteStatusChip(progress:progress),
+       const SizedBox(height:5),
+       Text("${r['work_date'].toString().substring(0,10)} · "
+        "${r['scope_kind']=='chain'?'Chuỗi':r['district']==''?'Toàn tỉnh':'Địa bàn'}: "
+        "${r['scope_kind']=='chain'?scopes.where((s)=>s['scope_key']==r['scope_key']).map((s)=>s['label']).firstOrNull??'Chuỗi':r['scope_key']}"),
+       Text("Mục tiêu khách mới: ${r['target_new_customers']}"),
+       Text(r['status']=='cancelled'?'Đã hủy':planGraphStatus(r)),
+      ]);
+     }),
      trailing:Builder(builder:(ctx){
        final matching=dayRoutes.where((t)=>t['monthly_plan_id']==r['id']).toList();
        final queued=widget.queue.pending.where((op)=>op['path']=='/api/v1/day-routes'&&

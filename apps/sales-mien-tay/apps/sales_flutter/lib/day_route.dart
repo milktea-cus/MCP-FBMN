@@ -677,36 +677,15 @@ class _DayRoutePageState extends State<DayRoutePage>{
   if(!mounted)return;
   // Wait for this route's real evidence, never an unrelated old 409.
   // The growing reference set follows survey/photo dependencies transitively.
-  final relevant=<String>{widget.routeId,sessionId,
-   for(final stop in stops)stop['id'].toString(),
-   for(final op in pendingStops)
-    if((op['payload'] as Map?)?['client_ref']!=null)
-     (op['payload'] as Map)['client_ref'].toString(),
-  };
-  final pending=widget.queue.pending;
-  final captured=<String>{};
-  var changed=true;
-  while(changed){
-   changed=false;
-   for(final op in pending){
-    final payload=op['payload'] as Map?;
-    final ref=payload?['client_ref']?.toString()??'';
-    final path=op['path']?.toString()??'';
-    final linked=path.startsWith('/api/v1/day-routes/${widget.routeId}')||
-      path.startsWith('/api/v1/work-sessions/$sessionId')||
-      ref==widget.routeId||ref==sessionId||
-      relevant.contains(payload?['day_route_id']?.toString())||
-      relevant.contains(payload?['route_stop_id']?.toString())||
-      relevant.contains(payload?['day_route_stop_id']?.toString())||
-      relevant.contains(op['session_id']?.toString())||
-      (op['depends_on'] as List? ?? []).any((v)=>relevant.contains(v.toString()));
-    if(linked&&ref.isNotEmpty){
-     if(captured.add(ref))changed=true;
-     relevant.add(ref);
-    }
-   }
-  }
-  final dependencies=captured.toList();
+  final dependencies=workSessionClosureDependencies(
+   routeId:widget.routeId,sessionId:sessionId,pending:widget.queue.pending,
+   stopIds:{
+    for(final stop in stops)stop['id'].toString(),
+    for(final p in pendingStops)
+     if((p['payload'] as Map?)?['client_ref']!=null)
+      (p['payload'] as Map)['client_ref'].toString(),
+   });
+
   try{
    await widget.queue.enqueue('/api/v1/work-sessions/$sessionId/close',{
     'client_ref':const Uuid().v4(),
