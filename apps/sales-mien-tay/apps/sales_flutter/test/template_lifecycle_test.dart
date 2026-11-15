@@ -79,6 +79,7 @@ void main(){
  });
 
  testWidgets('Lỗi API không hiển thị danh sách rỗng giả và cho thử lại',(tester)async{
+  print('FBMN_RETRY:BEGIN');
   var broken=true;
   final client=MockClient((request)async{
    if(request.url.path.endsWith('survey-templates')){
@@ -89,19 +90,28 @@ void main(){
    }
    return http.Response('{"items":[]}',200,headers:{'content-type':'application/json'});
   });
+  print('FBMN_RETRY:BEFORE_PUMPWIDGET');
   await tester.pumpWidget(MaterialApp(home:SurveyTemplateAdmin(
    service:CustomerService('https://example.test','token',client:client),
    regions:const RegionCatalog({'Bến Tre':['Bình Đại']}),embedded:true)));
+  print('FBMN_RETRY:AFTER_PUMPWIDGET');
   await settle(tester);
+  print('FBMN_RETRY:AFTER_FIRST_SETTLE');
   expect(find.byKey(const Key('template-load-error')),findsOneWidget);
   expect(find.byKey(const Key('template-edit-button')),findsNothing);
+  print('FBMN_RETRY:FOUND_ERROR');
   broken=false;
+  print('FBMN_RETRY:BEFORE_TAP');
   await tester.tap(find.byKey(const Key('template-retry-button')));
+  print('FBMN_RETRY:AFTER_TAP');
   await settle(tester);
+  print('FBMN_RETRY:AFTER_SECOND_SETTLE');
   expect(find.byKey(const Key('template-edit-button')),findsOneWidget);
+  print('FBMN_RETRY:FOUND_EDIT');
   await tester.pumpWidget(const SizedBox.shrink());
   await settle(tester);
   client.close();
+  print('FBMN_RETRY:END');
  });
 
  testWidgets('Thiết lập vẫn mở tab mẫu làm việc trước',(tester)async{
