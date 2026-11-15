@@ -75,6 +75,7 @@ class _AppUpdatePageState extends State<AppUpdatePage> {
     final current=installed,update=release;
     if(downloading||installing||current==null||update==null||
        !update.canUpgradeSafely(current))return;
+    var canOpenInstaller=false;
     setState((){
       downloading=true;cancelRequested=false;
       received=0;error=null;notice=null;readyApk=null;
@@ -93,11 +94,15 @@ class _AppUpdatePageState extends State<AppUpdatePage> {
       await driver.inspect(path,update);
       if(mounted)setState((){
         readyApk=path;
-        notice='Đã kiểm tra dung lượng, SHA-256, package và chữ ký. Sẵn sàng cài đè.';
+        notice='Đã kiểm tra dung lượng, SHA-256, package và chữ ký. Đang mở trình cài đặt.';
       });
+      canOpenInstaller=true;
     }catch(e){
       if(mounted)setState(()=>error=describe(e));
     }finally{if(mounted)setState(()=>downloading=false);}
+    // One tap starts download, verification and the Android system installer.
+    // Android still requires explicit OS confirmation; never silently install.
+    if(canOpenInstaller&&mounted)await install();
   }
 
   Future<void> install()async{
@@ -164,7 +169,7 @@ class _AppUpdatePageState extends State<AppUpdatePage> {
             FilledButton.icon(
               onPressed:busy?null:download,
               icon:const Icon(Icons.download_outlined),
-              label:Text(error==null?'Tải':'Thử lại')),
+              label:Text(error==null?'Cập nhật':'Thử lại')),
           if(downloading)OutlinedButton.icon(
             onPressed:(){
               cancelRequested=true;
