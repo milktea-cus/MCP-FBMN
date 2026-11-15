@@ -19,7 +19,7 @@ class SchoolDirectoryPage extends StatefulWidget {
 class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
   static const int pageSize=20;
   Map<String,List<String>> areas={};
-  String province='',district='',search='';
+  String province='',district='',search='',levelFilter='';
   final searchController=TextEditingController();
   final List<Map<String,dynamic>> schools=[];
   Timer? debounce;
@@ -73,9 +73,9 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
   }
 
   String _cacheKey(int next)=>
-    'schools:page:v1:${province.isEmpty?'_':province}:${district.isEmpty?'_':district}:$next';
+    'schools:page:v2:${province.isEmpty?'_':province}:${district.isEmpty?'_':district}:${levelFilter.isEmpty?'_':levelFilter}:$next';
 
-  void _changeFilters({String? newProvince,String? newDistrict}){
+  void _changeFilters({String? newProvince,String? newDistrict,String? newLevel}){
     setState((){
       if(newProvince!=null){
         province=newProvince;
@@ -83,6 +83,7 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
       }else if(newDistrict!=null){
         district=newDistrict;
       }
+      if(newLevel!=null)levelFilter=newLevel;
       schools.clear();total=0;page=0;more=false;error=null;
     });
     unawaited(_load());
@@ -92,7 +93,8 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
     if(loading&&loadMore)return;
     final request=++generation;
     final next=loadMore?page+1:1;
-    final chosenProvince=province,chosenDistrict=district,chosenSearch=search;
+    final chosenProvince=province,chosenDistrict=district,
+      chosenSearch=search,chosenLevel=levelFilter;
     setState((){
       loading=true;error=null;
       if(!loadMore){schools.clear();page=0;total=0;more=false;}
@@ -115,6 +117,7 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
         'page':'$next','size':'$pageSize',
         if(chosenProvince.isNotEmpty)'province':chosenProvince,
         if(chosenDistrict.isNotEmpty)'district':chosenDistrict,
+        if(chosenLevel.isNotEmpty)'level':chosenLevel,
         if(chosenSearch.isNotEmpty)'q':chosenSearch,
       });
       final data=await widget.session.get(uri.toString());
@@ -209,6 +212,15 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
   Widget _schoolCard(Map<String,dynamic> school){
     final name=school['name']?.toString()??'Trường học';
     final level=school['education_level']?.toString()??'';
+    const labels={
+      'Tiểu học':'Cấp 1 · Tiểu học',
+      'THCS':'Cấp 2 · THCS',
+      'THPT':'Cấp 3 · THPT',
+      'Tiểu học & THCS':'Liên cấp 1–2 · Tiểu học & THCS',
+      'THCS & THPT':'Liên cấp 2–3 · THCS & THPT',
+      'Tiểu học & THCS & THPT':'Liên cấp 1–2–3',
+    };
+    final levelLabel=labels[level]??level;
     final location=[school['province_old'],school['district_old']]
         .where((s)=>s!=null&&s.toString().isNotEmpty).join(' · ');
     final address=school['address_text']?.toString()??'Chưa có địa chỉ';
@@ -220,7 +232,8 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
         child:Row(crossAxisAlignment:CrossAxisAlignment.center,children:[
           Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
             Text(name,style:Theme.of(context).textTheme.titleSmall),
-            if(level.isNotEmpty)Text(level,style:Theme.of(context).textTheme.labelSmall),
+            if(level.isNotEmpty)Text(levelLabel,
+              style:Theme.of(context).textTheme.labelSmall),
             const SizedBox(height:5),
             Text(location,style:Theme.of(context).textTheme.bodySmall),
             const SizedBox(height:3),
@@ -271,6 +284,18 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
               onChanged:province.isEmpty?null:
                 (v)=>_changeFilters(newDistrict:v??''))),
           ]),
+          const SizedBox(height:8),
+          DropdownButtonFormField<String>(
+            key:ValueKey('school-level:$levelFilter'),
+            initialValue:levelFilter,isExpanded:true,
+            decoration:const InputDecoration(labelText:'Cấp học',isDense:true),
+            items:const [
+              DropdownMenuItem(value:'',child:Text('Tất cả cấp')),
+              DropdownMenuItem(value:'1',child:Text('Cấp 1 · Tiểu học')),
+              DropdownMenuItem(value:'2',child:Text('Cấp 2 · THCS')),
+              DropdownMenuItem(value:'3',child:Text('Cấp 3 · THPT')),
+            ],
+            onChanged:(v)=>_changeFilters(newLevel:v??'')),
           const SizedBox(height:6),
           Text(offline?'Dữ liệu đã lưu trên máy · cần mạng để cập nhật':
             '$total trường phù hợp',
