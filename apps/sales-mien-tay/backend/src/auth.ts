@@ -1,6 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
-import {classifySessionProviderFailure} from './auth_session_policy';
+import {classifySessionProviderFailure,classifySessionSnapshot} from './auth_session_policy';
 
 export interface AuthEnv {
  DATABASE_URL: string;
@@ -44,10 +44,13 @@ async function sessionSubject(value: string) {
  // these responses to 401 made Android erase a durable secure-store cookie.
  if(!res.ok)throw new AuthError(classifySessionProviderFailure(res.status),
    res.status===401?'Phiên đăng nhập không hợp lệ':'Dịch vụ xác thực tạm thời không sẵn sàng');
- let data:{user?:{id?:string;emailVerified?:boolean};session?:{expiresAt?:string}};try{data=await res.json();}catch{throw new AuthError(401,'Phiên đăng nhập không hợp lệ');}
- if(!data?.user?.id || !data.session || !data.user.emailVerified ||
- !data.session.expiresAt || !Number.isFinite(Date.parse(data.session.expiresAt)) || Date.parse(data.session.expiresAt)<=Date.now()) throw new AuthError(401,'Phiên hết hạn hoặc email chưa xác minh');
- return data.user.id;
+ let data:unknown;try{data=await res.json();}catch{
+  throw new AuthError(503,'Dịch vụ xác thực trả phản hồi không hợp lệ');
+ }
+ const validated=classifySessionSnapshot(data);
+ if(validated.kind==='unavailable')throw new AuthError(503,'Dịch vụ xác thực trả thông tin phiên không đầy đủ');
+ if(validated.kind==='invalid')throw new AuthError(401,'Phiên hết hạn hoặc email chưa xác minh');
+ return validated.subject;
 }
 export async function principal(env: AuthEnv, sub: string) {
  const db=neon(env.DATABASE_URL);
