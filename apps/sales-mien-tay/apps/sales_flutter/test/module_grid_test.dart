@@ -27,7 +27,7 @@ void main() {
       final delegate = tester.widget<GridView>(find.byType(GridView)).gridDelegate
         as SliverGridDelegateWithFixedCrossAxisCount;
       expect(delegate.crossAxisCount,
-        width < 378 ? 3 : width < 1018 ? 4 : 6);
+        width < 396 ? 3 : width < 1036 ? 4 : 6);
       expect(find.descendant(of:find.byType(SalesModuleGrid),
         matching:find.byType(Card)),findsNothing,
         reason:'Module shortcuts are bare icon+label, not individual cards');
