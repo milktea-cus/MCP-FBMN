@@ -21,12 +21,12 @@ class SalesSettingsPage extends StatelessWidget {
     title:const Text('Thiết lập'),
     bottom:TabBar(isScrollable:false,tabs:[
      const Tab(icon:Icon(Icons.bookmark_outline),text:'Mẫu lịch trình'),
-     if(admin)const Tab(icon:Icon(Icons.fact_check_outlined),text:'Câu hỏi gặp khách'),
+     if(admin)const Tab(icon:Icon(Icons.fact_check_outlined),text:'Mẫu làm việc'),
     ]),
    ),
    body:TabBarView(children:[
     RouteTemplateLibraryPage(service:service,queue:queue,embedded:true),
-    if(admin)SurveyTemplateAdmin(service:service,regions:regions,embedded:true),
+    if(admin)SurveyTemplateAdmin(service:service,regions:regions,queue:queue,embedded:true),
    ]),
   ),
  );

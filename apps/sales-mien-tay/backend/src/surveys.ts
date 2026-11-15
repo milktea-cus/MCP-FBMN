@@ -133,7 +133,7 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
    const history=url.searchParams.get('history')==='1';
    if(history){
     if(!actor.admin||!province)return bad('Chỉ Admin được xem lịch sử mẫu',403);
-    const older=await db`SELECT t.id,t.province,t.version,t.questions,t.created_by,
+    const older=await db`SELECT t.id,t.province,t.title,t.version,t.questions,t.created_by,
       t.created_at,coalesce(v.status,'active') AS status
       FROM public.field_survey_templates t
       LEFT JOIN public.field_survey_template_visibility v ON v.province=t.province
@@ -141,7 +141,7 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
     return json({items:older});
    }
    const rows=await db`SELECT DISTINCT ON (t.province)
-    t.id,t.province,t.version,t.questions,t.created_by,t.created_at
+    t.id,t.province,t.title,t.version,t.questions,t.created_by,t.created_at
     FROM public.field_survey_templates t
     LEFT JOIN public.field_survey_template_visibility v ON v.province=t.province
     WHERE coalesce(v.status,'active')='active'
@@ -197,7 +197,8 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   if(!actor.admin)return bad('Chỉ Admin thiết lập mẫu',403);
   let v:Body;try{v=await body(req);}catch{return bad('JSON không hợp lệ');}
   const province=String(v.province??''),qs=questions(v.questions);
-  if((province!=='*'&&!areas[province])||!qs||!isUuid(v.client_ref)||!Number.isInteger(v.expected_version)||Number(v.expected_version)<0)return bad('Mẫu, tỉnh hoặc phiên bản không hợp lệ');
+   const title=String(v.title??(province==='*'?'Mẫu chung · Gặp khách':'Mẫu gặp khách · '+province)).trim();
+  if((province!=='*'&&!areas[province])||!qs||title.length<2||title.length>80||/[\x00-\x1f\x7f]/.test(title)||!isUuid(v.client_ref)||!Number.isInteger(v.expected_version)||Number(v.expected_version)<0)return bad('Mẫu, tỉnh hoặc phiên bản không hợp lệ');
   // A catalog-backed question snapshots official names in the published version;
   // unchecked free text and expired aliases must never enter a canonical survey.
   if(qs.some(q=>q.catalog_source==='brands')){
@@ -208,8 +209,8 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   }
   const prior=await db`SELECT * FROM field_survey_templates WHERE id=${v.client_ref}::uuid AND province=${province}`;
   if(prior.length)return json({item:prior[0],idempotent:true});
-  const rows=await db`INSERT INTO field_survey_templates(id,province,version,questions,created_by)
-   SELECT ${v.client_ref}::uuid,${province},${Number(v.expected_version)+1},${JSON.stringify(qs)}::jsonb,${actor.sub}
+  const rows=await db`INSERT INTO field_survey_templates(id,province,title,version,questions,created_by)
+   SELECT ${v.client_ref}::uuid,${province},${title},${Number(v.expected_version)+1},${JSON.stringify(qs)}::jsonb,${actor.sub}
    WHERE coalesce((SELECT max(version) FROM field_survey_templates WHERE province=${province}),0)=${Number(v.expected_version)}
    ON CONFLICT DO NOTHING RETURNING *`;
   return rows.length?json({item:rows[0]},201):bad('Mẫu đã thay đổi; tải lại trước khi lưu',409);

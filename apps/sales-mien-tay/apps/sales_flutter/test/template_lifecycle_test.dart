@@ -36,12 +36,15 @@ void main(){
   expect(find.byKey(const Key('template-pause-button')),findsNothing);
   expect(find.byKey(const Key('template-delete-button')),findsNothing);
   expect(find.textContaining('Mẫu chung phải luôn có'),findsOneWidget);
-  expect(find.text('Phát hành phiên bản'),findsNothing);
+  expect(find.byKey(const Key('template-publish-button')),findsNothing);
   await tester.tap(find.byKey(const Key('template-edit-button')));
   await tester.pumpAndSettle();
-  await tester.scrollUntilVisible(find.text('Phát hành phiên bản'),300,scrollable:find.byType(Scrollable).first);
-  expect(find.text('Phát hành phiên bản'),findsOneWidget);
-  expect(find.text('Xóa câu hỏi'),findsWidgets);
+  expect(find.byKey(const Key('template-title-field')),findsOneWidget);
+  expect(find.byKey(const Key('template-publish-button')),findsOneWidget);
+  expect(find.textContaining('Câu hỏi (3/50)'),findsOneWidget);
+  await tester.tap(find.text('Nhãn hàng kinh doanh'));
+  await tester.pumpAndSettle();
+  expect(find.text('Xóa'),findsOneWidget);
   client.close();
  });
 
@@ -116,7 +119,7 @@ void main(){
   )));
   await tester.pumpAndSettle();
   expect(find.text('Mẫu lịch trình'),findsOneWidget);
-  expect(find.text('Câu hỏi gặp khách'),findsOneWidget);
+  expect(find.text('Mẫu làm việc'),findsOneWidget);
   final controller=DefaultTabController.of(tester.element(find.byType(TabBar)));
   expect(controller.index,1);
   client.close();queue.dispose();
