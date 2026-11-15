@@ -126,11 +126,28 @@ jobs:
           mapfile -t tests < <(find test -maxdepth 1 -name '*_test.dart' | sort)
           group=()
           for i in "${!tests[@]}"; do
+            if [[ "${tests[i]}" == "test/template_lifecycle_test.dart" ]]; then continue; fi
             if (( i % 8 == ${{ matrix.shard }} )); then group+=("${tests[i]}"); fi
           done
           if (( ${#group[@]} == 0 )); then echo 'No tests in this shard'; exit 1; fi
           printf 'Running %s test files in shard %s\n' "${#group[@]}" "${{ matrix.shard }}"
           flutter test --concurrency=1 --timeout=75s "${group[@]}"
+  flutter-form-lifecycle:
+    name: Flutter Form Lifecycle / Isolated
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/sales-mien-tay/apps/sales_flutter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter create --platforms=web,android .
+      - run: flutter pub get
+      - name: Validate form API error, recovery and activation in isolated test process
+        run: timeout 70s flutter test test/template_lifecycle_test.dart
   dependency-and-layout:
     name: Source / Data & secret guards
     runs-on: ubuntu-latest
