@@ -816,8 +816,11 @@ class CustomerDetail extends StatefulWidget {
   /// Optional media cache seam: PWA/Android production defaults to durable
   /// account-scoped IndexedDB/SQLite. Widget tests may supply a fake cache.
   final CustomerPhotoCache? photoCacheOverride;
+  /// Replaceable metadata read for widget tests only. Production keeps
+  /// account-scoped IndexedDB/SQLite cache-first reads.
+  final Future<List<Map<String,dynamic>>> Function(String key)? cachedMetadataOverride;
   const CustomerDetail({super.key,required this.service,required this.customer,
-    required this.regions,this.queue,this.photoCacheOverride});
+    required this.regions,this.queue,this.photoCacheOverride,this.cachedMetadataOverride});
   @override State<CustomerDetail> createState()=>_CustomerDetailState();
 }
 
@@ -879,8 +882,9 @@ class _CustomerDetailState extends State<CustomerDetail> {
    if(_accessDenied)return;
    if(_scopeMatches){
     try{
+     final read=widget.cachedMetadataOverride??q!.cached;
      final cached=await Future.wait([
-      q!.cached('customer-media:$cid'),q.cached('visits:$cid')]);
+      read('customer-media:$cid'),read('visits:$cid')]);
      if(!mounted||epoch!=_loadEpoch||_accessDenied)return;
      setState((){
       if(cached[0].isNotEmpty)gallery=cached[0];

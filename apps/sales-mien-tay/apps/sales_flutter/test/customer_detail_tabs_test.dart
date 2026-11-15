@@ -53,6 +53,24 @@ class PendingMediaService extends FakeService {
   }
 }
 
+
+class InMemoryPhotoCache extends CustomerPhotoCache {
+ InMemoryPhotoCache(super.queue);
+ final bytes=base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/hoUAAAAASUVORK5CYII=');
+ bool revoked=false;
+ int reads=0;
+ @override Future<Uint8List?> get(String customer,String source,String photo,
+  {bool thumbnail=true,String? expectedSha})async{
+  reads++;
+  return revoked?null:bytes;
+ }
+ @override Future<void> revokeCustomer(String customer)async{revoked=true;}
+ @override Future<void> pruneCustomer(String customer,Set<String> allowed)async{}
+}
+Future<List<Map<String,dynamic>>> fakeCachedMetadata(String key)async=>
+ key.startsWith('customer-media:')?[images.first]:<Map<String,dynamic>>[];
+
 class CaptureDialLauncher extends UrlLauncherPlatform {
   String? lastUrl;
   // Ignore uncalled platform-specific members in this fake; only launchUrl is used.
@@ -364,80 +382,60 @@ void main(){
     expect(other.pending,isEmpty);
     queue.dispose();restored.dispose();other.dispose();
   });
-  testWidgets('P1-N warm profile renders scoped thumbnail without waiting for gallery/visits HTTP',
-    (tester)async{
-   tester.view.devicePixelRatio=1;
-   tester.view.physicalSize=const Size(390,870);
-   addTearDown(tester.view.resetPhysicalSize);
-   addTearDown(tester.view.resetDevicePixelRatio);
-   final factory=newIdbFactoryMemory();
-   final queue=OfflineQueue(SalesSession(),'sales-1','scope-1',factory:factory);
-   await tester.runAsync(()async{
-    await queue.cache('customer-media:$customerId',[images.first]);
-    await queue.cache('visits:$customerId',[]);
-    final png=base64Decode(
-     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/hoUAAAAASUVORK5CYII=');
-    await CustomerPhotoCache(queue).put(customerId,'customer',coverId,png);
-   });
-   final service=PendingMediaService();
-   await tester.pumpWidget(MaterialApp(home:CustomerDetail(
-    service:service,customer:customer(),queue:queue,
-    regions:const RegionCatalog(<String,List<String>>{}))));
-   await tester.runAsync(()async{
-    await Future<void>.delayed(const Duration(milliseconds:50));
-   });
-   await tester.pump();
-   await tester.pump();
-   await tester.tap(find.text('Hình ảnh'));
-   await tester.pump();
-   await tester.pump();
-   expect(find.text('Hình ảnh cửa hàng · 1'),findsOneWidget,
-    reason:'Cached metadata must be rendered while both network requests hang');
-   expect(find.byType(Image),findsWidgets);
-   expect(service.downloadCount,0,reason:'Warm thumbnail must not call R2');
-   service.galleryResponse.complete(images);
-   service.visitResponse.complete([]);
-   await tester.pump();
-   await tester.pump();
-   await tester.pumpWidget(const SizedBox.shrink());
-   queue.dispose();
-  });
 
-  testWidgets('P1-N HTTP 403 clears cached profile, gallery and image bytes',
-    (tester)async{
-   final factory=newIdbFactoryMemory();
-   final queue=OfflineQueue(SalesSession(),'sales-1','scope-1',factory:factory);
-   await tester.runAsync(()async{
-    await queue.cache('customer-media:$customerId',[images.first]);
-    await CustomerPhotoCache(queue).put(customerId,'customer',coverId,
-     Uint8List.fromList([1,2,3]));
-   });
-   final service=PendingMediaService();
-   await tester.pumpWidget(MaterialApp(home:CustomerDetail(
-    service:service,customer:customer(),queue:queue,
-    regions:const RegionCatalog(<String,List<String>>{}))));
-   await tester.runAsync(()async{
-    await Future<void>.delayed(const Duration(milliseconds:50));
-   });
-   await tester.pump();
-   await tester.pump();
-   service.galleryResponse.completeError(
-    const ApiFailure(403,'Quyền xem ảnh đã thu hồi'));
-   service.visitResponse.complete([]);
-   await tester.pump();
-   await tester.pump();
-   await tester.runAsync(()async{
-    await Future<void>.delayed(const Duration(milliseconds:40));
-   });
-   await tester.pump();
-   final removed=await tester.runAsync(()async=>(
-    await queue.cached('customer-media:$customerId'),
-    await CustomerPhotoCache(queue).usage()));
-   expect(removed?.$1,isEmpty);
-   expect(removed?.$2['entries'],0);
-   expect(find.text('Không có quyền xem dữ liệu này'),findsOneWidget);
-   await tester.pumpWidget(const SizedBox.shrink());
-   queue.dispose();
-  });
+ testWidgets('P1-N warm profile renders thumbnail while media and visits HTTP hang',
+  (tester)async{
+  tester.view.devicePixelRatio=1;
+  tester.view.physicalSize=const Size(390,870);
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  final queue=OfflineQueue(SalesSession(),'sales-1','scope-1',
+    factory:newIdbFactoryMemory());
+  final cache=InMemoryPhotoCache(queue),service=PendingMediaService();
+  await tester.pumpWidget(MaterialApp(home:CustomerDetail(
+   service:service,customer:customer(),queue:queue,
+   photoCacheOverride:cache,cachedMetadataOverride:fakeCachedMetadata,
+   regions:const RegionCatalog(<String,List<String>>{}))));
+  await tester.pump();
+  await tester.pump();
+  expect(service.galleryResponse.isCompleted,isFalse);
+  expect(service.visitResponse.isCompleted,isFalse);
+  await tester.tap(find.text('Hình ảnh'));
+  await tester.pump();
+  await tester.pump();
+  expect(find.text('Hình ảnh cửa hàng · 1'),findsOneWidget,
+   reason:'Cached metadata is visible before independent server requests');
+  expect(find.byType(Image),findsWidgets);
+  expect(cache.reads,greaterThan(0));
+  expect(service.downloadCount,0);
+  await tester.pumpWidget(const SizedBox.shrink());
+  service.galleryResponse.complete(images);
+  service.visitResponse.complete([]);
+  await tester.pump();
+  queue.dispose();
+ });
+ testWidgets('P1-N authorization 403 revokes displayed metadata and image bytes',
+  (tester)async{
+  final queue=OfflineQueue(SalesSession(),'sales-1','scope-1',
+    factory:newIdbFactoryMemory());
+  final cache=InMemoryPhotoCache(queue),service=PendingMediaService();
+  await tester.pumpWidget(MaterialApp(home:CustomerDetail(
+   service:service,customer:customer(),queue:queue,
+   photoCacheOverride:cache,cachedMetadataOverride:fakeCachedMetadata,
+   regions:const RegionCatalog(<String,List<String>>{}))));
+  await tester.pump();
+  await tester.pump();
+  expect(find.textContaining('Ảnh lưu trên máy'),findsOneWidget);
+  service.galleryResponse.completeError(
+   const ApiFailure(403,'Quyền xem ảnh đã thu hồi'));
+  service.visitResponse.complete([]);
+  await tester.pump();
+  await tester.pump();
+  expect(cache.revoked,isTrue);
+  expect(find.text('Không có quyền xem dữ liệu này'),findsOneWidget);
+  expect(find.textContaining('Ảnh lưu trên máy'),findsNothing);
+  await tester.pumpWidget(const SizedBox.shrink());
+  queue.dispose();
+ });
 
 }
