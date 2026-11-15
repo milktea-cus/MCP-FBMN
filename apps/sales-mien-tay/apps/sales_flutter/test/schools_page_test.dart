@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:idb_shim/idb_shim_memory.dart';
+import 'package:idb_shim/idb_shim.dart';
 import 'package:sales_mien_tay/offline_queue.dart';
 import 'package:sales_mien_tay/schools_page.dart';
 import 'package:sales_mien_tay/session.dart';
