@@ -24,6 +24,7 @@ import {orderRoutes} from './orders';
 import {performanceRoutes} from './performance';
 import {notificationRoutes} from './notifications';
 import {appReleaseRoutes,publicAndroidInstaller} from './app_releases';
+import {githubAndroidPublisher} from './android_release_publisher';
 
 interface Env {
   DATABASE_URL: string;
@@ -37,6 +38,7 @@ interface Env {
   PHOTOS_BUCKET?: R2Bucket;
   APP_RELEASES_BUCKET?: R2Bucket;
   APP_DOWNLOAD_HMAC_KEY?: string;
+  FIELD_WORK_SIGNING_WRAP_KEY?: string;
 }
 type Kind = 'survey' | 'target' | 'forecast' | 'visit' | 'dealer' | 'competitor' | 'support';
 const kinds: Kind[] = ['survey', 'target', 'forecast', 'visit', 'dealer', 'competitor', 'support'];
@@ -107,6 +109,9 @@ export default {
     if (origin && !allowedOrigin(origin, env)) return bad('Origin không được cho phép', 403);
     const answer = async (): Promise<Response> => {
       const url = new URL(req.url);
+      // GitHub Actions OIDC grants only the owner-approved signing/publisher job.
+      const publisher=await githubAndroidPublisher(req,env,url);
+      if(publisher)return publisher;
       // Signed APK bootstrap is read-only and public; authenticated app updates
       // still require the existing identity-bound short-lived ticket.
       const installer=await publicAndroidInstaller(req,env,url);
