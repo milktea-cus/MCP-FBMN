@@ -38,43 +38,15 @@ bool customerWorkDateAllowed(Map<String,dynamic> route,DateTime localToday){
  return d!=null&&d.year==localToday.year&&d.month==localToday.month&&d.day==localToday.day;
 }
 
-/// Shared questions are offered everywhere; territory questions are layered
-/// on top using the actual customer's province, not the trip's primary area.
-/// A provincial override replaces a duplicate shared ID, never renders twice.
-Map<String,dynamic>? mergeCustomerVisitTemplates(
-  Iterable<Map<String,dynamic>> templates,String province){
- Map<String,dynamic>? latest(String p){
-  final candidates=templates.where((t)=>t['province']==p).toList()
-   ..sort((a,b)=>((b['version'] as num?)?.toInt()??0)
-        .compareTo((a['version'] as num?)?.toInt()??0));
-  return candidates.isEmpty?null:candidates.first;
- }
- final common=latest('*');
- final rawProvince=latest(province);
- // Seed-only province forms are examples, not administrator-published forms.
- final specific=rawProvince!=null&&
-   (rawProvince['created_by']!='system:initial'&&
-    ((rawProvince['version'] as num?)?.toInt()??0)>1)
-   ?rawProvince:null;
- if(common==null&&specific==null)return null;
- final localQuestions=((specific?['questions'] as List?)??[])
-   .map((q)=>Map<String,dynamic>.from(q as Map)).toList();
- final localIds=localQuestions.map((q)=>q['id']?.toString()).toSet();
- final commonQuestions=((common?['questions'] as List?)??[])
-   .map((q)=>Map<String,dynamic>.from(q as Map))
-   .where((q)=>!localIds.contains(q['id']?.toString()))
-   .map((q)=>{...q,'template_scope':'common','source_template_id':common!['id']}).toList();
- return {
-  ...?specific,...?((specific==null)?common:null),
-  'questions':[...commonQuestions,
-   for(final q in localQuestions){...q,'template_scope':'province','source_template_id':specific!['id']}],
-  'common_template_id':common?['id'],
-  'province_template_id':specific?['id'],
-  'common_version':common?['version'],
-  'province_version':specific?['version'],
-  'template_province':province,
- };
-}
+/// Each independently named form is eligible only for its own scope.
+List<Map<String,dynamic>> availableCustomerWorkTemplates(
+ Iterable<Map<String,dynamic>> forms,String province)=>[
+ for(final form in forms)
+  if(form['status']=='active'&&
+   (((form['provinces'] as List?)??[]).isEmpty||
+    ((form['provinces'] as List?)??[]).contains(province)))
+   form,
+];
 
 /// Preserve the immutable template ID for each question at save time.
 List<Map<String,dynamic>> customerWorkFormSegments(
@@ -192,7 +164,7 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
    }
    final area=province;
    final key='survey-forms:'+area;
-   final cachedForms=await cache(key);
+   final cachedForms=availableCustomerWorkTemplates(await cache(key),area);
    if(cachedForms.isNotEmpty&&mounted)setState((){
     templateChoices=cachedForms;
     template=selectedFormId==null?cachedForms.firstOrNull:
@@ -203,8 +175,9 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
     final res=decodeApi(await http.get(widget.service.uri(
      '/api/v1/survey-templates',{'province':area.isEmpty?'*':area}),
      headers:widget.service.headers).timeout(const Duration(seconds:15)));
-    final items=((res['items'] as List?)??[])
-     .map((v)=>Map<String,dynamic>.from(v as Map)).toList();
+    final items=availableCustomerWorkTemplates(
+     ((res['items'] as List?)??[])
+       .map((v)=>Map<String,dynamic>.from(v as Map)),area);
     if(mounted)setState((){
      templateChoices=items;
      template=selectedFormId==null?items.firstOrNull:
