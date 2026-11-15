@@ -380,7 +380,7 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
         onSettings:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>
           SalesSettingsPage(service:_customerService,queue:_queue,
            regions:_catalog,admin:widget.me['role']=='admin'))),
-        onSyncIssues:_queue.blockedCount>0
+        onSyncIssues:(_queue.blockedCount>0||_queue.rescued.isNotEmpty)
           ?()=>showSyncQueueDetails(context,_queue):null,
         onUpdate:kIsWeb
           ?()=>Navigator.push(context,MaterialPageRoute(

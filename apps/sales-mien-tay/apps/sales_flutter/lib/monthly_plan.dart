@@ -287,6 +287,27 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
   }catch(e){_toast('Không dời được tuyến: $e');}
  }
 
+ String planGraphStatus(Map<String,dynamic> p){
+  final id=p['id']?.toString()??'';
+  final existing=dayRoutes.where((r)=>r['monthly_plan_id']==id).firstOrNull;
+  final routeJob=widget.queue.pending.where((r)=>
+   r['path']=='/api/v1/day-routes'&&
+   (r['payload'] as Map?)?['monthly_plan_id']==id).firstOrNull;
+  final routeId=existing?['id']?.toString()??
+    (routeJob?['payload'] as Map?)?['client_ref']?.toString();
+  final tripJob=widget.queue.pending.where((r)=>
+   r['path']=='/api/v1/trips'&&
+   (r['payload'] as Map?)?['day_route_id']?.toString()==routeId).firstOrNull;
+  if(existing?['trip_id']!=null)return 'Chuyến đã liên kết';
+  if(tripJob!=null)return tripJob['status']=='blocked'
+   ?'LỖI: Chuyến bị từ chối, kiểm tra Chi tiết đồng bộ'
+   :'Chuyến đang chờ đồng bộ trên máy';
+  if(routeJob!=null)return routeJob['status']=='blocked'
+   ?'LỖI: Tuyến bị từ chối, kiểm tra Chi tiết đồng bộ'
+   :'Tuyến đang chờ đồng bộ trên máy';
+  if(existing!=null)return 'Chưa có chuyến liên kết — mở Chưa hoàn thành để khôi phục';
+  return 'Chưa có tuyến xác nhận trên server';
+ }
  @override Widget build(BuildContext context){
   final visible=items.where((r){
    final date=DateTime.tryParse(r['work_date']?.toString()??'');
@@ -354,7 +375,8 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
     for(final r in visible)Card(child:ListTile(
      leading:CircleAvatar(child:Text(DateTime.tryParse(r['work_date'].toString())?.day.toString()??'–')),
      title:Text(r['purpose']?.toString()??''),
-     subtitle:Text("${r['work_date'].toString().substring(0,10)} · ${r['scope_kind']=='chain'?'Chuỗi':r['district']==''?'Toàn tỉnh':'Địa bàn'}: ${r['scope_kind']=='chain'?scopes.where((s)=>s['scope_key']==r['scope_key']).map((s)=>s['label']).firstOrNull??'Chuỗi':r['scope_key']}\nMục tiêu khách mới: ${r['target_new_customers']} · ${r['status']=='cancelled'?'Đã hủy':'Đã lập kế hoạch'} · v${r['version']}"),
+     subtitle:Text("${r['work_date'].toString().substring(0,10)} · ${r['scope_kind']=='chain'?'Chuỗi':r['district']==''?'Toàn tỉnh':'Địa bàn'}: ${r['scope_kind']=='chain'?scopes.where((s)=>s['scope_key']==r['scope_key']).map((s)=>s['label']).firstOrNull??'Chuỗi':r['scope_key']}\nMục tiêu khách mới: ${r['target_new_customers']} · ${r['status']=='cancelled'?'Đã hủy':'Đã lập kế hoạch'}
+${r['status']=='cancelled'?'Đã hủy':planGraphStatus(r)}"),
      isThreeLine:true,
      trailing:Builder(builder:(ctx){
        final matching=dayRoutes.where((t)=>t['monthly_plan_id']==r['id']).toList();
