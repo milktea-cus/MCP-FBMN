@@ -813,7 +813,11 @@ class CustomerDetail extends StatefulWidget {
   final FieldCustomer customer;
   final RegionCatalog regions;
   final OfflineQueue? queue;
-  const CustomerDetail({super.key,required this.service,required this.customer,required this.regions,this.queue});
+  /// Optional media cache seam: PWA/Android production defaults to durable
+  /// account-scoped IndexedDB/SQLite. Widget tests may supply a fake cache.
+  final CustomerPhotoCache? photoCacheOverride;
+  const CustomerDetail({super.key,required this.service,required this.customer,
+    required this.regions,this.queue,this.photoCacheOverride});
   @override State<CustomerDetail> createState()=>_CustomerDetailState();
 }
 
@@ -823,7 +827,8 @@ class _CustomerDetailState extends State<CustomerDetail> {
   final Map<String,Future<Uint8List>> imageTasks={};
   int _loadEpoch=0;
   bool _accessDenied=false;
-  CustomerPhotoCache? get photoCache=>widget.queue==null?null:CustomerPhotoCache(widget.queue!);
+  CustomerPhotoCache? get photoCache=>widget.photoCacheOverride??
+   (widget.queue==null?null:CustomerPhotoCache(widget.queue!));
   String? message;
   bool busy=false;
   @override void initState(){
