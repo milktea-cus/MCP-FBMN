@@ -18,7 +18,7 @@ jobs:
       github.event.issue.number == 2 &&
       github.event.issue.pull_request == null &&
       github.event.comment.user.login == github.repository_owner &&
-      github.event.comment.body == '/deploy production'
+      (github.event.comment.body == '/deploy production' || github.event.comment.body == '/deploy production A')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -62,11 +62,19 @@ jobs:
       - name: Require production acceptance
         env:
           RELEASE_READY: ${{ vars.SALES_PRODUCTION_READY }}
+          OWNER_APPROVED_A: ${{ github.event.comment.body == '/deploy production A' && github.event.comment.user.login == github.repository_owner }}
         run: |
-          test "$RELEASE_READY" = "true" || { echo 'Production gates not approved: finish auth, API, database and app acceptance first.'; exit 1; }
+          # Global product acceptance remains gated. Feature-A test release needs
+          # an explicit Owner-only command, green CI for exact main, and live API checks.
+          if [ "$RELEASE_READY" != 'true' ] && [ "$OWNER_APPROVED_A" != 'true' ]; then
+            echo 'Production gate closed: require accepted product or Owner-approved A test release.'
+            exit 1
+          fi
           curl --fail --silent --show-error --max-time 20 "$API_BASE_URL/health" >/dev/null
           code=$(curl --silent --show-error --max-time 20 -o /dev/null -w '%{http_code}' "$API_BASE_URL/api/v1/customers")
           test "$code" = "401" || { echo "Expected unauthenticated API 401, got $code"; exit 1; }
+          code=$(curl --silent --show-error --max-time 20 -o /dev/null -w '%{http_code}' "$API_BASE_URL/api/v1/scoped-records?kind=support")
+          test "$code" = "401" || { echo "Scoped records must reject anonymous access; got $code"; exit 1; }
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ needs.authorize.outputs.sha }}
@@ -86,7 +94,9 @@ jobs:
           python3 scripts/generate_app_icons.py
           python3 scripts/check_app_icons.py
           flutter analyze --no-fatal-infos
-          flutter test
+          # The complete regression suite has already passed on exact main SHA;
+          # rerun the A editor acceptance tests here instead of the full 8-shard CI.
+          flutter test --reporter expanded test/scoped_record_editor_test.dart
           flutter build web --release --dart-define=API_BASE_URL="$API_BASE_URL"
       - name: Prepare static Vercel Build Output
         run: |
@@ -113,4 +123,13 @@ jobs:
           cd "$RUNNER_TEMP/sales-release"
           url=$(vercel deploy --prebuilt --prod --yes)
           DEPLOY_URL="$url" node --input-type=module -e 'const u=new URL(process.env.DEPLOY_URL.trim());if(u.protocol!=="https:"||!u.hostname.endsWith(".vercel.app"))process.exit(1)'
-          printf '### Sales production deployment\nURL: %s\nCommit: %s\n' "$url" "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          # Validate the public production alias after Vercel has assigned it.
+          public=https://sales-mien-tay.vercel.app
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent --show-error --max-time 20 "$public/" | grep -qi '<html'; then break; fi
+            sleep 5
+          done
+          curl --fail --silent --show-error --max-time 20 "$public/flutter_bootstrap.js" >/dev/null
+          code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "$public/api/v1/scoped-records?kind=competitor")
+          test "$code" = '401' || { echo "Frontend scoped API proxy did not reject anonymous access: $code"; exit 1; }
+          printf '### Sales production deployment\nURL: %s\nCommit: %s\nPublic: %s\n' "$url" "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" "$public" >> "$GITHUB_STEP_SUMMARY"
