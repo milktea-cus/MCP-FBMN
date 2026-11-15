@@ -58,8 +58,12 @@ class MainActivity : FlutterActivity() {
     @Suppress("DEPRECATION")
     private fun readPackage(path: String?): PackageInfo {
         val pm = packageManager
-        val flags = if (Build.VERSION.SDK_INT >= 28)
-            PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
+        // Android 9/10 may not populate signingInfo for archive APKs. Prefer
+        // the legacy signature parser on API 28/29, without skipping any hash
+        // or signer pin checks in inspect().
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+            PackageManager.GET_SIGNING_CERTIFICATES
+        else PackageManager.GET_SIGNATURES
         return if (path == null) pm.getPackageInfo(packageName, flags)
         else pm.getPackageArchiveInfo(path, flags)
             ?: throw SecurityException("Không đọc được gói APK")
@@ -67,11 +71,22 @@ class MainActivity : FlutterActivity() {
 
     @Suppress("DEPRECATION")
     private fun signerHash(info: PackageInfo): String {
-        val signatures = if (Build.VERSION.SDK_INT >= 28)
-            info.signingInfo?.apkContentsSigners else info.signatures
+        val signing = if (Build.VERSION.SDK_INT >= 28) info.signingInfo else null
+        if (signing?.hasMultipleSigners() == true)
+            throw SecurityException("APK có nhiều chữ ký, không hỗ trợ cập nhật")
+        val modern = if (Build.VERSION.SDK_INT >= 28)
+            (signing?.apkContentsSigners?.takeIf { it.isNotEmpty() }
+                ?: signing?.signingCertificateHistory?.lastOrNull()?.let { arrayOf(it) })
+        else null
+        val legacy = info.signatures?.takeIf { it.isNotEmpty() }
+        val signatures = modern ?: legacy
         if (signatures == null || signatures.size != 1)
             throw SecurityException("Không xác minh được chữ ký ứng dụng")
-        return sha256(signatures[0].toByteArray())
+        val certificate = sha256(signatures[0].toByteArray())
+        if (modern != null && legacy != null &&
+            (legacy.size != 1 || sha256(legacy[0].toByteArray()) != certificate))
+            throw SecurityException("Thông tin chứng thư ký APK không nhất quán")
+        return certificate
     }
 
     private fun sha256(bytes: ByteArray): String =
