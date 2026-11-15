@@ -73,16 +73,16 @@ class CustomerZaloMark extends StatelessWidget{
 
 class FieldCustomer {
   final String id, name, address, province, district, category, status;
-  final String? phone, contact, note, owner, code, fieldCode;
+  final String? phone, contact, note, owner, code, fieldCode, coverPhotoId;
   final double? latitude, longitude, locationAccuracy;
   final String? locationSource, locationRecordedBy;
   final DateTime? locationRecordedAt;
   final int version;
   final bool? canPlan;
-  Map<String,dynamic> toJson()=>{'id':id,'owner_sub':owner,'name':name,'code':code,'field_code':fieldCode,'address_line':address,'province':province,'district':district,'category':category,'status':status,'phone':phone,'contact_name':contact,'note':note,'latitude':latitude,'longitude':longitude,'location_accuracy_m':locationAccuracy,'location_source':locationSource,'location_recorded_by':locationRecordedBy,'location_recorded_at':locationRecordedAt?.toIso8601String(),'version':version,'can_plan':canPlan};
+  Map<String,dynamic> toJson()=>{'id':id,'owner_sub':owner,'name':name,'code':code,'field_code':fieldCode,'cover_photo_id':coverPhotoId,'address_line':address,'province':province,'district':district,'category':category,'status':status,'phone':phone,'contact_name':contact,'note':note,'latitude':latitude,'longitude':longitude,'location_accuracy_m':locationAccuracy,'location_source':locationSource,'location_recorded_by':locationRecordedBy,'location_recorded_at':locationRecordedAt?.toIso8601String(),'version':version,'can_plan':canPlan};
   FieldCustomer.fromJson(Map<String, dynamic> j)
       : id = j['id'].toString(), name = j['name'].toString(),
-        owner = j['owner_sub'] as String?, code = j['code'] as String?,fieldCode=j['field_code'] as String?, address = j['address_line'].toString(), province = j['province'].toString(),
+        owner = j['owner_sub'] as String?, code = j['code'] as String?,fieldCode=j['field_code'] as String?,coverPhotoId=j['cover_photo_id'] as String?, address = j['address_line'].toString(), province = j['province'].toString(),
         district = j['district'].toString(), category = j['category'].toString(),
         status = j['status'].toString(), phone = j['phone'] as String?,
         contact = j['contact_name'] as String?, note = j['note'] as String?,
@@ -176,7 +176,9 @@ class CustomerService {
     decode(res);
   }
   Future<List<Map<String,dynamic>>> media(String customerId) async {
-    final res=await http.get(uri('/api/v1/customers/$customerId/media'),headers:headers).timeout(const Duration(seconds:20));
+    final request=uri('/api/v1/customers/$customerId/media');
+    final res=await (client?.get(request,headers:headers)??http.get(request,headers:headers))
+      .timeout(const Duration(seconds:20));
     final data=decode(res);
     return (data['items'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
   }
@@ -190,12 +192,19 @@ class CustomerService {
     final path=source=='survey'
       ?'/api/v1/sessions/${media['session_id']}/photos/${media['id']}'
       :'/api/v1/customers/$customerId/photos/${media['id']}';
-    final res=await http.get(uri(path,thumbnail?{'thumbnail':'1'}:null),headers:headers).timeout(const Duration(seconds:20));
-    if(res.statusCode!=200){checkSessionStatus(res);throw StateError('Không tải được ảnh');}
+    final request=uri(path,thumbnail?{'thumbnail':'1'}:null);
+    final res=await (client?.get(request,headers:headers)??http.get(request,headers:headers))
+      .timeout(const Duration(seconds:20));
+    if(res.statusCode!=200){
+      checkSessionStatus(res);
+      throw ApiFailure(res.statusCode,res.statusCode==403?'Không có quyền xem ảnh':'Không tải được ảnh');
+    }
     return res.bodyBytes;
   }
   Future<List<Map<String,dynamic>>> visits(String customerId) async {
-    final data=decode(await http.get(uri('/api/v1/customers/$customerId/visits'),headers:headers).timeout(const Duration(seconds:20)));
+    final request=uri('/api/v1/customers/$customerId/visits');
+    final data=decode(await (client?.get(request,headers:headers)??http.get(request,headers:headers))
+      .timeout(const Duration(seconds:20)));
     return (data['items'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
   }
   Future<List<String>> photos(String customerId) async {
