@@ -14,6 +14,14 @@ class SchoolSession extends SalesSession {
     ]};
     if(path.contains('q=khongco'))return {
       'items':<Map<String,dynamic>>[],'total':0,'hasMore':false};
+    if(path.contains('level=2')||path.contains('level=3'))return {
+      'items':[
+        {'source_ref':'SCHOOL-MIXED-23','name':'Trường liên cấp kiểm thử',
+          'education_level':'THCS & THPT','province_old':'Long An',
+          'district_old':'TP Tân An','address_text':'Long An',
+          'maps_search_url':'https://www.google.com/maps/search/?api=1&query=Test',
+          'gps_verified':false,'latitude':null,'longitude':null}
+      ],'total':1,'page':1,'size':20,'hasMore':false};
     return {'items':[
       {'source_ref':'THEF4145DA8','name':'Trường Tiểu học An Vĩnh Ngãi',
         'education_level':'Tiểu học','province_old':'Long An',
@@ -43,6 +51,32 @@ void main(){
       expect(find.text('Không tìm thấy trường trong phạm vi của bạn'),
         findsOneWidget);
       expect(session.requests.any((p)=>p.contains('q=khongco')),isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+      queue.dispose();
+    });
+
+  testWidgets('School grade filter includes multi-level institutions',
+    (tester)async{
+      final session=SchoolSession();
+      final queue=OfflineQueue(session,'sales-school-grade','1',
+        factory:newIdbFactoryMemory());
+      await tester.pumpWidget(MaterialApp(home:Scaffold(body:
+        SchoolDirectoryPage(queue:queue,session:session))));
+      await tester.pumpAndSettle();
+      expect(find.text('Cấp 1 · Tiểu học'),findsOneWidget);
+      await tester.tap(find.text('Tất cả cấp'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cấp 2 · THCS').last);
+      await tester.pumpAndSettle();
+      expect(session.requests.any((p)=>p.contains('level=2')),isTrue);
+      expect(find.text('Trường liên cấp kiểm thử'),findsOneWidget);
+      expect(find.text('Liên cấp 2–3 · THCS & THPT'),findsOneWidget);
+      await tester.tap(find.text('Cấp 2 · THCS').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cấp 3 · THPT').last);
+      await tester.pumpAndSettle();
+      expect(session.requests.any((p)=>p.contains('level=3')),isTrue);
+      expect(find.text('Trường liên cấp kiểm thử'),findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
       queue.dispose();
     });
