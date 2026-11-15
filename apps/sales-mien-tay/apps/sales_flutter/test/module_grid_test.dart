@@ -8,7 +8,7 @@ void main() {
     'Lịch trình','Hỗ trợ','Chính sách','Yêu cầu','Báo cáo tháng',
     'Danh mục SKU','Tra tồn','Ra đơn',
   ];
-  for (final width in [320.0, 360.0, 390.0, 780.0, 1280.0, 1440.0]) {
+  for (final width in [320.0, 360.0, 390.0, 430.0, 780.0, 1280.0, 1440.0]) {
     testWidgets('all 12 shortcuts fit and navigate at $width', (tester) async {
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = Size(width, 900);
@@ -26,12 +26,49 @@ void main() {
       expect(find.byType(InkWell), findsNWidgets(12));
       final delegate = tester.widget<GridView>(find.byType(GridView)).gridDelegate
         as SliverGridDelegateWithFixedCrossAxisCount;
-      expect(delegate.crossAxisCount, width < 350 ? 2 : width < 668 ? 3
-        : width < 1036 ? 4 : 6);
+      expect(delegate.crossAxisCount,
+        width < 378 ? 3 : width < 1018 ? 4 : 6);
+      expect(find.descendant(of:find.byType(SalesModuleGrid),
+        matching:find.byType(Card)),findsNothing,
+        reason:'Module shortcuts are bare icon+label, not individual cards');
+      for(final surface in tester.widgetList<InkWell>(
+         find.descendant(of:find.byType(SalesModuleGrid),
+          matching:find.byType(InkWell)))){
+        expect(surface.onTap,isNotNull);
+      }
+      final tile=tester.getSize(find.byKey(const ValueKey('module-grid-1')));
+      expect(tile.width,greaterThanOrEqualTo(48));
+      expect(tile.height,greaterThanOrEqualTo(48));
       await tester.ensureVisible(find.byKey(const ValueKey('module-grid-12')));
       await tester.tap(find.byKey(const ValueKey('module-grid-12')));
       expect(selected, [12]);
       expect(tester.takeException(), isNull);
+    });
+  }
+  for(final brightness in [Brightness.light,Brightness.dark]){
+    testWidgets('P1-O text scaling 1.4, focus and semantics $brightness',
+      (tester)async{
+      tester.view.devicePixelRatio=1;
+      tester.view.physicalSize=const Size(320,800);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final selected=<int>[];
+      await tester.pumpWidget(MaterialApp(
+        theme:ThemeData(brightness:brightness),
+        home:MediaQuery(data:const MediaQueryData(textScaler:TextScaler.linear(1.4)),
+         child:Scaffold(body:SingleChildScrollView(child:Padding(
+          padding:const EdgeInsets.all(18),child:SalesModuleGrid(
+           sections:names,icons:List.filled(names.length,Icons.apps),
+           onSelect:selected.add)))))));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(),isNull);
+      expect(find.descendant(of:find.byType(SalesModuleGrid),
+       matching:find.byType(Card)),findsNothing);
+      final node=find.byKey(const ValueKey('module-grid-5'));
+      await tester.ensureVisible(node);
+      await tester.tap(node);
+      expect(selected,[5]);
+      expect(tester.takeException(),isNull);
     });
   }
   testWidgets('Sales only sees Cong tac; independent survey is not a shortcut',(tester) async {

@@ -825,7 +825,9 @@ class _SalesBrandCoverageTableState extends State<SalesBrandCoverageTable>{
  }
 }
 
-/// Responsive home shortcuts. All routes retain their original indices.
+/// Lightweight, accessible FBMN home shortcuts without individual Cards.
+/// Identity, notification bar, KPI cards, navigation and module indices are
+/// deliberately untouched. The full tile has a >= 48dp hit target.
 class SalesModuleGrid extends StatelessWidget {
   final List<String> sections;
   final List<IconData> icons;
@@ -835,39 +837,43 @@ class SalesModuleGrid extends StatelessWidget {
     this.hiddenIndices=const {},required this.onSelect});
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(builder: (context, size) {
-    final columns = size.maxWidth >= 1000 ? 6
-      : size.maxWidth >= 650 ? 4 : size.maxWidth >= 315 ? 3 : 2;
-    final available=[for(var i=1;i<sections.length;i++)if(!hiddenIndices.contains(i))i];
+  Widget build(BuildContext context) => LayoutBuilder(builder:(context,size) {
+    final width=size.maxWidth;
+    final columns=width>=1000?6:width>=600?4:width>=360?4:width>=260?3:2;
+    final available=[for(var i=1;i<sections.length;i++)
+      if(!hiddenIndices.contains(i))i];
     return GridView.builder(
-      primary: false,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: available.length,
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: columns, mainAxisSpacing: 10, crossAxisSpacing: 10,
-        mainAxisExtent: 110,
+      primary:false,shrinkWrap:true,physics:const NeverScrollableScrollPhysics(),
+      itemCount:available.length,
+      gridDelegate:SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount:columns,mainAxisSpacing:6,crossAxisSpacing:6,
+        mainAxisExtent:88,
       ),
-      itemBuilder: (context, slot) {
-        final index = available[slot];
-        final label = index == 1 ? 'Khách hàng'
-          : index == 9 ? 'Báo cáo' : sections[index];
-        return Card(
-          margin: EdgeInsets.zero,
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            key: ValueKey('module-grid-$index'),
-            onTap: () => onSelect(index),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 9),
-              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Icon(icons[index], color: Theme.of(context).colorScheme.primary, size: 28),
-                const SizedBox(height: 9),
-                Text(label, textAlign: TextAlign.center, maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    fontWeight: FontWeight.w600)),
-              ]),
+      itemBuilder:(context,slot){
+        final index=available[slot];
+        final label=index==1?'Khách hàng':index==9?'Báo cáo':sections[index];
+        return Semantics(
+          button:true,label:label,
+          child:Material(
+            type:MaterialType.transparency,
+            child:InkWell(
+              key:ValueKey('module-grid-$index'),
+              onTap:()=>onSelect(index),
+              borderRadius:BorderRadius.circular(SalesTheme.controlRadius),
+              child:ConstrainedBox(
+                constraints:const BoxConstraints(minWidth:48,minHeight:48),
+                child:Padding(
+                  padding:const EdgeInsets.symmetric(horizontal:3,vertical:5),
+                  child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[
+                    Icon(icons[index],size:26,color:Theme.of(context).colorScheme.primary),
+                    const SizedBox(height:5),
+                    Flexible(child:Text(label,textAlign:TextAlign.center,
+                      maxLines:2,overflow:TextOverflow.ellipsis,
+                      style:Theme.of(context).textTheme.labelSmall?.copyWith(
+                        fontWeight:FontWeight.w600))),
+                  ]),
+                ),
+              ),
             ),
           ),
         );
