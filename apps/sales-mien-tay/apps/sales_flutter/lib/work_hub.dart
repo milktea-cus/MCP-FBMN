@@ -125,6 +125,34 @@ List<Map<String,dynamic>> mergeTripRoutes(
  }).toList();
 }
 
+/// Open trips and older one-day routes remain visible until explicitly
+/// concluded. No date rollover may mark them complete or delete them.
+List<Map<String,dynamic>> outstandingWorkRoutes(
+ List<Map<String,dynamic>> routes,List<Map<String,dynamic>> selectedRoutes,
+ String selectedDate,String today){
+ if(selectedDate!=today)return [];
+ final seen=<String>{};
+ final overdue=<Map<String,dynamic>>[];
+ for(final r in selectedRoutes){
+  final end=r['trip_end_date']?.toString()??'';
+  if(r['trip_id']!=null&&r['trip_closed_at']==null&&
+     end.length>=10&&end.substring(0,10).compareTo(today)<0&&
+     seen.add(r['id'].toString()))overdue.add(r);
+ }
+ for(final r in routes){
+  final date=r['route_date']?.toString()??'';
+  if(r['trip_id']!=null||date.length<10||
+    date.substring(0,10).compareTo(today)>=0||
+    r['status']!='ready'||r['plan_status']!='planned'||
+    ['done','cancelled'].contains(r['work_session_state'])||
+    !seen.add(r['id'].toString()))continue;
+  overdue.add(r);
+ }
+ overdue.sort((a,b)=>(b['trip_end_date']??b['route_date']).toString()
+   .compareTo((a['trip_end_date']??a['route_date']).toString()));
+ return overdue;
+}
+
 /// Single Sales entry: plan, execute, compare. The legacy route screen stays
 /// readable through old records but is no longer a second route editor.
 class WorkHubPage extends StatefulWidget {
@@ -164,9 +192,9 @@ class _WorkHubPageState extends State<WorkHubPage>{
   try{
    final from=DateTime(day.year,day.month,1),to=DateTime(day.year,day.month+1,0);
    final res=decodeApi(await (widget.service.client?.get(
-    widget.service.uri('/api/v1/trips',{'from':dayKey(from),'to':dayKey(to)}),
+    widget.service.uri('/api/v1/trips',{'from':dayKey(from),'to':dayKey(to),'include_overdue':'1'}),
     headers:widget.service.headers)??
-    http.get(widget.service.uri('/api/v1/trips',{'from':dayKey(from),'to':dayKey(to)}),
+    http.get(widget.service.uri('/api/v1/trips',{'from':dayKey(from),'to':dayKey(to),'include_overdue':'1'}),
     headers:widget.service.headers)).timeout(const Duration(seconds:20)));
    final fresh=(res['items'] as List).map((v)=>Map<String,dynamic>.from(v as Map)).toList();
    // Keep other months offline; replace all records overlapping this query.
@@ -175,7 +203,8 @@ class _WorkHubPageState extends State<WorkHubPage>{
       end=t['end_date']?.toString().substring(0,10)??'';
     return end.compareTo(dayKey(from))<0||start.compareTo(dayKey(to))>0;
    }).toList();
-   trips=[...fresh,...old];
+   final freshIds={for(final t in fresh)t['id'].toString()};
+   trips=[...fresh,...old.where((t)=>!freshIds.contains(t['id'].toString()))];
    try{await widget.queue.cache(tripsCache,trips);}catch(_){}
    if(mounted)setState(()=>offline=false);
   }catch(e){
@@ -200,7 +229,7 @@ class _WorkHubPageState extends State<WorkHubPage>{
    }catch(_){}
    if(mounted)setState((){routes=old;offline=old.isNotEmpty;});
    final uri=widget.service.uri('/api/v1/day-routes',{
-    'month':monthKey(day)});
+    'month':monthKey(day),'include_overdue':'1'});
    final res=decodeApi(await (
     widget.service.client?.get(uri,headers:widget.service.headers)??
     http.get(uri,headers:widget.service.headers))
@@ -340,11 +369,77 @@ class _WorkHubPageState extends State<WorkHubPage>{
     SnackBar(content:Text('Không lưu được thay đổi chuyến: ${e}')));
   }finally{note.dispose();}
  }
+
+ /// Legacy one-day schedule did not have a trip. Recover it on the SAME
+ /// existing route after the user chooses the end date; never guess the
+ /// length of a trip or fabricate work evidence.
+ Future<void> recoverLegacyTrip(Map<String,dynamic> route)async{
+  if(route['trip_id']!=null||route['owner_sub']!=widget.queue.identity)return;
+  final id=route['id']?.toString()??'';
+  final start=route['route_date']?.toString().substring(0,10)??'';
+  final startAt=DateTime.tryParse(start);
+  if(id.isEmpty||startAt==null)return;
+  final today=DateTime.now().toUtc().add(const Duration(hours:7));
+  final firstDay=DateTime(today.year,today.month,today.day);
+  final lastDay=startAt.add(const Duration(days:90));
+  if(firstDay.isAfter(lastDay)){
+   if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+    content:Text('Lịch quá 90 ngày: cần đối chiếu trực tiếp, không tự tạo chuyến mới.')));
+   return;
+  }
+  if(widget.queue.pending.any((op)=>
+    op['path']=='/api/v1/trips'&&
+    (op['payload'] as Map?)?['day_route_id']==id)){
+   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+    content:Text('Chuyến này đang chờ đồng bộ; mở Chi tiết để kiểm tra.')));
+   return;
+  }
+  final kind=route['scope_kind']?.toString()??'';
+  final scopeKey=route['scope_key']?.toString()??'';
+  if(!['territory','chain','customer'].contains(kind)||scopeKey.isEmpty){
+   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+    content:Text('Lịch cũ thiếu phạm vi; không thể khôi phục tự động.')));
+   return;
+  }
+  final end=await showDatePicker(context:context,initialDate:firstDay,
+   firstDate:firstDay,lastDate:lastDay);
+  if(end==null||!mounted)return;
+  final accepted=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(
+   title:const Text('Khôi phục công tác chưa hoàn thành?'),
+   content:Text('Dùng lại tuyến ngày ${start} và toàn bộ lịch sử đã ghi. '
+    'Ngày kết thúc mới: ${dayKey(end)}. Không tạo khách, GPS hay khảo sát giả.'),
+   actions:[
+    TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('Hủy')),
+    FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('Khôi phục')),
+   ]));
+  if(accepted!=true||!mounted)return;
+  final tripId=const Uuid().v4();
+  try{
+   await widget.queue.enqueue('/api/v1/trips',{
+    'client_ref':tripId,'mutation_ref':tripId,'day_route_id':id,
+    'start_date':start,'end_date':dayKey(end),
+    'purpose':route['purpose']??'Công tác',
+    'note':route['note']??'',
+    'scopes':[{'scope_kind':kind,'scope_key':scopeKey,
+     'province':kind=='territory'?route['province']:null,
+     'district':kind=='territory'?route['district']:null}],
+    'priorities':<String>[],
+   });
+   if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+    content:Text('Đã lưu khôi phục trên máy · chờ xác nhận server.')));
+   if(mounted)await load();
+  }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(
+   SnackBar(content:Text('Không khôi phục được chuyến: $e')));}
+ }
+
  List<Map<String,dynamic>> get dayRoutes=>mergeTripRoutes(
   routes,trips,widget.queue.pending,widget.queue.identity,dayKey(day));
  @override Widget build(BuildContext context){
   final today=dayKey(DateTime.now().toUtc().add(const Duration(hours:7)));
-  final totals=WorkCounts.fromRoutes(dayRoutes);
+  final overdue=outstandingWorkRoutes(routes,dayRoutes,dayKey(day),today);
+  final overdueIds={for(final r in overdue)r['id'].toString()};
+  final activeRoutes=dayRoutes.where((r)=>!overdueIds.contains(r['id'].toString())).toList();
+  final totals=WorkCounts.fromRoutes(activeRoutes);
   return Column(children:[
    Padding(padding:const EdgeInsets.fromLTRB(12,12,12,6),child:Column(
     crossAxisAlignment:CrossAxisAlignment.stretch,children:[
@@ -377,7 +472,7 @@ class _WorkHubPageState extends State<WorkHubPage>{
       if(offline)Text('Dữ liệu đã lưu trên máy · chờ đồng bộ.',
        style:Theme.of(context).textTheme.bodySmall),
       if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
-      if(dayRoutes.isEmpty&&!busy)...[
+      if(activeRoutes.isEmpty&&overdue.isEmpty&&!busy)...[
        Padding(padding:const EdgeInsets.all(12),child:Text(
         error!=null||offline
           ?'Chưa xác nhận được tuyến ngày từ máy chủ. Không có nghĩa là lịch bị mất. '
@@ -387,7 +482,7 @@ class _WorkHubPageState extends State<WorkHubPage>{
         icon:const Icon(Icons.calendar_month_outlined),
         label:const Text('Mở Kế hoạch')),
       ],
-      if(tab==2&&dayRoutes.isNotEmpty)Card(child:Padding(
+      if(tab==2&&activeRoutes.isNotEmpty)Card(child:Padding(
        padding:const EdgeInsets.all(12),child:Column(
         crossAxisAlignment:CrossAxisAlignment.start,children:[
          Text('Tổng kết ngày',style:Theme.of(context).textTheme.titleMedium),
@@ -398,7 +493,7 @@ class _WorkHubPageState extends State<WorkHubPage>{
          Text('Ngoài kế hoạch: ${totals.unplanned} điểm · Đã ghé: ${totals.unplannedVisited}'),
         ],
        ))),
-      for(final route in dayRoutes)Builder(builder:(context){
+      for(final route in activeRoutes)Builder(builder:(context){
        final c=WorkCounts.fromRoutes([route]);
        final state=workSessionState(route,widget.queue.pending);
        final own=route['owner_sub']==widget.queue.identity;
@@ -450,6 +545,42 @@ class _WorkHubPageState extends State<WorkHubPage>{
         )),
        ]));
       }),
+      if(overdue.isNotEmpty)...[
+       const SizedBox(height:16),
+       Text('Chưa hoàn thành / Quá hạn (${overdue.length})',
+        key:const ValueKey('overdue-work-heading'),
+        style:Theme.of(context).textTheme.titleMedium),
+       const SizedBox(height:6),
+       for(final route in overdue)Card(
+        key:ValueKey('overdue-work:${route['id']}'),
+        child:Column(children:[
+         ListTile(
+          leading:const Icon(Icons.pending_actions_outlined),
+          title:Text(route['purpose']?.toString()??'Công tác'),
+          subtitle:Text(
+           '${route['trip_id']!=null?'Quá hạn · chưa kết thúc':'Chưa hoàn thành · chưa liên kết chuyến'}'
+           ' · ${(route['trip_end_date']??route['route_date']).toString().substring(0,10)}'),
+          onTap:()=>openRoute(route),
+         ),
+         Wrap(alignment:WrapAlignment.end,spacing:5,runSpacing:3,children:[
+          TextButton.icon(
+           onPressed:()=>openRoute(route),icon:const Icon(Icons.folder_open_outlined),
+           label:const Text('Mở lại')),
+          if(route['owner_sub']==widget.queue.identity&&route['trip_id']==null)
+           OutlinedButton.icon(
+            key:ValueKey('recover-legacy-trip:${route['id']}'),
+            onPressed:()=>recoverLegacyTrip(route),
+            icon:const Icon(Icons.history_outlined),label:const Text('Khôi phục chuyến')),
+          if(route['owner_sub']==widget.queue.identity&&route['trip_id']!=null)...[
+           OutlinedButton.icon(onPressed:()=>mutateTrip(route,close:false),
+            icon:const Icon(Icons.date_range_outlined),label:const Text('Gia hạn')),
+           TextButton.icon(onPressed:()=>mutateTrip(route,close:true),
+            icon:const Icon(Icons.stop_circle_outlined),label:const Text('Kết thúc')),
+          ],
+         ]),
+        ])),
+      ],
+
     ])),
   ]);
  }
