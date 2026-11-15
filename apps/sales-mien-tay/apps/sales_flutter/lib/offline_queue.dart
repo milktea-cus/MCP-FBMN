@@ -815,8 +815,11 @@ class OfflineQueue extends ChangeNotifier {
   if(rawRow is Map){
    final row=Map<String,dynamic>.from(rawRow);
    if(row['namespace']!=namespace)return;
-   if(isRouteDuplicateConflict(row)||isRoutePatchConflict(row)||
-      isPlanDuplicateConflict(row)||isTripDuplicateConflict(row)){
+   // Read-only reconciliation is mandatory for 409, but 400/422 may
+   // be explicitly retried after the user fixes a validation problem.
+   final conflict=(row['error']?.toString()??'').contains('409');
+   if(conflict&&(isRouteDuplicateConflict(row)||isRoutePatchConflict(row)||
+      isPlanDuplicateConflict(row)||isTripDuplicateConflict(row))){
     try{
      final matched=isRoutePatchConflict(row)
       ?await _ackAlreadyAppliedRoutePatch(row)
