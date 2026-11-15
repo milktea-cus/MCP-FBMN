@@ -467,7 +467,7 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
         return Card(clipBehavior:Clip.antiAlias,child:InkWell(
           key:Key('customer-card-${c.id}'),
           onTap:()async{
-            final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>
+            await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>
               CustomerDetail(service:widget.service,customer:c,regions:widget.regions,queue:widget.queue)));
             if(mounted)refresh();
           },
