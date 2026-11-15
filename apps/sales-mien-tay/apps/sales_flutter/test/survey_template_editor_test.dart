@@ -81,7 +81,15 @@ void main(){
   await tester.pumpAndSettle();
   await tester.tap(find.text('Thêm câu'));
   await tester.pumpAndSettle();
-  await tester.enterText(find.text('Nội dung câu hỏi'),'Ghi nhận tại điểm bán');
+  // The expanded editor sits below the scope selector on a phone.
+  // Scroll to the real TextFormField rather than searching its decoration label.
+  final questionLabel=find.byWidgetPredicate((w)=>
+   w is TextFormField && w.key is ValueKey<String> &&
+   (w.key as ValueKey<String>).value.startsWith('label:'));
+  await tester.scrollUntilVisible(questionLabel,220,
+   scrollable:find.byType(Scrollable).first);
+  await tester.pumpAndSettle();
+  await tester.enterText(questionLabel,'Ghi nhận tại điểm bán');
   await tester.tap(find.byKey(const Key('template-publish-button')));
   await tester.pumpAndSettle();
   await tester.tap(find.widgetWithText(FilledButton,'Lưu mẫu').last);
