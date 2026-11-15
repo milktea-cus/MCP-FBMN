@@ -351,7 +351,8 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
   String get cacheKey => 'customers:${widget.service.province}';
   Set<String> _sellingQueueIds()=>{
     for(final op in widget.queue?.pending??<Map<String,dynamic>>[])
-      if(op['method']=='PATCH'&&(op['payload'] as Map?)?['is_selling'] is bool)
+      if(op['method']=='PATCH'&&op['status']!='blocked'&&
+         (op['payload'] as Map?)?['is_selling'] is bool)
         op['path'].toString().split('/').last,
   };
   void _sellingQueueChanged(){
@@ -911,12 +912,24 @@ class _CustomerDetailState extends State<CustomerDetail> {
     if(settled)unawaited(_refreshSelling());
   }
   Future<void> _refreshSelling()async{
+    if(_sellingBusy||!mounted)return;
+    setState(()=>_sellingBusy=true);
+    FieldCustomer? latest;
     try{
-      final next=await widget.service.getById(widget.customer.id);
-      if(!mounted||_accessDenied)return;
-      setState(()=>_sellingCurrent=next);
+      latest=await widget.service.getById(widget.customer.id);
     }catch(_){
-      // A failed network refresh never confirms an unacknowledged mutation.
+      // The outbox is acknowledged only after the server response. A cached
+      // version is safe to use after network loss, but never a queued guess.
+      try{
+        final local=await widget.queue?.cached('customers:');
+        final matching=local?.where((r)=>r['id']==widget.customer.id).firstOrNull;
+        if(matching!=null)latest=FieldCustomer.fromJson(matching);
+      }catch(_){}
+    }finally{
+      if(mounted)setState((){
+        if(latest!=null&&!_accessDenied)_sellingCurrent=latest;
+        _sellingBusy=false;
+      });
     }
   }
   Future<void> _setSelling(bool desired)async{
