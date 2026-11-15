@@ -621,16 +621,7 @@ class _WorkHubPageState extends State<WorkHubPage>{
        final rangeEnd=route['trip_end_date']?.toString().substring(0,10)??'';
        final tripLength=trip?DateTime.parse(rangeEnd).difference(DateTime.parse(rangeStart)).inDays+1:1;
        final progress=trip?DateTime.parse(dayKey(day)).difference(DateTime.parse(rangeStart)).inDays+1:1;
-       final tripState=route['trip_closed_at']!=null?'Đã kết thúc':
-         today.compareTo(rangeStart)<0?'Sắp đến ngày':
-         today.compareTo(rangeEnd)>0?'Quá hạn · có thể gia hạn':'Đang công tác';
        final scopesCount=(route['scopes'] as List?)?.length??1;
-       final status=route['pending_route']==true
-        ?'Lịch đã lưu trên máy · chờ đồng bộ'
-        :route['pending_route_date']==true
-        ?'Ngày mới đã lưu máy · chờ máy chủ xác nhận'
-        :state=='ongoing'?'Đang đi':state=='done'?'Đã kết thúc'
-        :state=='cancelled'?'Đã hủy':'Trong lịch công tác';
        return Card(child:Column(children:[
         ListTile(
          leading:Icon(state=='ongoing'?Icons.directions_walk_outlined:Icons.route_outlined),

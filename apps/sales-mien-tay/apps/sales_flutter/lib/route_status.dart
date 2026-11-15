@@ -8,7 +8,6 @@ import 'work_session_identity.dart';
 enum RouteProgress {planned,running,completed,overdue,awaitingSync,syncError,cancelled}
 
 bool isClosingRoute(Map<String,dynamic> route,List<Map<String,dynamic>> pending){
- final id=route['id']?.toString()??'';
  final owner=route['owner_sub']?.toString()??'';
  final session=workSessionRouteId(route,owner);
  final trip=route['trip_id']?.toString()??'';
