@@ -549,7 +549,15 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
  List<String> officialBrands=[];
  List<FieldCustomer> knownCustomers=[];
  bool busy=false,loadFailed=false;String? message;
- @override void initState(){super.initState();unawaited(load());unawaited(loadBrands());unawaited(loadSuppliers());}
+ @override void initState(){
+  super.initState();
+  WidgetsBinding.instance.addPostFrameCallback((_){
+   if(!mounted)return;
+   unawaited(load());
+   unawaited(loadBrands());
+   unawaited(loadSuppliers());
+  });
+ }
  Future<void> loadBrands()async{
   try{final res=await surveyGet(widget.service,'/api/v1/market/brands');
    if(mounted)setState(()=>officialBrands=asRows(res['items'])
