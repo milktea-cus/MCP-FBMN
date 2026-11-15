@@ -141,6 +141,9 @@ BEGIN
  RETURN to_jsonb(saved);
 END $fbmn$;
 REVOKE ALL ON public.sales_record_areas,public.sales_record_customers,public.sales_scoped_record_audit FROM PUBLIC;
+-- Production default privileges otherwise grant direct mutations to sales_api.
+-- All writes must pass the validated SECURITY DEFINER save function.
+REVOKE ALL ON public.sales_record_areas,public.sales_record_customers,public.sales_scoped_record_audit FROM sales_api;
 GRANT SELECT ON public.sales_record_areas,public.sales_record_customers TO sales_api;
 REVOKE ALL ON FUNCTION public.sales_save_scoped_record(text,text,uuid,uuid,integer,text[],text,uuid[],jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.sales_save_scoped_record(text,text,uuid,uuid,integer,text[],text,uuid[],jsonb) TO sales_api;
