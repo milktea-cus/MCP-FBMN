@@ -175,4 +175,85 @@ void main(){
     first.dispose();reopened.dispose();another.dispose();revised.dispose();reread.dispose();
   });
 
+ test('P0 atomic plan-route-trip graph persists all three or none, with stable UUID',()async{
+  const p='11111111-1111-4111-8111-111111111111',
+    r='22222222-2222-4222-8222-222222222222',
+    t='33333333-3333-4333-8333-333333333333';
+  final factory=newIdbFactoryMemory();
+  final q=OfflineQueue(Disconnected(),'sales-atomic','1',factory:factory);
+  final plan=<String,dynamic>{'client_ref':p,'work_date':'2026-11-14','period_ym':'2026-11',
+   'purpose':'Tìm khách mới','status':'planned'};
+  final route=<String,dynamic>{'client_ref':r,'monthly_plan_id':p,
+   'route_date':'2026-11-14','status':'ready'};
+  final trip=<String,dynamic>{'client_ref':t,'day_route_id':r,
+   'start_date':'2026-11-14','end_date':'2026-11-17',
+   'scopes':[{'scope_kind':'territory','scope_key':'Bến Tre|'}]};
+  await q.enqueueTripGraph(plan:plan,route:route,trip:trip);
+  expect(q.pending.map((x)=>x['path']).toList(),
+   ['/api/v1/monthly-plans','/api/v1/day-routes','/api/v1/trips']);
+  expect(q.pending[0]['depends_on'],isEmpty);
+  expect(q.pending[1]['depends_on'],[p]);
+  expect(q.pending[2]['depends_on'],[r]);
+  await q.enqueueTripGraph(plan:plan,route:route,trip:trip);
+  expect(q.pending,hasLength(3));
+  await expectLater(q.enqueueTripGraph(plan:plan,route:{...route,'monthly_plan_id':t},trip:trip),
+   throwsStateError);
+  expect(q.pending,hasLength(3));
+  final restart=OfflineQueue(Disconnected(),'sales-atomic','1',factory:factory);
+  await restart.reload();
+  expect(restart.pending,hasLength(3));
+  final other=OfflineQueue(Disconnected(),'other','1',factory:factory);
+  await other.reload();expect(other.pending,isEmpty);
+  q.dispose();restart.dispose();other.dispose();
+ });
+
+ test('P0 cancel blocked safely keeps byte-exact payload in recovery cache and restores',()async{
+  const id='44444444-4444-4444-8444-444444444444';
+  final factory=newIdbFactoryMemory();
+  final q=OfflineQueue(Disconnected(),'sales-archive','5',factory:factory);
+  await q.enqueue('/api/v1/day-routes/$id/customer-work',{
+   'client_ref':id,'answers':{'old_question':'Giữ nguyên chữ gốc'}});
+  final key=q.pending.single['key'] as String;
+  final db=await q.db,tx=db.transaction('outbox',idbModeReadWrite);
+  await tx.objectStore('outbox').put({...q.pending.single,
+   'status':'blocked','error':'HTTP 400: Mẫu không hợp lệ'});
+  await tx.completed;await q.reload();
+  expect(q.canRescue(q.pending.single),isTrue);
+  await q.rescueBlocked(key);
+  expect(q.pending,isEmpty);expect(q.rescued,hasLength(1));
+  expect((q.rescued.single['payload'] as Map)['answers'],
+   {'old_question':'Giữ nguyên chữ gốc'});
+  final restart=OfflineQueue(Disconnected(),'sales-archive','5',factory:factory);
+  await restart.reload();
+  expect(restart.rescued,hasLength(1));
+  await restart.restoreRescued(key);
+  expect(restart.rescued,isEmpty);
+  expect(restart.pending.single['status'],'blocked');
+  expect((restart.pending.single['payload'] as Map)['answers'],
+   {'old_question':'Giữ nguyên chữ gốc'});
+  final other=OfflineQueue(Disconnected(),'other','5',factory:factory);
+  await other.reload();expect(other.pending,isEmpty);expect(other.rescued,isEmpty);
+  q.dispose();restart.dispose();other.dispose();
+ });
+
+ test('P0 cannot cancel a blocked parent while dependent trip survives',()async{
+  const p='55555555-5555-4555-8555-555555555555',
+   r='66666666-6666-4666-8666-666666666666',
+   t='77777777-7777-4777-8777-777777777777';
+  final q=OfflineQueue(Disconnected(),'sales-safe','1',factory:newIdbFactoryMemory());
+  await q.enqueueTripGraph(
+   plan:{'client_ref':p,'work_date':'2026-11-14','period_ym':'2026-11'},
+   route:{'client_ref':r,'monthly_plan_id':p,'route_date':'2026-11-14'},
+   trip:{'client_ref':t,'day_route_id':r,'start_date':'2026-11-14',
+    'end_date':'2026-11-16','scopes':[{'scope_kind':'territory','scope_key':'Bến Tre|'}]});
+  final first=q.pending.first,key=first['key'] as String;
+  final db=await q.db,tx=db.transaction('outbox',idbModeReadWrite);
+  await tx.objectStore('outbox').put({...first,'status':'blocked','error':'HTTP 409'});
+  await tx.completed;await q.reload();
+  expect(q.canRescue(q.pending.first),isFalse);
+  await expectLater(q.rescueBlocked(key),throwsStateError);
+  expect(q.pending,hasLength(3));
+  q.dispose();
+ });
+
 }

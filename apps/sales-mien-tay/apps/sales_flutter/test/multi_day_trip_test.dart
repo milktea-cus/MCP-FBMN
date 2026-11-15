@@ -74,5 +74,22 @@ void main(){
   expect(queue.pending,hasLength(4));
   queue.dispose();
  });
+ test('P0 overdue work remains in a separate section across month rollover',(){
+  final old=<String,dynamic>{
+   'id':'33333333-3333-4333-8333-333333333333',
+   'route_date':'2026-10-28','status':'ready',
+   'plan_status':'planned','work_session_state':'open','trip_id':null};
+  final finished={...old,'work_session_state':'done'};
+  final expired=mergeTripRoutes([], [trip(from:'2026-10-01',to:'2026-10-31')],
+   [],'sales-1','2026-11-15');
+  expect(expired,hasLength(1));
+  final rows=outstandingWorkRoutes([old],expired,'2026-11-15','2026-11-15');
+  expect(rows,hasLength(2));
+  expect(rows.map((x)=>x['id']),contains(old['id']));
+  expect(rows.map((x)=>x['trip_id']),contains(tripId));
+  expect(outstandingWorkRoutes([finished],[],'2026-11-15','2026-11-15'),isEmpty);
+  expect(outstandingWorkRoutes([old],expired,'2026-11-14','2026-11-15'),isEmpty);
+ });
+
 }
 

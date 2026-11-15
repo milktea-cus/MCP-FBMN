@@ -20,6 +20,7 @@ void main(){
    queue:queue,onDetails:(){},
   ))));
   expect(find.textContaining('Cần đối chiếu'),findsOneWidget);
+  expect(find.byKey(const ValueKey('sync-banner-close')),findsOneWidget);
   await tester.runAsync(()=>queue.dismissBlockedBanner());
   await tester.pump();
   expect(queue.blockedBannerDismissed,isTrue);
