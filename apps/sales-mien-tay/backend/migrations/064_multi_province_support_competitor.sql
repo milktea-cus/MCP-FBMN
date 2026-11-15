@@ -41,7 +41,6 @@ CREATE OR REPLACE FUNCTION public.sales_save_scoped_record(
 DECLARE original public.sales_records%ROWTYPE;
  saved public.sales_records%ROWTYPE;
  area_name text;
- c record;
  before_value jsonb;
  is_admin boolean;
  has_scope boolean;

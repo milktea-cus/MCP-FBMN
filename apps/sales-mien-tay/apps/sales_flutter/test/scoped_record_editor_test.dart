@@ -45,7 +45,8 @@ void main(){
   await tester.tap(find.text('Xong · 2 tỉnh'));
   await tester.pumpAndSettle();
   expect(find.textContaining('không chọn huyện'),findsOneWidget);
-  await tester.ensureVisible(find.text('Lưu trên máy · Đồng bộ khi có mạng'));
+  await tester.scrollUntilVisible(find.text('Lưu trên máy · Đồng bộ khi có mạng'),240,scrollable:find.byType(Scrollable).first);
+  await tester.pumpAndSettle();
   await tester.tap(find.text('Lưu trên máy · Đồng bộ khi có mạng'));
   await tester.pumpAndSettle();
   expect(queue.pending.length,1);
@@ -78,7 +79,8 @@ void main(){
   await tester.pumpAndSettle();
   await tester.tap(find.text('Xong · 2 khách'));
   await tester.pumpAndSettle();
-  await tester.ensureVisible(find.text('Lưu trên máy · Đồng bộ khi có mạng'));
+  await tester.scrollUntilVisible(find.text('Lưu trên máy · Đồng bộ khi có mạng'),240,scrollable:find.byType(Scrollable).first);
+  await tester.pumpAndSettle();
   await tester.tap(find.text('Lưu trên máy · Đồng bộ khi có mạng'));
   await tester.pumpAndSettle();
   final payload=queue.pending.single['payload'] as Map;
