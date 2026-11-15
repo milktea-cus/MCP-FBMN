@@ -235,7 +235,7 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
               'Tìm trường trên Google Maps (chưa xác minh GPS)',
             onPressed:directions==null?null:()=>_openMaps(school),
             icon:const Icon(Icons.directions_outlined)),
-        ]))));
+        ])));
   }
 
   @override Widget build(BuildContext context){
