@@ -62,7 +62,7 @@ void main(){
   expect(restart.pending.length,1);
   queue.dispose();restart.dispose();
  });
- test('HTTP 409 becomes blocked, user can retry without dropping operation',()async{
+ test('HTTP 409 must not be blindly replayed after a rejected write',()async{
   final factory=newIdbFactoryMemory(),session=ReadyForSync();
   var sends=0;
   final network=MockClient((req)async{
@@ -81,7 +81,7 @@ void main(){
   await queue.sync();
   expect(sends,1);
   await queue.retryBlocked(queue.pending.single['key'].toString());
-  expect(sends,2);
+  expect(sends,1,reason:'Unresolved 409 is not automatically POSTed twice');
   expect(queue.pending.single['status'],'blocked');
   queue.dispose();network.close();
  });
@@ -123,7 +123,7 @@ void main(){
   await q.reload();
   final key=q.pending.single['key'] as String;
   final db=await q.db,t=db.transaction('outbox',idbModeReadWrite);
-  await t.objectStore('outbox').put({...q.pending.single,'status':'blocked','error':'409 conflict'});
+  await t.objectStore('outbox').put({...q.pending.single,'status':'blocked','error':'HTTP 503: Mạng tạm thời'});
   await t.completed;
   await q.reload();
   expect(q.pending.single['status'],'blocked');
