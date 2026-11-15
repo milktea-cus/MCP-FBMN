@@ -81,12 +81,15 @@ class FieldCustomer {
   final DateTime? locationRecordedAt;
   final int version;
   final bool? canPlan;
-  Map<String,dynamic> toJson()=>{'id':id,'owner_sub':owner,'name':name,'code':code,'field_code':fieldCode,'cover_photo_id':coverPhotoId,'address_line':address,'province':province,'district':district,'category':category,'status':status,'phone':phone,'contact_name':contact,'note':note,'latitude':latitude,'longitude':longitude,'location_accuracy_m':locationAccuracy,'location_source':locationSource,'location_recorded_by':locationRecordedBy,'location_recorded_at':locationRecordedAt?.toIso8601String(),'version':version,'can_plan':canPlan};
+  /// Explicit selling confirmation, independent of operational status.
+  final bool isSelling;
+  Map<String,dynamic> toJson()=>{'id':id,'owner_sub':owner,'name':name,'code':code,'field_code':fieldCode,'cover_photo_id':coverPhotoId,'address_line':address,'province':province,'district':district,'category':category,'status':status,'is_selling':isSelling,'phone':phone,'contact_name':contact,'note':note,'latitude':latitude,'longitude':longitude,'location_accuracy_m':locationAccuracy,'location_source':locationSource,'location_recorded_by':locationRecordedBy,'location_recorded_at':locationRecordedAt?.toIso8601String(),'version':version,'can_plan':canPlan};
   FieldCustomer.fromJson(Map<String, dynamic> j)
       : id = j['id'].toString(), name = j['name'].toString(),
         owner = j['owner_sub'] as String?, code = j['code'] as String?,fieldCode=j['field_code'] as String?,coverPhotoId=j['cover_photo_id'] as String?, address = j['address_line'].toString(), province = j['province'].toString(),
         district = j['district'].toString(), category = j['category'].toString(),
-        status = j['status'].toString(), phone = j['phone'] as String?,
+        status = j['status'].toString(), isSelling=j['is_selling']==true,
+         phone = j['phone'] as String?,
         contact = j['contact_name'] as String?, note = j['note'] as String?,
         latitude = (j['latitude'] as num?)?.toDouble(),
         longitude = (j['longitude'] as num?)?.toDouble(),
@@ -141,6 +144,12 @@ class CustomerService {
       if(page.length<100)break;
     }
     return items;
+  }
+  Future<FieldCustomer> getById(String id)async{
+    final url=uri('/api/v1/customers/$id');
+    final res=await (client?.get(url,headers:headers)??
+      http.get(url,headers:headers)).timeout(const Duration(seconds:20));
+    return FieldCustomer.fromJson(Map<String,dynamic>.from(decode(res)['item'] as Map));
   }
   Future<FieldCustomer> add(Map<String, dynamic> data) async {
     final url=uri('/api/v1/customers');
@@ -306,6 +315,24 @@ String customerLocationLabel(String? source)=>switch(source){
   _=>'Chưa rõ nguồn · mốc cũ được bảo vệ',
 };
 
+/// A blocked write is never presented as a confirmed sale.
+Map<String,dynamic>? pendingCustomerSelling(OfflineQueue? queue,String id){
+  if(queue==null)return null;
+  for(final row in queue.pending.reversed){
+    if(row['path']=='/api/v1/customers/$id'&&row['method']=='PATCH'&&
+       row['status']!='blocked'&&
+       (row['payload'] as Map?)?['is_selling'] is bool)return row;
+  }
+  return null;
+}
+bool customerSellingForDisplay(FieldCustomer c,OfflineQueue? queue){
+  final row=pendingCustomerSelling(queue,c.id);
+  return row==null?c.isSelling:(row['payload'] as Map)['is_selling']==true;
+}
+bool hasCustomerPatchPending(OfflineQueue? queue,String id)=>
+  queue?.pending.any((r)=>r['path']=='/api/v1/customers/$id'&&
+    r['method']=='PATCH')??false;
+
 class CustomerDirectoryPage extends StatefulWidget {
   final CustomerService service;
   final RegionCatalog regions;
@@ -320,11 +347,33 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
   List<FieldCustomer>? completeSnapshot;
   bool loading = false, openingCache = true;
   String? error;
+  Set<String> _pendingSellingIds={};
   String get cacheKey => 'customers:${widget.service.province}';
+  Set<String> _sellingQueueIds()=>{
+    for(final op in widget.queue?.pending??<Map<String,dynamic>>[])
+      if(op['method']=='PATCH'&&(op['payload'] as Map?)?['is_selling'] is bool)
+        op['path'].toString().split('/').last,
+  };
+  void _sellingQueueChanged(){
+    if(!mounted)return;
+    final next=_sellingQueueIds();
+    if(_pendingSellingIds.length==next.length&&
+       _pendingSellingIds.difference(next).isEmpty)return;
+    final completed=_pendingSellingIds.difference(next).isNotEmpty;
+    _pendingSellingIds=next;
+    setState((){});
+    if(completed)unawaited(refresh());
+  }
+  @override void dispose(){
+    widget.queue?.removeListener(_sellingQueueChanged);
+    super.dispose();
+  }
 
   @override
   void initState() {
     super.initState();
+    _pendingSellingIds=_sellingQueueIds();
+    widget.queue?.addListener(_sellingQueueChanged);
     // Render account-scoped IndexedDB/SQLite before contacting the server.
     unawaited(_openDirectory());
   }
@@ -413,21 +462,28 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
       : ListView.builder(itemCount: customers.length, itemBuilder: (ctx,i) {
         final c = customers[i];
         final category = CustomerCategory.fromId(c.category);
+        final sellingPending=pendingCustomerSelling(widget.queue,c.id)!=null;
         return Card(clipBehavior:Clip.antiAlias,child:InkWell(
           key:Key('customer-card-${c.id}'),
           onTap:()async{
             final changed=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>
               CustomerDetail(service:widget.service,customer:c,regions:widget.regions,queue:widget.queue)));
-            if(changed==true&&mounted)refresh();
+            if(mounted)refresh();
           },
           child:Padding(padding:const EdgeInsets.fromLTRB(10,8,8,8),
             child:Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
               Padding(padding:const EdgeInsets.only(top:4),
-                child:i<4&&c.coverPhotoId!=null&&widget.queue!=null
-                  ?CustomerDirectoryCover(
-                     key:ValueKey('customer-cover:'+c.id+':'+c.coverPhotoId!),
-                     service:widget.service,customer:c,queue:widget.queue!)
-                  :CustomerCategoryAvatar(category:c.category)),
+                child:Column(mainAxisSize:MainAxisSize.min,children:[
+                  i<4&&c.coverPhotoId!=null&&widget.queue!=null
+                    ?CustomerDirectoryCover(
+                       key:ValueKey('customer-cover:'+c.id+':'+c.coverPhotoId!),
+                       service:widget.service,customer:c,queue:widget.queue!)
+                    :CustomerCategoryAvatar(category:c.category),
+                  const SizedBox(height:5),
+                  CustomerSellingDot(key:ValueKey('selling-dot:${c.id}'),
+                    isSelling:customerSellingForDisplay(c,widget.queue),
+                    pending:sellingPending),
+                ])),
               const SizedBox(width:8),
               Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
                 Text(c.name,maxLines:2,overflow:TextOverflow.ellipsis,
