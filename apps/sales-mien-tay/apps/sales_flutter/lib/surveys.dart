@@ -121,7 +121,17 @@ class _SurveyPageState extends State<SurveyPage>{
   try{
    final params={'day':dayKey(day),'period':period,'province':widget.service.province};
    final values=await Future.wait([list('/api/v1/routes',params,'routes-v2:$period:${dayKey(day)}:${widget.service.province}'),list('/api/v1/sessions',params,'surveys:$key'),widget.queue.cached('survey-drafts')]);
-   try{final t=asRows((await surveyGet(widget.service,'/api/v1/survey-templates'))['items']);for(final item in t){await widget.queue.cache('survey-template:${item['province']}',[item]);}}catch(e){if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;}
+   try{
+    final rows=asRows((await surveyGet(widget.service,'/api/v1/survey-templates'))['items']);
+    for(final p in widget.regions.provinces){
+     final matches=rows.where((f){
+      final ps=(f['provinces'] as List?)??[];
+      return ps.isEmpty||ps.contains(p);
+     }).toList();
+     await widget.queue.cache('survey-template:'+p,matches);
+     await widget.queue.cache('survey-forms:'+p,matches);
+    }
+   }catch(e){if(e is ApiFailure&&(e.status==401||e.status==403))rethrow;}
    final newStops=await scheduledDayRouteStops();
     if(mounted)setState((){routes=[...values[0],...newStops];sessions=values[1];drafts=values[2];if(!routes.any((r)=>r['district']==district))district='';if(!routes.any((r)=>r['owner_sub']==employee))employee='';});
   }catch(e){if(mounted)setState((){error=e.toString();if(e is ApiFailure&&(e.status==401||e.status==403)){routes=[];sessions=[];drafts=[];}});}
@@ -146,18 +156,24 @@ class _SurveyPageState extends State<SurveyPage>{
   final d=await showDatePicker(context:context,initialDate:day,firstDate:DateTime(2020),lastDate:DateTime(2100));
   if(d!=null&&mounted){setState((){day=d;routes=[];sessions=[];});await load();}
  }
- Future<Map<String,dynamic>> template(String province)async{
+ Future<Map<String,dynamic>?> template(String province)async{
   final items=await list('/api/v1/survey-templates',{'province':province},'survey-template:$province');
-  final selected=items.where((row)=>row['province']==province).firstOrNull;
-  if(selected==null)throw StateError('Chưa có mẫu khảo sát tỉnh này trên máy; cần đồng bộ hoặc Admin tạo mẫu.');
-  return selected;
+  final available=items.where((row)=>row['form_id']!=null).toList();
+  if(available.isEmpty)throw StateError('Chưa có mẫu áp dụng cho tỉnh này; cần đồng bộ hoặc Admin tạo mẫu.');
+  if(available.length==1)return available.first;
+  if(!mounted)return null;
+  return showDialog<Map<String,dynamic>>(context:context,builder:(c)=>SimpleDialog(
+   title:const Text('Chọn mẫu khảo sát'),
+   children:[for(final item in available)SimpleDialogOption(
+    onPressed:()=>Navigator.pop(c,item),
+    child:Text(item['title']?.toString()??'Mẫu làm việc'))]));
  }
  bool canStart(Map<String,dynamic> row)=>row['owner_sub']==widget.queue.identity||row['planned']!=true&&row['can_fieldwork']==true;
  Future<void> begin(Map<String,dynamic> row)async{
   if(busy||!canStart(row)||!isToday(row))return;
   setState(()=>busy=true);
   try{
-   final t=await template(row['province'].toString());if(!mounted)return;
+   final t=await template(row['province'].toString());if(!mounted||t==null)return;
    final saved=row['last_checkin'];
    final verified=saved is Map&&saved['client_ref']!=null&&
     saved['latitude'] is num&&saved['longitude'] is num&&saved['accuracy_m'] is num&&
@@ -180,7 +196,7 @@ class _SurveyPageState extends State<SurveyPage>{
    final longitude=verified==null?pos!.longitude:(verified['longitude'] as num).toDouble();
    final accuracy=verified==null?pos!.accuracy:(verified['accuracy_m'] as num).toDouble();
    final payload=<String,dynamic>{'client_ref':id,'customer_id':row['customer_id'],'route_stop_id':row['planned']==true&&row['day_route_stop_id']==null?row['id']:null,'day_route_stop_id':row['day_route_stop_id'],'template_id':t['id'],'started_at':started,'latitude':latitude,'longitude':longitude,'accuracy_m':accuracy,if(first)'initialize_location':true,if(verified!=null)'visit_ref':verified['client_ref']};
-   final draft=<String,dynamic>{...payload,'id':id,'owner_sub':widget.queue.identity,'province':row['province'],'district':row['district'],'customer_name':row['name'],'template_version':t['version'],'questions':t['questions'],'status':'in_progress','location_initialized':first,'start_op':id,'version':1,'answers':<String,dynamic>{},'note':'','photos':<Map<String,dynamic>>[]};
+   final draft=<String,dynamic>{...payload,'id':id,'owner_sub':widget.queue.identity,'province':row['province'],'district':row['district'],'customer_name':row['name'],'template_version':t['version'],'template_title':t['title'],'questions':t['questions'],'status':'in_progress','location_initialized':first,'start_op':id,'version':1,'answers':<String,dynamic>{},'note':'','photos':<Map<String,dynamic>>[]};
    final sessionDeps=<String>[
     for(final job in widget.queue.pending)
      if(widget.initialStop?['day_route_id']!=null&&
@@ -208,7 +224,7 @@ class _SurveyPageState extends State<SurveyPage>{
    final chosen=await showDialog<Map<String,dynamic>>(context:context,builder:(c)=>AlertDialog(title:Text(row['name'].toString()),content:SizedBox(width:420,child:ListView(shrinkWrap:true,children:[
     Text(row['is_unplanned']==true?'Ngoài kế hoạch':row['planned']==true?'Theo lịch ${(row['data'] as Map)['plannedDate']}':'Ngoài tuyến · ghé đột xuất'),
     if(history.isEmpty)const Text('Chưa có phiên khảo sát.'),
-    for(final s in history)ListTile(title:Text(surveyStatus(s)),subtitle:Text('${s['started_at']} · Mẫu v${s['template_version']} · ${s['route_stop_id']==null?'Ngoài tuyến':'Theo tuyến'}'),onTap:()=>Navigator.pop(c,s)),
+    for(final s in history)ListTile(title:Text(surveyStatus(s)),subtitle:Text('${s['started_at']} · Mẫu ${s['template_version']} · ${s['route_stop_id']==null?'Ngoài tuyến':'Theo tuyến'}'),onTap:()=>Navigator.pop(c,s)),
    ])),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng')),if(canStart(row)&&isToday(row))FilledButton(onPressed:()=>Navigator.pop(c,{'new':true}),child:const Text('Bắt đầu phiên mới'))]));
    if(chosen==null||!mounted)return;
    if(chosen['new']==true){await begin(row);}else{await open(chosen);}
@@ -490,7 +506,7 @@ class _SurveyDetailState extends State<SurveyDetail>{
   if(denied)return Scaffold(appBar:AppBar(title:const Text('Phiên khảo sát')),body:const Center(child:Text('Không còn quyền truy cập phiên này.')));
   return Scaffold(appBar:AppBar(title:const Text('Phiên khảo sát'),actions:[IconButton(onPressed:busy?null:load,tooltip:'Tải lại phiên',icon:const Icon(Icons.sync))]),
    body:ListView(padding:const EdgeInsets.all(16),children:[
-    Text(draft['customer_name'].toString(),style:Theme.of(context).textTheme.titleLarge),Text('${draft['district']}, ${draft['province']} · Mẫu v${draft['template_version']}'),
+    Text(draft['customer_name'].toString(),style:Theme.of(context).textTheme.titleLarge),Text('${draft['district']}, ${draft['province']} · Mẫu ${draft['template_version']}'),
     Text(draft['route_stop_id']==null?'Ngoài tuyến':'Theo tuyến'),Text(surveyStatus(draft),style:Theme.of(context).textTheme.titleMedium),
     Text('Bắt đầu: ${draft['started_at']}'),if(draft['ended_at']!=null)Text('Kết thúc: ${draft['ended_at']}'),
     Text('GPS: ${draft['latitude']}, ${draft['longitude']} · Sai số ${draft['accuracy_m']} m'),

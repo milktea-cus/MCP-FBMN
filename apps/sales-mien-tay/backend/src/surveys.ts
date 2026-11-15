@@ -80,7 +80,7 @@ export function validateSurveyAnswers(template:Question[],value:unknown):string|
  return null;
 }
 async function getSession(db:Db,actor:Actor,id:string){
- const rows=await db`SELECT s.*,c.name AS customer_name,t.version AS template_version,t.questions
+ const rows=await db`SELECT s.*,c.name AS customer_name,t.version AS template_version,t.title AS template_title,t.questions
  FROM field_survey_sessions s JOIN customers c ON c.id=s.customer_id JOIN field_survey_templates t ON t.id=s.template_id
  WHERE s.id=${id}::uuid AND public.sales_customer_allowed(${actor.sub},c.id,'view')`;
  return rows[0]??null;
@@ -286,9 +286,11 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   const distance=first?0:meters(c.latitude,c.longitude,v.latitude as number,v.longitude as number);
   if(distance>200)return bad('GPS cách điểm bán '+Math.round(distance)+'m, vượt bán kính 200m. Kiểm tra địa chỉ hoặc tọa độ đã lưu.',422);
   const template=await db`SELECT t.id FROM public.field_survey_templates t
-    JOIN public.field_survey_forms f ON f.id=t.form_id
-    WHERE t.id=${tid}::uuid AND f.status='active'
-      AND (cardinality(f.provinces)=0 OR ${c.province}=ANY(f.provinces))`;
+    LEFT JOIN public.field_survey_forms f ON f.id=t.form_id
+    WHERE t.id=${tid}::uuid
+      AND ((f.id IS NULL AND t.province=${c.province})
+       OR (f.id IS NOT NULL AND f.status='active'
+        AND (cardinality(f.provinces)=0 OR ${c.province}=ANY(f.provinces))))`;
   if(!template.length)return bad('Mẫu không thuộc tỉnh điểm bán',409);
   if(rid){const stops=await db`SELECT id FROM sales_records WHERE id=${rid}::uuid AND kind='visit' AND owner_sub=${actor.sub} AND data->>'customerId'=${cid} AND data->>'plannedDate'=${vnDay(started)} AND public.sales_can_access(${actor.sub},owner_sub,province,district)`;if(!stops.length)return bad('Điểm ghé không thuộc tuyến/ngày thực tế',409);}
   if(drid){
