@@ -36,7 +36,11 @@ def oidc():
 
 
 def call(path, method="GET", payload=None, headers=None, stream=False):
-    authorization = {"Authorization": "Bearer " + oidc()}
+    # Cloudflare workers.dev Browser Integrity Check rejects Python-urllib default UA (1010).
+    # Identify this legitimate CI client; OIDC remains required by the Worker.
+    authorization = {"Authorization": "Bearer " + oidc(),
+                     "User-Agent": "FieldWork-Release-Publisher/1.0 (+https://github.com/milktea-cus/MCP-FBMN)",
+                     "Accept": "application/json"}
     if headers:
         authorization.update(headers)
     if isinstance(payload, dict):
