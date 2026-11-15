@@ -149,7 +149,7 @@ jobs:
       - run: flutter create --platforms=web,android .
       - run: flutter pub get
       - name: Validate form API error, recovery and activation in isolated test process
-        run: timeout 70s flutter test test/template_lifecycle_test.dart
+        run: timeout 70s flutter test --reporter expanded --concurrency=1 test/template_lifecycle_test.dart
   dependency-and-layout:
     name: Source / Data & secret guards
     runs-on: ubuntu-latest
