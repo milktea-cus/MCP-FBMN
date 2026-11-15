@@ -188,14 +188,12 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   }
   const prior=await db`SELECT t.id,t.form_id,t.title,t.questions,
     f.name,f.provinces,f.revision FROM public.field_survey_templates t
-    JOIN public.field_survey_forms f ON f.id=t.form_id WHERE t.id=${ref}::uuid`;
-  if(prior.length){
-   const p=prior[0];
-   return p.form_id===formId&&p.title===name&&
-     JSON.stringify(p.questions)===JSON.stringify(qs)
-     ?json({item:p,idempotent:true})
-     :bad('Mã thao tác đã dùng cho nội dung khác',409);
-  }
+    JOIN public.field_survey_forms f ON f.id=t.form_id
+    WHERE t.id=${ref}::uuid AND t.form_id=${formId}::uuid
+      AND t.title=${name} AND t.questions=${JSON.stringify(qs)}::jsonb`;
+  if(prior.length)return json({item:prior[0],idempotent:true});
+  const refUsed=await db`SELECT id FROM public.field_survey_templates WHERE id=${ref}::uuid`;
+  if(refUsed.length)return bad('Mã thao tác đã dùng cho nội dung khác',409);
   // Publish and switch the active snapshot atomically. Historical answers
   // retain their original template_id; a scope is a property of the form.
   const rows=await db`SELECT public.sales_publish_survey_form(

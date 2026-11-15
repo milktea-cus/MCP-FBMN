@@ -61,8 +61,11 @@ BEGIN
  IF NOT FOUND THEN RETURN NEW; END IF;
  SELECT c.province INTO customer_province FROM public.customers c
  WHERE c.id=NEW.customer_id;
- submitted_at:=CASE WHEN TG_TABLE_NAME='field_survey_sessions'
-  THEN NEW.started_at ELSE NEW.captured_at END;
+ IF TG_TABLE_NAME='field_survey_sessions' THEN
+  submitted_at:=NEW.started_at;
+ ELSE
+  submitted_at:=NEW.captured_at;
+ END IF;
  IF customer_province IS NULL OR
   (cardinality(form_record.provinces)>0
    AND NOT (customer_province=ANY(form_record.provinces))) OR
