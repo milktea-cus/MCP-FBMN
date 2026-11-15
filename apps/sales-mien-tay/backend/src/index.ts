@@ -5,6 +5,7 @@ import {orgRoutes} from './org';
 import districts from './districts_old.json';
 import {customerRoutes} from './customers';
 import {scopedRecordRoutes} from './scoped_records';
+import {schoolRoutes} from './schools';
 import {assortmentRoutes} from './assortment';
 import {surveyRoutes} from './surveys';
 import {monthlyPlanRoutes} from './monthly_plans';
@@ -175,6 +176,8 @@ export default {
         return json({districts:allowed,kinds});
       }
       if (!env.DATABASE_URL) return bad('DATABASE_URL chưa được cấu hình', 503);
+      const schoolsResponse=await schoolRoutes(req,env,user,url);
+      if(schoolsResponse)return schoolsResponse;
       const scopedResponse=await scopedRecordRoutes(req,env,user,url);
       if(scopedResponse)return scopedResponse;
       const marketResponse=await marketRoutes(req,env,user,url);
