@@ -401,8 +401,7 @@ void main(){
   expect(service.galleryResponse.isCompleted,isFalse);
   expect(service.visitResponse.isCompleted,isFalse);
   await tester.tap(find.text('Hình ảnh'));
-  await tester.pump();
-  await tester.pump();
+  await tester.pumpAndSettle();
   expect(find.text('Hình ảnh cửa hàng · 1'),findsOneWidget,
    reason:'Cached metadata is visible before independent server requests');
   expect(find.byType(Image),findsWidgets);
