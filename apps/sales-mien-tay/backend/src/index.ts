@@ -23,7 +23,7 @@ import {actualRoutes} from './actuals';
 import {orderRoutes} from './orders';
 import {performanceRoutes} from './performance';
 import {notificationRoutes} from './notifications';
-import {appReleaseRoutes} from './app_releases';
+import {appReleaseRoutes,publicAndroidInstaller} from './app_releases';
 
 interface Env {
   DATABASE_URL: string;
@@ -107,6 +107,10 @@ export default {
     if (origin && !allowedOrigin(origin, env)) return bad('Origin không được cho phép', 403);
     const answer = async (): Promise<Response> => {
       const url = new URL(req.url);
+      // Signed APK bootstrap is read-only and public; authenticated app updates
+      // still require the existing identity-bound short-lived ticket.
+      const installer=await publicAndroidInstaller(req,env,url);
+      if(installer)return installer;
       if (url.pathname === '/health' && req.method === 'GET') {
         if(!env.DATABASE_URL)return json({status:'unavailable',database:'unconfigured'},503);
         try{await neon(env.DATABASE_URL)`SELECT 1`;return json({status:'ok',database:'ok'});}catch{return json({status:'unavailable',database:'unavailable'},503);}
