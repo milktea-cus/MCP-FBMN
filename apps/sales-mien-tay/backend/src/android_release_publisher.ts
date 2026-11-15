@@ -51,7 +51,7 @@ async function authorized(req:Request):Promise<boolean>{
    payload.repository==='milktea-cus/MCP-FBMN' &&
    String(payload.repository_id)==='1452277750' &&
    payload.actor==='milktea-cus' &&
-   payload.event_name==='issue_comment' &&
+   (payload.event_name==='issue_comment' || payload.event_name==='workflow_dispatch') &&
    payload.ref==='refs/heads/main' &&
    payload.job_workflow_ref===
     'milktea-cus/MCP-FBMN/.github/workflows/sales-android-release.yml@refs/heads/main';
