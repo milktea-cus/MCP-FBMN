@@ -97,8 +97,9 @@ class RouteStatusChip extends StatelessWidget {
     borderRadius:BorderRadius.circular(SalesTheme.controlRadius)),
    child:Row(mainAxisSize:MainAxisSize.min,children:[
     Icon(icon,size:14,color:color),const SizedBox(width:4),
-    Text(routeProgressLabel(progress),style:TextStyle(
-     color:color,fontWeight:FontWeight.w700,fontSize:12)),
+    Flexible(child:Text(routeProgressLabel(progress),maxLines:1,
+     overflow:TextOverflow.ellipsis,softWrap:false,style:TextStyle(
+     color:color,fontWeight:FontWeight.w700,fontSize:12))),
    ]),
   );
  }
