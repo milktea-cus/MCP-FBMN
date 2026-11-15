@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'app_update_page.dart';
+import 'schools_page.dart';
 import 'pwa_update_page.dart';
 import 'api.dart';
 import 'customers.dart';
@@ -107,11 +108,11 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
   bool _brandLoaded=false;
   List<int> get _visibleMenuIndices=>[for(var i=0;i<_sections.length;i++)if(widget.me['role']=='admin'||i!=2)i];
 
-  List<String> get _sections => ['Tổng quan', 'Khách hàng / Điểm bán', ...moduleKinds.map((e) => e=='survey'?'Quản trị khảo sát':e=='visit'?'Công tác':moduleLabels[e]!), 'Báo cáo tháng', 'Danh mục SKU', 'Tra tồn', 'Ra đơn'];
+  List<String> get _sections => ['Tổng quan', 'Khách hàng / Điểm bán', ...moduleKinds.map((e) => e=='survey'?'Quản trị khảo sát':e=='visit'?'Công tác':moduleLabels[e]!), 'Báo cáo tháng', 'Danh mục SKU', 'Tra tồn', 'Ra đơn', 'Trường Học'];
   List<IconData> get _icons => const [
     Icons.dashboard_outlined, Icons.storefront_outlined, Icons.store_outlined, Icons.flag_outlined,
     Icons.payments_outlined, Icons.route_outlined, Icons.handshake_outlined,
-    Icons.policy_outlined, Icons.support_agent_outlined, Icons.analytics_outlined, Icons.inventory_2_outlined, Icons.inventory_outlined,Icons.shopping_cart_outlined,
+    Icons.policy_outlined, Icons.support_agent_outlined, Icons.analytics_outlined, Icons.inventory_2_outlined, Icons.inventory_outlined,Icons.shopping_cart_outlined,Icons.school_outlined,
   ];
 
   @override
@@ -478,7 +479,7 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
             NavigationRailDestination(icon: Icon(_icons[i]), label: Text(_sections[i]))],
         ),
         Expanded(child: Column(children: [
-          if(_selectedIndex!=3&&_selectedIndex!=5&&_selectedIndex!=10&&_selectedIndex!=11&&_selectedIndex!=12)Padding(padding:const EdgeInsets.all(12),child:DropdownButtonFormField<String>(initialValue:_province,isExpanded:true,decoration:const InputDecoration(labelText:'Địa bàn'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả địa bàn của tôi')),for(final p in _catalog.provinces)DropdownMenuItem(value:p,child:Text(p))],onChanged:(p)=>setState(()=>_province=p??''))),
+          if(_selectedIndex!=3&&_selectedIndex!=5&&_selectedIndex!=10&&_selectedIndex!=11&&_selectedIndex!=12&&_selectedIndex!=13)Padding(padding:const EdgeInsets.all(12),child:DropdownButtonFormField<String>(initialValue:_province,isExpanded:true,decoration:const InputDecoration(labelText:'Địa bàn'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả địa bàn của tôi')),for(final p in _catalog.provinces)DropdownMenuItem(value:p,child:Text(p))],onChanged:(p)=>setState(()=>_province=p??''))),
           _syncBanner(),
           // This is a records/overview cache warning, not a WorkHub sync
           // failure. Never place pale-on-pale text over the Công tác screen.
@@ -491,7 +492,8 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
               ? CustomerDirectoryPage(key:ValueKey('customers:${_queue.namespace}:$_province'),service:CustomerService(_apiUrl,_accessToken,province:_province,identity:_queue.identity,revision:_queue.revision),regions:_catalog,queue:_queue)
               : _selectedIndex==2?SurveyPage(key:ValueKey('survey:$_province'),queue:_queue,service:_customerService,regions:_catalog,admin:widget.me['role']=='admin',legacy:(_)=>Scaffold(appBar:AppBar(title:const Text('Biểu mẫu khảo sát cũ')),body:_records('survey',readOnly:true)))
               : _selectedIndex==3?TargetPage(key:ValueKey('target:${_queue.namespace}'),queue:_queue)
-              : _selectedIndex==12?OrdersPage(key:ValueKey('orders:${_queue.namespace}'),queue:_queue,admin:widget.me['role']=='admin')
+              : _selectedIndex==13?SchoolDirectoryPage(key:ValueKey('schools:${_queue.namespace}'),queue:_queue,session:widget.session)
+               : _selectedIndex==12?OrdersPage(key:ValueKey('orders:${_queue.namespace}'),queue:_queue,admin:widget.me['role']=='admin')
               : _selectedIndex==11?StockPage(key:ValueKey('stock:${_queue.namespace}'),queue:_queue,service:CustomerService(_apiUrl,_accessToken,identity:_queue.identity,revision:_queue.revision))
               : _selectedIndex==10?CatalogPage(queue:_queue,service:CustomerService(_apiUrl,_accessToken,identity:_queue.identity,revision:_queue.revision),admin:widget.me['role']=='admin')
               : _selectedIndex==9?PerformancePage(key:ValueKey('report:${_queue.namespace}'),queue:_queue,regions:_catalog,service:_customerService)
