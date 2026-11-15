@@ -56,8 +56,7 @@ BEGIN
   OR p_provinces IS NULL OR cardinality(p_provinces) NOT BETWEEN 1 AND 13
   OR p_customer_ids IS NULL OR cardinality(p_customer_ids)>1000
  THEN RAISE EXCEPTION 'SCOPED_INVALID'; END IF;
- IF (p_kind='support' AND cardinality(p_customer_ids)>0)
-  OR (cardinality(p_provinces)>1 AND clean_district<>'')
+ IF (cardinality(p_provinces)>1 AND clean_district<>'')
   OR length(clean_district)>120
   OR (cardinality(p_provinces)<> (SELECT count(DISTINCT x) FROM unnest(p_provinces) x))
   OR (cardinality(p_customer_ids)<> (SELECT count(DISTINCT x) FROM unnest(p_customer_ids) x))
@@ -111,7 +110,7 @@ BEGIN
       AND g.scope_key IN (
         area_name||'|',CASE WHEN clean_district<>'' THEN area_name||'|'||clean_district ELSE '' END)
    ) OR (
-    p_kind='competitor' AND cardinality(p_customer_ids)>0 AND EXISTS(
+    cardinality(p_customer_ids)>0 AND EXISTS(
       SELECT 1 FROM public.customers c
       WHERE c.id=ANY(p_customer_ids) AND c.province=area_name
         AND public.sales_customer_allowed(p_actor,c.id,'view'))

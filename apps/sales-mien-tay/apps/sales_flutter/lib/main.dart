@@ -397,7 +397,8 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
                  ?provinces.join(', '):record.province??'';
                detail=provinceText;
                if(record.district!=null&&record.district!.isNotEmpty)detail+=' · ${record.district}';
-               if(kind=='competitor')detail+=' · ${(record.data['customerIds'] as List?)?.length??0} khách';
+               final linked=(record.data['customerIds'] as List?)?.length??0;
+               if(linked>0)detail+=' · $linked khách';
              }
              if (kind == 'survey') {
               detail = 'NPP: ${record.data['distributorCount'] ?? 0} · '
@@ -411,7 +412,8 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
                  if(_recordPending(record))Icon(_recordBlocked(record)?Icons.error_outline:Icons.cloud_upload_outlined,
                    color:_recordBlocked(record)?Theme.of(context).colorScheme.error:null)
                  else const Icon(Icons.cloud_done_outlined),
-                 if(!_recordPending(record)&&(record.owner==_queue.identity||widget.me['role']=='admin'))
+                 if((!_recordPending(record)||record.version==0)&&!_recordBlocked(record)&&
+                     (record.owner==_queue.identity||widget.me['role']=='admin'))
                   IconButton(tooltip:'Sửa bản ghi',icon:const Icon(Icons.edit_outlined),
                     onPressed:()=>_editScopedRecord(record)),
                 ]):['target','forecast'].contains(kind)&&record.owner==_queue.identity?IconButton(tooltip:'Sửa kế hoạch',icon:const Icon(Icons.edit_outlined),onPressed:()=>_editPlan(record)):const Icon(Icons.cloud_done_outlined),

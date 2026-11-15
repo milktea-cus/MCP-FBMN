@@ -88,4 +88,82 @@ void main(){
   expect(payload['version'],0);
   queue.dispose();
  });
+ test('offline scoped draft can be edited without creating a PATCH or losing original operation',()async{
+  final factory=newIdbFactoryMemory();
+  final queue=OfflineQueue(OfflineSession(),'editor','4',factory:factory);
+  const id='33333333-3333-4333-8333-333333333333';
+  final payload=<String,dynamic>{
+   'client_ref':id,'kind':'support','version':0,
+   'provinces':['Bến Tre'],'district':'','customer_ids':<String>[],
+   'data':{'title':'Ban đầu'}
+  };
+  await queue.enqueue('/api/v1/scoped-records',payload);
+  await queue.replaceScopedDraft(id,{...payload,'data':{'title':'Đã sửa lúc offline'}});
+  final reopened=OfflineQueue(OfflineSession(),'editor','4',factory:factory);
+  await reopened.reload();
+  expect(reopened.pending.length,1);
+  expect(reopened.pending.single['method'],'POST');
+  expect(reopened.pending.single['payload']['client_ref'],id);
+  expect(reopened.pending.single['payload']['data']['title'],'Đã sửa lúc offline');
+  final other=OfflineQueue(OfflineSession(),'different','4',factory:factory);
+  await other.reload();
+  expect(other.pending,isEmpty);
+  await expectLater(reopened.replaceScopedDraft('44444444-4444-4444-8444-444444444444',payload),
+    throwsA(isA<ArgumentError>()));
+  queue.dispose();reopened.dispose();other.dispose();
+ });
+ testWidgets('support can link selected customers and save real IDs',(tester)async{
+  final queue=OfflineQueue(OfflineSession(),'owner-c','9',factory:newIdbFactoryMemory());
+  await tester.pumpWidget(MaterialApp(home:ScopedRecordEditor(
+   kind:'support',regions:regions,queue:queue,service:const PickerCustomers(),onSaved:(){})));
+  await tester.pumpAndSettle();
+  await tester.enterText(find.byType(TextFormField).first,'Đề nghị hàng trưng bày');
+  await tester.tap(find.text('Chọn tỉnh'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.widgetWithText(CheckboxListTile,'Tiền Giang'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Xong · 1 tỉnh'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Chọn khách hàng (0 đã chọn)'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.widgetWithText(CheckboxListTile,'VPP A'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Xong · 1 khách'));
+  await tester.pumpAndSettle();
+  await tester.scrollUntilVisible(find.text('Lưu trên máy · Đồng bộ khi có mạng'),240,
+   scrollable:find.byType(Scrollable).first);
+  await tester.tap(find.text('Lưu trên máy · Đồng bộ khi có mạng'));
+  await tester.pumpAndSettle();
+  expect(queue.pending.single['payload']['customer_ids'],
+   ['11111111-1111-4111-8111-111111111111']);
+  queue.dispose();
+ });
+ testWidgets('editing a pending offline draft retains the original client_ref',(tester)async{
+  final queue=OfflineQueue(OfflineSession(),'owner-d','9',factory:newIdbFactoryMemory());
+  const id='33333333-3333-4333-8333-333333333333';
+  final payload=<String,dynamic>{
+   'client_ref':id,'kind':'support','version':0,
+   'provinces':['Bến Tre'],'district':'','customer_ids':<String>[],
+   'data':{'title':'Bản nháp cũ'}
+  };
+  await queue.enqueue('/api/v1/scoped-records',payload);
+  final initial=SalesRecord(
+   id:id,kind:'support',owner:'owner-d',version:0,province:'Bến Tre',
+   data:{'title':'Bản nháp cũ','provinces':['Bến Tre'],'customerIds':<String>[]});
+  await tester.pumpWidget(MaterialApp(home:ScopedRecordEditor(
+   kind:'support',regions:regions,queue:queue,initial:initial,
+   service:const PickerCustomers(),onSaved:(){})));
+  await tester.pumpAndSettle();
+  await tester.enterText(find.byType(TextFormField).first,'Bản nháp đã sửa');
+  await tester.scrollUntilVisible(find.text('Lưu trên máy · Đồng bộ khi có mạng'),240,
+   scrollable:find.byType(Scrollable).first);
+  await tester.tap(find.text('Lưu trên máy · Đồng bộ khi có mạng'));
+  await tester.pumpAndSettle();
+  expect(queue.pending.length,1);
+  expect(queue.pending.single['method'],'POST');
+  expect(queue.pending.single['payload']['client_ref'],id);
+  expect(queue.pending.single['payload']['data']['title'],'Bản nháp đã sửa');
+  queue.dispose();
+ });
+
 }

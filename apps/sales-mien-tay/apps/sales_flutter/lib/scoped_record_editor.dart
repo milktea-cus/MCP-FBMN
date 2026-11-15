@@ -57,7 +57,7 @@ class _ScopedRecordEditorState extends State<ScopedRecordEditor>{
   if(_provinces.length!=1)_district=null;
   final oldCustomers=old?.data['customerIds'];
   if(oldCustomers is List)_customerIds.addAll(oldCustomers.map((v)=>v.toString()));
-  if(_isCompetitor)unawaited(_loadCustomers());
+  unawaited(_loadCustomers());
  }
  @override void dispose(){
   for(final f in _fields.values){f.dispose();}
@@ -187,16 +187,14 @@ class _ScopedRecordEditorState extends State<ScopedRecordEditor>{
        DropdownMenuItem(value:d,child:Text(d,overflow:TextOverflow.ellipsis))],
     onChanged:_saving?null:(v)=>setState((){
      _district=(v==null||v.isEmpty)?null:v;
-     if(_isCompetitor){
-      _customerIds.removeWhere((id)=>_customers.any((c)=>c.id==id&&
-        c.province==_provinces.single&&_district!=null&&c.district!=_district));
-     }
+     _customerIds.removeWhere((id)=>_customers.any((c)=>c.id==id&&
+       c.province==_provinces.single&&_district!=null&&c.district!=_district));
     }))
   else if(_provinces.length>1)
    const Text('Đã chọn nhiều tỉnh: không chọn huyện, áp dụng toàn bộ các tỉnh được chọn.')
   else const Text('Chọn ít nhất một tỉnh để tiếp tục.'),
   const SizedBox(height:10),
-  if(_isCompetitor)...[
+  ...[
    OutlinedButton.icon(onPressed:_saving||_provinces.isEmpty?null:_selectCustomers,
     icon:const Icon(Icons.storefront_outlined),
     label:Text('Chọn khách hàng (${_customerIds.length} đã chọn)')),
@@ -220,24 +218,30 @@ class _ScopedRecordEditorState extends State<ScopedRecordEditor>{
    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Nhiều tỉnh không được chọn huyện.')));return;
   }
   final byId={for(final c in _customers)c.id:c};
-  if(_isCompetitor&&_customerIds.any((id)=>byId.containsKey(id)&&
+  if(_customerIds.any((id)=>byId.containsKey(id)&&
     (!_provinces.contains(byId[id]!.province)||
      (_district!=null&&byId[id]!.district!=_district)))){
    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Khách đã chọn không thuộc địa bàn.')));return;
   }
   final provinces=_provinces.toList()..sort();
   final ids=_customerIds.toList()..sort();
+  final editingOfflineDraft=widget.initial!=null&&widget.initial!.version==0;
   final record=<String,dynamic>{
    'kind':widget.kind,'provinces':provinces,'district':_district??'',
-   'customer_ids':_isCompetitor?ids:<String>[],
-   'version':widget.initial?.version??0,'client_ref':const Uuid().v4(),
+   'customer_ids':ids,
+   'version':widget.initial?.version??0,
+   'client_ref':editingOfflineDraft?widget.initial!.id:const Uuid().v4(),
    'data':{for(final key in _fieldsForKind) key:_fieldCtrl(key).text.trim()}
   };
   setState(()=>_saving=true);
   try{
    final target=widget.initial==null?'/api/v1/scoped-records':
       '/api/v1/scoped-records/${widget.initial!.id}';
-   await widget.queue.enqueue(target,record,method:widget.initial==null?'POST':'PATCH');
+   if(editingOfflineDraft){
+    await widget.queue.replaceScopedDraft(widget.initial!.id,record);
+   }else{
+    await widget.queue.enqueue(target,record,method:widget.initial==null?'POST':'PATCH');
+   }
    widget.onSaved();
    if(mounted)Navigator.pop(context,true);
   }catch(error){

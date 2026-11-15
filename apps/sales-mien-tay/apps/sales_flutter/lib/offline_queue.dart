@@ -192,6 +192,33 @@ class OfflineQueue extends ChangeNotifier {
   if(_timer!=null)unawaited(sync());
  }
 
+ /// Edit an unsynced scoped-record creation in the same durable IndexedDB/SQLite row.
+ /// Do not turn it into a PATCH against an ID that only exists on this device.
+ /// A blocked operation is never silently retried or rewritten.
+ Future<void> replaceScopedDraft(String draftId,Map<String,dynamic> data)async{
+  if(_closed)throw StateError('Phiên đã đóng');
+  if(syncing)throw StateError('Đang đồng bộ, mở lại bản ghi sau khi hoàn tất.');
+  if(!RegExp(r'^[a-fA-F0-9-]{36}$').hasMatch(draftId)||
+      data['client_ref']!=draftId||data['version']!=0||
+      !['support','competitor'].contains(data['kind']))
+   throw ArgumentError('Mã bản nháp hoặc dữ liệu chỉnh sửa không hợp lệ');
+  final database=await db;
+  final tx=database.transaction('outbox',idbModeReadWrite);
+  final store=tx.objectStore('outbox');
+  final key='$namespace:$draftId';
+  final existing=await store.getObject(key);
+  if(existing is! Map||existing['namespace']!=namespace||
+      existing['path']!='/api/v1/scoped-records'||existing['method']!='POST'||
+      existing['status']!='pending'||(existing['payload'] as Map?)?['kind']!=data['kind']){
+    await tx.completed;
+    throw StateError('Bản nháp không còn ở trạng thái chờ; tải lại để tránh ghi đè.');
+  }
+  await store.put({...Map<String,dynamic>.from(existing),'payload':data});
+  await tx.completed;
+  await reload();
+  if(_timer!=null)unawaited(sync());
+ }
+
  /// Save a plan -> route -> trip as one local transaction, never as three
  /// independently committed rows. Compatible with IndexedDB and SQLite.
  Future<void> enqueueTripGraph({

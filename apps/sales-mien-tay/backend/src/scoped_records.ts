@@ -34,7 +34,6 @@ function normalize(body:Json):{kind:string;provinces:string[];district:string;cu
  if(!Array.isArray(customerIds)||customerIds.length>1000||customerIds.some(x=>typeof x!=='string'||!uuid.test(x))
    ||new Set(customerIds).size!==customerIds.length)
    return 'Danh sách khách hàng không hợp lệ hoặc bị trùng.';
- if(kind==='support'&&customerIds.length>0)return 'Đề xuất hỗ trợ không liên kết nhiều khách hàng.';
  if(body.data===null||typeof body.data!=='object'||Array.isArray(body.data))
    return 'Dữ liệu biểu mẫu không hợp lệ.';
  const data=body.data as Json;
