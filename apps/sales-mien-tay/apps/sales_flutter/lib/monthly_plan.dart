@@ -150,7 +150,8 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
     final priorityIds=<String>{
      for(final byScope in selection.customersByScope.values)...byScope,
     }.toList();
-    await widget.queue.enqueue('/api/v1/monthly-plans',{
+    await widget.queue.enqueueTripGraph(
+     plan:{
       'client_ref':planId,'period_ym':monthKey(selection.date),
       'work_date':dayKey(selection.date),
       'scope_kind':primary['scope_kind'],'scope_key':primary['scope_key'],
@@ -158,19 +159,20 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
       'district':kind=='territory'?primary['district']:null,
       'purpose':selection.purpose,'target_new_customers':selection.target,
       'note':selection.note,'status':'planned',
-    });
-    await widget.queue.enqueue('/api/v1/day-routes',{
+     },
+     route:{
       'client_ref':routeId,'monthly_plan_id':planId,
       'route_date':dayKey(selection.date),'purpose':selection.purpose,
       'note':selection.note,'status':'ready',
-    },dependsOn:[planId]);
-    await widget.queue.enqueue('/api/v1/trips',{
+     },
+     trip:{
       'client_ref':tripId,'mutation_ref':tripId,
       'day_route_id':routeId,'start_date':dayKey(selection.date),
       'end_date':dayKey(selection.endDate),
       'purpose':selection.purpose,'note':selection.note,
       'scopes':chosenScopes,'priorities':priorityIds,
-    },dependsOn:[routeId]);
+     },
+    );
     _toast('Đã lưu một chuyến ${dayKey(selection.date)} – ${dayKey(selection.endDate)} trên máy · chờ đồng bộ');
     if(mounted)await _reload();
     return;
