@@ -1,6 +1,8 @@
 name: Field Work Android signed release to private R2
 
 on:
+  issue_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       ci_run_id:
@@ -33,7 +35,13 @@ concurrency:
 jobs:
   signed-release:
     name: Android / Signed APK and verified immutable R2 release
-    if: github.ref == 'refs/heads/main' && github.actor == 'milktea-cus'
+    # Comment trigger is restricted to the Owner, exact command and Issue #3.
+    # The manual workflow_dispatch remains available for future signed releases.
+    if: >-
+      github.actor == 'milktea-cus' && (
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'issue_comment' && github.event.issue.number == 3 && github.event.comment.body == '/field-work-release')
+      )
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -50,26 +58,49 @@ jobs:
           NOTES: ${{ inputs.release_notes }}
         run: |
           python3 - <<'PY'
-          import json, os, pathlib, urllib.request
-          run=os.environ['VERIFIED_CI_RUN']
-          if not run.isascii() or not run.isdigit() or len(run)>18:
-              raise SystemExit('CI run id invalid')
-          req=urllib.request.Request(
-              f"https://api.github.com/repos/{os.environ['REPO_NAME']}/actions/runs/{run}",
-              headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],
-                       'Accept':'application/vnd.github+json'})
-          with urllib.request.urlopen(req,timeout=20) as res:
-              data=json.load(res)
-          if data.get('head_sha')!=os.environ['COMMIT_SHA'] or data.get('conclusion')!='success' or data.get('name')!='Sales Miền Tây CI':
-              raise SystemExit('CI is not green for exact release SHA')
+          import json, os, pathlib, urllib.parse, urllib.request
+          event=os.environ['GITHUB_EVENT_NAME']
+          sha=os.environ['COMMIT_SHA']
           pubspec=pathlib.Path('pubspec.yaml').read_text(encoding='utf8')
           line=next(x for x in pubspec.splitlines() if x.startswith('version:'))
-          value=line.split(':',1)[1].strip()
-          if '+' not in value or value.rsplit('+',1)[1]!=os.environ['EXPECTED_BUILD_CODE']:
-              raise SystemExit('Version code does not match pubspec')
-          if len(os.environ['NOTES'])>2000:
-              raise SystemExit('Release notes too long')
-          print('CI and versionCode verified for signed release')
+          current=line.split(':',1)[1].strip()
+          if '+' not in current:
+              raise SystemExit('Flutter versionCode missing')
+          actual_code=current.rsplit('+',1)[1]
+          ci=os.environ.get('VERIFIED_CI_RUN','')
+          expected_code=os.environ.get('EXPECTED_BUILD_CODE','')
+          notes=os.environ.get('NOTES','')
+          def gh_json(endpoint):
+              request=urllib.request.Request(
+                  'https://api.github.com/repos/'+os.environ['REPO_NAME']+endpoint,
+                  headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],
+                           'Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(request,timeout=20) as reply:
+                  return json.load(reply)
+          if event=='issue_comment':
+              issue=json.loads(pathlib.Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+              if issue.get('issue',{}).get('number')!=3 or issue.get('comment',{}).get('body')!='/field-work-release':
+                  raise SystemExit('Release command is not approved')
+              expected_code=actual_code
+              notes='Field Work Android signed release; update subsequent versions inside the app.'
+              runs=gh_json('/actions/runs?event=push&per_page=100')['workflow_runs']
+              matching=[run for run in runs if run.get('name')=='Sales Miền Tây CI'
+                        and run.get('head_sha')==sha and run.get('conclusion')=='success']
+              if not matching: raise SystemExit('No passing CI for current main commit')
+              ci=str(matching[0]['id'])
+          if not ci.isascii() or not ci.isdigit() or len(ci)>18:
+              raise SystemExit('CI run id invalid')
+          checked=gh_json('/actions/runs/'+ci)
+          if checked.get('head_sha')!=sha or checked.get('conclusion')!='success' or checked.get('name')!='Sales Miền Tây CI':
+              raise SystemExit('CI not green for exact release SHA')
+          if expected_code!=actual_code or not expected_code.isdigit():
+              raise SystemExit('VersionCode does not match pubspec')
+          if not notes or len(notes)>2000 or '\n' in notes or '\r' in notes:
+              raise SystemExit('Release notes invalid')
+          with open(os.environ['GITHUB_ENV'],'a',encoding='utf8') as env:
+              env.write('FIELD_WORK_RELEASE_CODE='+expected_code+'\n')
+              env.write('FIELD_WORK_RELEASE_NOTES='+notes+'\n')
+          print('Green CI and exact Android versionCode verified for release')
           PY
       - uses: subosito/flutter-action@v2
         with:
@@ -103,7 +134,7 @@ jobs:
       - name: Verify APK package code and certificate with Android build tools
         env:
           EXPECTED_CERT: ${{ secrets.FIELD_WORK_ANDROID_CERT_SHA256 }}
-          EXPECTED_CODE: ${{ inputs.version_code }}
+          EXPECTED_CODE: ${{ env.FIELD_WORK_RELEASE_CODE }}
         run: |
           set -euo pipefail
           APK=build/app/outputs/flutter-apk/app-release.apk
@@ -133,17 +164,17 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: field-work-android-signed-${{ inputs.version_code }}
+          name: field-work-android-signed-${{ env.FIELD_WORK_RELEASE_CODE }}
           path: apps/sales-mien-tay/apps/sales_flutter/build/app/outputs/flutter-apk/app-release.apk
           retention-days: 30
       - name: Publish immutable APK and atomically advance private R2 latest
-        if: inputs.publish_production == 'yes'
+        if: inputs.publish_production == 'yes' || github.event_name == 'issue_comment'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.FIELD_WORK_R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.FIELD_WORK_R2_SECRET_ACCESS_KEY }}
           CF_ACCOUNT_ID: e29ec156139b3750d875a9c45ed477ec
-          EXPECTED_CODE: ${{ inputs.version_code }}
-          RELEASE_NOTES: ${{ inputs.release_notes }}
+          EXPECTED_CODE: ${{ env.FIELD_WORK_RELEASE_CODE }}
+          RELEASE_NOTES: ${{ env.FIELD_WORK_RELEASE_NOTES }}
         run: |
           set -euo pipefail
           test -n "$AWS_ACCESS_KEY_ID" && test -n "$AWS_SECRET_ACCESS_KEY" ||
