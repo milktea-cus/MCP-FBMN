@@ -1,5 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
+import {classifySessionProviderFailure} from './auth_session_policy';
 
 export interface AuthEnv {
  DATABASE_URL: string;
@@ -41,7 +42,7 @@ async function sessionSubject(value: string) {
  // A 429 throttle, provider maintenance/timeout or gateway response is NOT
  // proof that the signed-in staff member's session was revoked. Converting
  // these responses to 401 made Android erase a durable secure-store cookie.
- if(!res.ok)throw new AuthError(res.status===401?401:503,
+ if(!res.ok)throw new AuthError(classifySessionProviderFailure(res.status),
    res.status===401?'Phiên đăng nhập không hợp lệ':'Dịch vụ xác thực tạm thời không sẵn sàng');
  let data:{user?:{id?:string;emailVerified?:boolean};session?:{expiresAt?:string}};try{data=await res.json();}catch{throw new AuthError(401,'Phiên đăng nhập không hợp lệ');}
  if(!data?.user?.id || !data.session || !data.user.emailVerified ||
