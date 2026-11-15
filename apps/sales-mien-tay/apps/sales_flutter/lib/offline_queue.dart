@@ -577,14 +577,24 @@ class OfflineQueue extends ChangeNotifier {
   return true;
  }
 
+ /// Legacy PWA outboxes may store the server's Vietnamese conflict message
+ /// without an HTTP status. Never POST them blindly when user taps retry.
+ bool looksLikeConflict(Map<String,dynamic> row){
+  final e=(row['error']?.toString()??'').toLowerCase();
+  return RegExp(r'(^|[^0-9])409([^0-9]|$)').hasMatch(e)||
+   e.contains('bị trùng')||e.contains('trùng tuyến')||
+   e.contains('xung đột')||e.contains('phiên bản')||
+   e.contains('stale')||e.contains('duplicate')||
+   e.contains('version conflict');
+ }
  bool isPlanDuplicateConflict(Map<String,dynamic> row)=>
   row['status']=='blocked'&&row['method']=='POST'&&
   row['path']=='/api/v1/monthly-plans'&&
-  (row['error']?.toString()??'').contains('409');
+  looksLikeConflict(row);
  bool isTripDuplicateConflict(Map<String,dynamic> row)=>
   row['status']=='blocked'&&row['method']=='POST'&&
   row['path']=='/api/v1/trips'&&
-  (row['error']?.toString()??'').contains('409');
+  looksLikeConflict(row);
 
  bool _samePlan(Map server,Map local){
   final day=local['work_date']?.toString()??'';
@@ -817,7 +827,7 @@ class OfflineQueue extends ChangeNotifier {
    if(row['namespace']!=namespace)return;
    // Read-only reconciliation is mandatory for 409, but 400/422 may
    // be explicitly retried after the user fixes a validation problem.
-   final conflict=(row['error']?.toString()??'').contains('409');
+   final conflict=looksLikeConflict(row);
    if(conflict&&(isRouteDuplicateConflict(row)||isRoutePatchConflict(row)||
       isPlanDuplicateConflict(row)||isTripDuplicateConflict(row))){
     try{
@@ -840,8 +850,8 @@ class OfflineQueue extends ChangeNotifier {
    }
    // An unresolved 409 is never replayed blindly. The user may keep it
    // or move it to the recoverable shelf after checking dependencies.
-   if(row['status']=='blocked'&&(row['error']?.toString()??'').contains('409')){
-    error='Lỗi 409 chưa đối chiếu được; bản lưu vẫn nằm trên máy.';
+   if(row['status']=='blocked'&&looksLikeConflict(row)){
+    error='Lỗi trùng/xung đột chưa đối chiếu được; bản lưu vẫn nằm trên máy.';
     _notify();return;
    }
   }
