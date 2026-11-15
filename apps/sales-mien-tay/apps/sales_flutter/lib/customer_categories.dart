@@ -53,3 +53,30 @@ class CustomerCategoryLabel extends StatelessWidget {
     ]);
   }
 }
+
+/// Business selling confirmation is independent of the customer's category
+/// and active/inactive account status. Never recolor the type avatar itself.
+class CustomerSellingDot extends StatelessWidget {
+  final bool isSelling;
+  final bool pending;
+  const CustomerSellingDot({super.key,required this.isSelling,this.pending=false});
+  static const sellingColor=Color(0xFF16A34A);
+  static const unconfirmedColor=Color(0xFFEAB308);
+
+  @override Widget build(BuildContext context) => Tooltip(
+    message: isSelling
+      ? (pending?'Đang bán · chờ đồng bộ':'Khách đang bán')
+      : (pending?'Chưa bán · chờ đồng bộ':'Khách chưa bán'),
+    child:Semantics(
+      label:isSelling?'Trạng thái bán hàng: đang bán':'Trạng thái bán hàng: chưa bán',
+      child:Container(
+        key:const Key('customer-selling-dot'),
+        width:10,height:10,
+        decoration:BoxDecoration(
+          shape:BoxShape.circle,
+          color:isSelling?sellingColor:unconfirmedColor,
+        ),
+      ),
+    ),
+  );
+}
