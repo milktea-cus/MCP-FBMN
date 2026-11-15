@@ -529,195 +529,121 @@ class SurveyTemplateAdmin extends StatefulWidget{
  @override State<SurveyTemplateAdmin> createState()=>_SurveyTemplateAdminState();
 }
 class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
- String province='';int version=0;bool busy=false,loadFailed=false;
- String lifecycle='active';String? message;
- String templateTitle='Mẫu chung · Gặp khách';
- List<Map<String,dynamic>> qs=[];
- List<Map<String,dynamic>> publishedVersions=[];
+ List<Map<String,dynamic>> forms=[];
  List<String> officialBrands=[];
  List<FieldCustomer> knownCustomers=[];
- List<String> supplierOptions=const ['Mua trực tiếp công ty','NPP khác (ghi chú tên)'];
- @override void initState(){super.initState();unawaited(loadBrands());unawaited(loadSuppliers());unawaited(load('*'));}
+ bool busy=false,loadFailed=false;String? message;
+ @override void initState(){super.initState();unawaited(load());unawaited(loadBrands());unawaited(loadSuppliers());}
  Future<void> loadBrands()async{
-  try{
-   final result=await surveyGet(widget.service,'/api/v1/market/brands');
-   if(mounted)setState(()=>officialBrands=asRows(result['items'])
-    .map((b)=>b['name'].toString()).toList()..sort());
-  }catch(_){
-   // Existing versioned templates stay available during a catalog outage.
-  }
+  try{final res=await surveyGet(widget.service,'/api/v1/market/brands');
+   if(mounted)setState(()=>officialBrands=asRows(res['items'])
+    .map((b)=>b['name'].toString()).toList()..sort());}catch(_){}
  }
  Future<void> loadSuppliers()async{
-  try{
-   final list=await widget.service.list();
-   if(mounted)setState((){
-    knownCustomers=list;
-    supplierOptions=supplySourceOptions(list.where((c)=>c.province==province));
-   });
-  }catch(_){
-   // Keep the manually editable published template when the customer list is offline.
-  }
+  try{final res=await widget.service.list();
+   if(mounted)setState(()=>knownCustomers=res);}catch(_){}
  }
- Future<void> load(String p)async{
-  setState((){
-   province=p;busy=true;loadFailed=false;lifecycle='active';message=null;qs=[];publishedVersions=[];version=0;
-    templateTitle=p=='*'?'Mẫu chung · Gặp khách':'Mẫu gặp khách · '+p;
-   supplierOptions=supplySourceOptions(
-    knownCustomers.where((c)=>c.province==p));
-  });
-  try{
-   final data=await surveyGet(widget.service,
-    '/api/v1/survey-templates',{'province':p,'history':'1'});
-   final items=asRows(data['items']);
-   final selected=items.firstOrNull;
-   if(mounted)setState((){
-    publishedVersions=items;
-    lifecycle=selected?['status']?.toString()??'active';
-    version=(selected?['version'] as num?)?.toInt()??0;
-     templateTitle=selected?['title']?.toString()??templateTitle;
-    qs=selected==null?[]:asRows(selected['questions']);
-   });
-  }
-  catch(e){if(mounted)setState((){
-   loadFailed=true;
-   message='Không tải được mẫu. Vui lòng kiểm tra kết nối rồi thử lại.';
-  });}
-  finally{if(mounted)setState(()=>busy=false);}
+ Future<void> load()async{
+  setState((){busy=true;loadFailed=false;message=null;});
+  try{final res=await surveyGet(widget.service,'/api/v1/survey-templates',{'manage':'1'});
+   if(mounted)setState(()=>forms=asRows(res['items']));
+  }catch(_){if(mounted)setState((){
+   loadFailed=true;message='Không tải được danh sách mẫu. Vui lòng thử lại.';
+  });}finally{if(mounted)setState(()=>busy=false);}
  }
- Future<void> changeAvailability(String next)async{
-  if(busy||province.isEmpty||province=='*'||version==0)return;
-  final verb=next=='paused'?'Ngưng sử dụng':next=='archived'?'Xóa khỏi sử dụng':'Bật lại';
-  final confirmed=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(
-   title:Text('$verb mẫu?'),
+ String scopeLabel(Map<String,dynamic> f){
+  final ps=((f['provinces'] as List?)??[]).map((p)=>p.toString()).toList();
+  return ps.isEmpty?'Toàn hệ thống':ps.join(', ');
+ }
+ Future<void> changeStatus(Map<String,dynamic> f,String next)async{
+  if(busy)return;
+  final name=f['title']?.toString()??'Mẫu làm việc';
+  final verb=next=='active'?'Áp dụng lại':next=='paused'?'Ngưng áp dụng':'Xóa mẫu';
+  final ok=await showDialog<bool>(context:context,builder:(c)=>AlertDialog(
+   title:Text(verb+'?'),
    content:Text(next=='archived'
-    ?'Ẩn mẫu tỉnh $province khỏi các phiên đi khách. Các phiên bản và câu trả lời cũ vẫn được giữ để đối chiếu và khôi phục.'
-    :next=='paused'
-    ?'Tạm ngưng mẫu $province. Sales không thấy mẫu này cho đến khi bật lại.'
-    :'Bật lại mẫu tỉnh $province để Sales tiếp tục sử dụng.'),
-   actions:[
-    TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('Hủy')),
-    FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:Text(verb)),
-   ],
-  ));
-  if(confirmed!=true||!mounted)return;
+    ?'Ẩn mẫu "'+name+'" khỏi Sales. Kết quả khảo sát cũ vẫn giữ nguyên.'
+    :'Mẫu "'+name+'" sẽ '+(next=='active'?'được sử dụng lại.':'tạm ngưng sử dụng.')),
+   actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Hủy')),
+    FilledButton(onPressed:()=>Navigator.pop(c,true),child:Text(verb))]));
+  if(ok!=true||!mounted)return;
   setState(()=>busy=true);
+  final ref=const Uuid().v4();
   try{
-   final response=await (widget.service.client?.patch(
-    widget.service.uri('/api/v1/survey-templates'),headers:widget.service.headers,
-    body:jsonEncode({
-     'client_ref':const Uuid().v4(),'province':province,
-     'status':next,'expected_status':lifecycle,'expected_version':version,
-    })) ?? http.patch(widget.service.uri('/api/v1/survey-templates'),
-    headers:widget.service.headers,body:jsonEncode({
-     'client_ref':const Uuid().v4(),'province':province,
-     'status':next,'expected_status':lifecycle,'expected_version':version,
-    }))).timeout(const Duration(seconds:20));
-   final result=asMap(decodeApi(response)['item']);
-   if(!mounted)return;
-   setState((){
-    lifecycle=result['status']?.toString()??next;
-    publishedVersions=[for(final v in publishedVersions){...v,'status':lifecycle}];
-    message=next=='paused'?'Đã ngưng sử dụng mẫu tỉnh $province.'
-     :next=='archived'?'Đã xóa mẫu khỏi danh sách sử dụng. Lịch sử vẫn được giữ.'
-     :'Đã bật lại mẫu tỉnh $province.';
-   });
-   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(message!)));
-  }catch(e){if(mounted)setState(()=>message='Không đổi được trạng thái mẫu: $e');}
+   final data=jsonEncode({'form_id':f['form_id'],'client_ref':ref,
+    'status':next,'expected_revision':f['revision']});
+   final uri=widget.service.uri('/api/v1/survey-templates');
+   final res=await (widget.service.client?.patch(uri,
+    headers:widget.service.headers,body:data)??http.patch(uri,
+    headers:widget.service.headers,body:data)).timeout(const Duration(seconds:20));
+   decodeApi(res);await load();
+  }catch(err){if(mounted)setState(()=>message='Không đổi được trạng thái: '+err.toString());}
   finally{if(mounted)setState(()=>busy=false);}
  }
- Future<void> openEditor({List<Map<String,dynamic>>? fromQuestions,String? fromTitle})async{
-  if(busy||loadFailed||province.isEmpty)return;
+ Future<void> openEditor([Map<String,dynamic>? f])async{
+  if(busy||loadFailed)return;
   final saved=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>
    SurveyTemplateEditorPage(
-    service:widget.service,queue:widget.queue,province:province,
-    version:version,initialTitle:fromTitle??templateTitle,
-    initialQuestions:fromQuestions??qs,
-    brandOptions:officialBrands,supplierOptions:supplierOptions,
-   )));
-  if(saved==true&&mounted){
-   await load(province);
-   if(mounted)ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(content:Text('Đã phát hành mẫu mới; kết quả khảo sát cũ được giữ nguyên.')));
-  }
+    service:widget.service,queue:widget.queue,
+    formId:f?['form_id']?.toString(),
+    revision:(f?['revision'] as num?)?.toInt()??0,
+    initialTitle:f?['title']?.toString()??'',
+    initialProvinces:((f?['provinces'] as List?)??[]).map((p)=>p.toString()).toList(),
+    availableProvinces:widget.regions.provinces,
+    initialQuestions:f==null?[]:asRows(f['questions']),
+    brandOptions:officialBrands,supplierOptions:supplySourceOptions(knownCustomers))));
+  if(saved==true&&mounted)await load();
  }
  @override Widget build(BuildContext context)=>Scaffold(
   appBar:widget.embedded?null:AppBar(title:const Text('Mẫu làm việc với khách')),
-  body:ListView(padding:const EdgeInsets.all(16),children:[
-   Text('Mẫu làm việc với khách',style:Theme.of(context).textTheme.titleLarge),
-   const SizedBox(height:8),
-   Text('Chọn phạm vi và tạo hoặc sửa mẫu. Mỗi phạm vi có một mẫu đang áp dụng; chỉnh sửa tạo phiên bản mới.',
+  body:ListView(padding:const EdgeInsets.all(12),children:[
+   Row(children:[
+    Expanded(child:Text('Mẫu làm việc với khách',
+     style:Theme.of(context).textTheme.titleLarge)),
+    FilledButton.icon(key:const Key('template-create-button'),
+     onPressed:busy||loadFailed?null:()=>openEditor(),
+     icon:const Icon(Icons.add),label:const Text('Tạo mẫu'))]),
+   const SizedBox(height:6),
+   Text('Mỗi mẫu có tên và phạm vi riêng. Một tỉnh có thể dùng nhiều mẫu.',
     style:Theme.of(context).textTheme.bodySmall),
-   const SizedBox(height:14),
-   DropdownButtonFormField<String>(key:const Key('template-scope-select'),
-    initialValue:province.isEmpty?null:province,isExpanded:true,
-    decoration:const InputDecoration(labelText:'Áp dụng tại'),
-    items:[const DropdownMenuItem(value:'*',child:Text('Toàn hệ thống')),
-     for(final p in widget.regions.provinces)DropdownMenuItem(value:p,child:Text('Theo tỉnh · '+p))],
-    onChanged:busy?null:(p){if(p!=null)load(p);}),
-   if(busy)const Padding(padding:EdgeInsets.only(top:12),child:LinearProgressIndicator()),
-   if(message!=null&&!loadFailed)Padding(padding:const EdgeInsets.only(top:8),
+   if(busy)const LinearProgressIndicator(),
+   if(message!=null)Padding(padding:const EdgeInsets.all(10),
     child:Text(message!,style:TextStyle(color:Theme.of(context).colorScheme.error))),
-   const SizedBox(height:14),
-   if(loadFailed)Card(key:const Key('template-load-error'),child:Padding(
-    padding:const EdgeInsets.all(14),child:Column(
+   if(loadFailed)Card(key:const Key('template-load-error'),
+    child:Column(children:[
+     const Padding(padding:EdgeInsets.all(12),
+      child:Text('Không tải được mẫu; không cho sửa khi dữ liệu chưa xác minh.')),
+     OutlinedButton.icon(key:const Key('template-retry-button'),
+      onPressed:busy?null:load,icon:const Icon(Icons.refresh),label:const Text('Thử lại'))])),
+   if(!loadFailed&&forms.isEmpty&&!busy)const Padding(
+    padding:EdgeInsets.symmetric(vertical:24),child:Text('Chưa có mẫu. Bấm Tạo mẫu.')),
+   if(!loadFailed)for(final f in forms)Card(
+    key:ValueKey('survey-form:'+f['form_id'].toString()),
+    child:Padding(padding:const EdgeInsets.all(12),child:Column(
      crossAxisAlignment:CrossAxisAlignment.start,children:[
-      const Text('Không tải được mẫu'),
-      const SizedBox(height:8),
-      const Text('Không thể xác nhận mẫu đang áp dụng. Không tạo hoặc sửa mẫu khi chưa tải được dữ liệu.'),
-      const SizedBox(height:12),
-      OutlinedButton.icon(key:const Key('template-retry-button'),
-       onPressed:busy?null:()=>load(province),
-       icon:const Icon(Icons.refresh),label:const Text('Thử lại')),
+      Text(f['title']?.toString()??'Mẫu chưa đặt tên',
+       style:Theme.of(context).textTheme.titleMedium),
+      Text(scopeLabel(f)+' · '+asRows(f['questions']).length.toString()+' câu hỏi'),
+      Text(f['status']=='active'?'Đang áp dụng':
+       f['status']=='paused'?'Ngưng áp dụng':'Đã xóa khỏi sử dụng'),
+      Wrap(spacing:8,runSpacing:6,children:[
+       OutlinedButton.icon(key:const Key('template-edit-button'),
+        onPressed:busy?null:()=>openEditor(f),
+        icon:const Icon(Icons.edit_outlined),label:const Text('Sửa')),
+       if(f['status']=='active')OutlinedButton.icon(
+        key:const Key('template-pause-button'),
+        onPressed:busy?null:()=>changeStatus(f,'paused'),
+        icon:const Icon(Icons.pause_circle_outline),label:const Text('Ngưng')),
+       if(f['status']!='active')FilledButton.icon(
+        key:const Key('template-resume-button'),
+        onPressed:busy?null:()=>changeStatus(f,'active'),
+        icon:const Icon(Icons.play_arrow_outlined),label:const Text('Áp dụng lại')),
+       if(f['status']!='archived')TextButton.icon(
+        key:const Key('template-delete-button'),
+        onPressed:busy?null:()=>changeStatus(f,'archived'),
+        icon:const Icon(Icons.delete_outline),label:const Text('Xóa')),
+      ]),
      ]))),
-   if(!loadFailed&&province.isNotEmpty)Card(child:Padding(
-    padding:const EdgeInsets.all(14),
-    child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-     Text(templateTitle,style:Theme.of(context).textTheme.titleMedium),
-     const SizedBox(height:6),
-     Text(publishedVersions.isEmpty?'Chưa phát hành'
-      :lifecycle=='paused'?'Tạm ngưng · v$version'
-      :lifecycle=='archived'?'Đã lưu trữ · v$version'
-      :'Đang áp dụng · v$version · '+qs.length.toString()+' câu',
-      style:Theme.of(context).textTheme.bodyMedium),
-     const SizedBox(height:14),
-     SizedBox(width:double.infinity,child:FilledButton.icon(
-      key:const Key('template-edit-button'),onPressed:busy?null:openEditor,
-      icon:Icon(version==0?Icons.add:Icons.edit_outlined),
-      label:Text(version==0?'Tạo mẫu và đặt tên':'Sửa mẫu / Đổi tên'))),
-     if(province=='*')const Padding(padding:EdgeInsets.only(top:10),
-      child:Text('Mẫu chung phải luôn có, không thể ngưng hoặc xóa.')),
-     if(province!='*'&&version>0&&publishedVersions.firstOrNull?['created_by']!='system:initial')
-      Padding(padding:const EdgeInsets.only(top:8),child:Wrap(
-       spacing:8,runSpacing:8,children:[
-        if(lifecycle=='active')OutlinedButton.icon(
-         key:const Key('template-pause-button'),
-         onPressed:busy?null:()=>changeAvailability('paused'),
-         icon:const Icon(Icons.pause_circle_outline),label:const Text('Tạm ngưng')),
-        if(lifecycle=='paused'||lifecycle=='archived')OutlinedButton.icon(
-         key:const Key('template-resume-button'),
-         onPressed:busy?null:()=>changeAvailability('active'),
-         icon:const Icon(Icons.restore),label:const Text('Bật lại')),
-        if(lifecycle!='archived')TextButton.icon(
-         key:const Key('template-delete-button'),
-         onPressed:busy?null:()=>changeAvailability('archived'),
-         icon:const Icon(Icons.archive_outlined),label:const Text('Lưu trữ')),
-       ])),
-    ]))),
-   if(publishedVersions.isNotEmpty)ExpansionTile(
-    tilePadding:const EdgeInsets.symmetric(horizontal:4),
-    title:Text('Lịch sử phiên bản ('+publishedVersions.length.toString()+')'),
-    children:[
-     for(final old in publishedVersions.take(20))Card(child:ListTile(
-      title:Text((old['title']?.toString()??templateTitle)+' · v'+old['version'].toString()),
-      subtitle:Text(asRows(old['questions']).length.toString()+' câu · '+
-       (old['created_at']?.toString().split('T').first??'')),
-      trailing:const Icon(Icons.history),
-      onTap:()=>openEditor(fromQuestions:asRows(old['questions']),
-       fromTitle:old['title']?.toString()??templateTitle),
-     )),
-     const Padding(padding:EdgeInsets.all(10),
-      child:Text('Chọn phiên bản cũ để sao chép thành bản mới, không sửa đè kết quả đã khảo sát.')),
-    ]),
   ]),
  );
 }
