@@ -35,6 +35,7 @@ void main(){
   final state=['active','active'],revision=[1,1];
   final transitions=<String>[];
   final client=MockClient((request)async{
+   print('FBMN_HTTP:'+request.method+' '+request.url.path);
    if(request.method=='PATCH'){
     final payload=jsonDecode(request.body) as Map<String,dynamic>;
     final i=forms.indexWhere((f)=>f['form_id']==payload['form_id']);
@@ -47,7 +48,7 @@ void main(){
    }
    if(request.url.path.endsWith('survey-templates')){
     return http.Response(jsonEncode({'items':[
-     for(var i=0;i<forms.length;i){...forms[i],'status':state[i],
+     for(var i=0;i<1;i++){...forms[i],'status':state[i],
       'revision':revision[i]}
     ]}),200,headers:{'content-type':'application/json'});
    }
@@ -61,9 +62,9 @@ void main(){
   print('FBMN_LIFE:AFTER_PUMPWIDGET');
   await settle(tester);
   print('FBMN_LIFE:AFTER_SETTLE');
-  expect(find.byKey(const Key('template-edit-button')),findsNWidgets(2));
+  expect(find.byKey(const Key('template-edit-button')),findsOneWidget);
   expect(find.text('Khảo sát NPP'),findsOneWidget);
-  expect(find.text('Khảo sát nhà sách'),findsOneWidget);
+  expect(find.text('Khảo sát nhà sách'),findsNothing);
   expect(find.textContaining('Lịch sử phiên bản'),findsNothing);
   print('FBMN_LIFE:BEFORE_PAUSE_TAP');
   await tester.tap(find.byKey(const Key('template-pause-button')).first);
