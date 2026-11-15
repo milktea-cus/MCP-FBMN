@@ -12,12 +12,15 @@ import 'session.dart';
 class SurveyTemplateEditorPage extends StatefulWidget {
  final CustomerService service;
  final OfflineQueue? queue;
- final String province,initialTitle;
- final int version;
+ final String? formId;
+ final String initialTitle;
+ final int revision;
+ final List<String> initialProvinces,availableProvinces;
  final List<Map<String,dynamic>> initialQuestions;
  final List<String> brandOptions,supplierOptions;
- const SurveyTemplateEditorPage({super.key,required this.service,required this.province,
-  required this.version,required this.initialTitle,required this.initialQuestions,
+ const SurveyTemplateEditorPage({super.key,required this.service,this.formId,
+  required this.revision,required this.initialTitle,required this.initialProvinces,
+  required this.availableProvinces,required this.initialQuestions,
   this.queue,this.brandOptions=const [],this.supplierOptions=const []});
  @override State<SurveyTemplateEditorPage> createState()=>_SurveyTemplateEditorPageState();
 }
@@ -25,22 +28,28 @@ class _SurveyTemplateEditorPageState extends State<SurveyTemplateEditorPage> {
  late TextEditingController title;
  late List<Map<String,dynamic>> questions;
  final Map<String,List<String>> optionKeys={};
- String? openId,error;
+ String? openId,error,submitRef;
  bool saving=false,dirty=false;
- String get draftKey=>'survey-template-draft:'+widget.province;
+ late final String effectiveFormId;
+ late bool global;
+ late Set<String> selectedProvinces;
+ String get draftKey=>'survey-form-draft:'+(widget.formId??'new');
  List<Map<String,dynamic>> clone(List<Map<String,dynamic>> v)=>asRows(jsonDecode(jsonEncode(v)));
  @override void initState(){
   super.initState();title=TextEditingController(text:widget.initialTitle);
   questions=clone(widget.initialQuestions);
+  effectiveFormId=widget.formId??const Uuid().v4();
+  selectedProvinces=widget.initialProvinces.toSet();
+  global=selectedProvinces.isEmpty;
   WidgetsBinding.instance.addPostFrameCallback((_){unawaited(restoreDraft());});
  }
  @override void dispose(){title.dispose();super.dispose();}
- void changed(){dirty=true;error=null;}
+ void changed(){dirty=true;error=null;submitRef=null;}
  void toast(String s){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(s)));}
  Future<void> restoreDraft()async{
   try{
    final rows=await widget.queue?.cached(draftKey)??[];
-   if(!mounted||rows.isEmpty||rows.first['base_version']!=widget.version)return;
+   if(!mounted||rows.isEmpty||rows.first['base_version']!=widget.revision)return;
    final use=await showDialog<bool>(context:context,builder:(c)=>AlertDialog(
     title:const Text('Bản nháp chưa phát hành'),
     content:const Text('Tiếp tục bản nháp đã lưu trên thiết bị này?'),
@@ -51,7 +60,10 @@ class _SurveyTemplateEditorPageState extends State<SurveyTemplateEditorPage> {
    if(!mounted)return;
    if(use==true)setState((){
     title.text=rows.first['title']?.toString()??widget.initialTitle;
-    questions=asRows(rows.first['questions']);optionKeys.clear();dirty=true;
+    questions=asRows(rows.first['questions']);
+    selectedProvinces=((rows.first['provinces'] as List?)??[])
+     .map((p)=>p.toString()).toSet();
+    global=selectedProvinces.isEmpty;optionKeys.clear();dirty=true;
    });
    if(use==false)await widget.queue?.cache(draftKey,[]);
   }catch(_){}
@@ -61,7 +73,8 @@ class _SurveyTemplateEditorPageState extends State<SurveyTemplateEditorPage> {
   try{
    if(widget.queue==null){toast('Không có kho lưu bản nháp.');return;}
    await widget.queue!.cache(draftKey,[{
-    'base_version':widget.version,'title':title.text,'questions':questions,
+    'base_version':widget.revision,'title':title.text,'questions':questions,
+    'provinces':global?<String>[]:selectedProvinces.toList(),
    }]);
    dirty=false;toast('Đã lưu nháp trên thiết bị; chưa phát hành cho Sales.');
   }catch(e){toast('Không lưu được nháp: $e');}
@@ -107,6 +120,7 @@ class _SurveyTemplateEditorPageState extends State<SurveyTemplateEditorPage> {
  String? validate(){
   final name=title.text.trim();
   if(name.length<2||name.length>80)return 'Tên mẫu phải từ 2 đến 80 ký tự.';
+  if(!global&&selectedProvinces.isEmpty)return 'Chọn ít nhất một tỉnh.';
   if(questions.isEmpty)return 'Cần ít nhất một câu hỏi.';
   for(var i=0;i<questions.length;i++){
    final q=questions[i],label=q['label']?.toString().trim()??'';
@@ -130,25 +144,29 @@ class _SurveyTemplateEditorPageState extends State<SurveyTemplateEditorPage> {
    if(['choice','multi_choice'].contains(q['type']))
     q['options']=(q['options'] as List).map((v)=>v.toString().trim()).toList();
   }
-  if(widget.version>0&&name==widget.initialTitle&&
+  if(widget.revision>0&&name==widget.initialTitle&&
+     selectedProvinces.length==widget.initialProvinces.length&&
+     selectedProvinces.containsAll(widget.initialProvinces)&&
      jsonEncode(copy)==jsonEncode(widget.initialQuestions)){
    toast('Không có thay đổi để phát hành.');return;
   }
   final ok=await showDialog<bool>(context:context,builder:(c)=>AlertDialog(
-   title:const Text('Phát hành mẫu?'),
+   title:const Text('Lưu mẫu?'),
    content:Text('Mẫu "'+name+'" · '+copy.length.toString()+' câu · '+
-    (widget.province=='*'?'toàn hệ thống':'tỉnh '+widget.province)+
-    '. Phiên khảo sát cũ giữ nguyên mẫu đã dùng.'),
+    (global?'toàn hệ thống':selectedProvinces.join(', '))+
+    '. Kết quả khảo sát cũ được giữ nguyên.'),
    actions:[
     TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Quay lại')),
-    FilledButton(onPressed:()=>Navigator.pop(c,true),child:const Text('Phát hành')),
+    FilledButton(onPressed:()=>Navigator.pop(c,true),child:const Text('Lưu mẫu')),
    ]));
   if(ok!=true||!mounted)return;
   setState((){saving=true;error=null;});
   try{
    final uri=widget.service.uri('/api/v1/survey-templates');
-   final body=jsonEncode({'client_ref':const Uuid().v4(),'province':widget.province,
-    'title':name,'expected_version':widget.version,'questions':copy});
+   submitRef??=const Uuid().v4();
+   final body=jsonEncode({'client_ref':submitRef,'form_id':effectiveFormId,
+    'provinces':global?<String>[]:selectedProvinces.toList(),
+    'title':name,'expected_revision':widget.revision,'questions':copy});
    final r=await (widget.service.client?.post(uri,headers:widget.service.headers,body:body)
       ??http.post(uri,headers:widget.service.headers,body:body))
       .timeout(const Duration(seconds:20));
@@ -265,23 +283,33 @@ class _SurveyTemplateEditorPageState extends State<SurveyTemplateEditorPage> {
  }
  @override Widget build(BuildContext context)=>WillPopScope(onWillPop:canLeave,
   child:Scaffold(
-   appBar:AppBar(title:Text(widget.version==0?'Tạo mẫu làm việc':'Sửa mẫu làm việc'),
+   appBar:AppBar(title:Text(widget.revision==0?'Tạo mẫu':'Sửa mẫu'),
     leading:IconButton(tooltip:'Quay lại',onPressed:leave,
      icon:const Icon(Icons.arrow_back)),
     actions:[IconButton(tooltip:'Xem trước',onPressed:preview,
      icon:const Icon(Icons.visibility_outlined))]),
    body:ListView(padding:const EdgeInsets.all(16),children:[
-    Text(widget.province=='*'?'Phạm vi: Toàn hệ thống':'Phạm vi: '+widget.province,
-     style:Theme.of(context).textTheme.labelLarge),
-    const SizedBox(height:8),
-    Text('Soạn phiên bản '+(widget.version+1).toString()+
-     '. Bản đang áp dụng không thay đổi cho đến khi phát hành.',
-     style:Theme.of(context).textTheme.bodySmall),
-    const SizedBox(height:16),
+    const Text('Tên mẫu, phạm vi áp dụng và nội dung là các thuộc tính của cùng một mẫu.'),
+    const SizedBox(height:12),
     TextFormField(key:const Key('template-title-field'),controller:title,maxLength:80,
      decoration:const InputDecoration(labelText:'Tên mẫu *',
       hintText:'Ví dụ: Khảo sát điểm bán – tháng 11'),
      onChanged:(_)=>changed()),
+    const SizedBox(height:8),
+    SwitchListTile(contentPadding:EdgeInsets.zero,
+     title:const Text('Áp dụng toàn hệ thống'),value:global,
+     onChanged:(v)=>setState((){
+      global=v;if(global)selectedProvinces.clear();changed();
+     })),
+    if(!global)ExpansionTile(
+     initiallyExpanded:true,title:Text('Chọn tỉnh ('+selectedProvinces.length.toString()+')'),
+     children:[for(final province in widget.availableProvinces)
+      CheckboxListTile(dense:true,title:Text(province),
+       value:selectedProvinces.contains(province),onChanged:(v)=>setState((){
+        if(v==true)selectedProvinces.add(province);
+        else selectedProvinces.remove(province);
+        changed();
+       }))]),
     const SizedBox(height:8),
     Row(children:[
      Expanded(child:Text('Câu hỏi ('+questions.length.toString()+'/50)',
@@ -296,7 +324,7 @@ class _SurveyTemplateEditorPageState extends State<SurveyTemplateEditorPage> {
       onPressed:questions.length>=50||widget.brandOptions.length<2?null:
        ()=>addPreset('brands','Nhãn hàng thị trường',widget.brandOptions,catalog:true),
       icon:const Icon(Icons.sell_outlined),label:const Text('Từ nhãn hàng')),
-     if(widget.province!='*')OutlinedButton.icon(
+     OutlinedButton.icon(
       onPressed:questions.length>=50||widget.supplierOptions.length<2?null:
        ()=>addPreset('supply_source','Nguồn hàng đang lấy',widget.supplierOptions),
       icon:const Icon(Icons.local_shipping_outlined),label:const Text('Nguồn hàng / NPP')),
@@ -304,7 +332,7 @@ class _SurveyTemplateEditorPageState extends State<SurveyTemplateEditorPage> {
     if(error!=null)Padding(padding:const EdgeInsets.symmetric(vertical:12),
      child:Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error))),
     const SizedBox(height:12),
-    Text('Lưu nháp chỉ lưu trên thiết bị; Phát hành mới áp dụng cho Sales.',
+    Text('Lưu nháp trên thiết bị; bấm Lưu mẫu để áp dụng cho Sales.',
      style:Theme.of(context).textTheme.bodySmall),
     const SizedBox(height:80),
    ]),
@@ -317,7 +345,7 @@ class _SurveyTemplateEditorPageState extends State<SurveyTemplateEditorPage> {
      const SizedBox(width:10),
      Expanded(child:FilledButton.icon(key:const Key('template-publish-button'),
       onPressed:saving?null:publish,icon:const Icon(Icons.publish_outlined),
-      label:const Text('Phát hành'))),
+      label:const Text('Lưu mẫu'))),
     ]),
    )),
   ));
