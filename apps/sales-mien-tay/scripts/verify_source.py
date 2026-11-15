@@ -38,8 +38,16 @@ assert release_workflow.is_file(), "Missing signed Android release workflow"
 source = release_workflow.read_text(encoding="utf8")
 assert "ci_run_id:" in source and "publish_production:" in source, "Release approval gate missing"
 assert "flutter build apk --release" in source, "Signed release build missing"
-assert "FIELD_WORK_ANDROID_CERT_SHA256" in source, "Signer pinning missing"
-assert "publish_android_release.py" in source, "Immutable R2 publisher missing"
+assert "id-token: write" in source, "Trusted GitHub OIDC permissions missing"
+assert "FIELD_WORK_CERT_SHA256" in source, "Persistent signer pinning missing"
+assert "github_oidc_release.py signing" in source, "Encrypted signer restore missing"
+assert "github_oidc_release.py publish" in source, "Verified private R2 publisher missing"
+oidc_publisher = ROOT / "scripts" / "github_oidc_release.py"
+ast.parse(oidc_publisher.read_text(encoding="utf8"), filename=str(oidc_publisher))
+internal_publisher = (backend / "src" / "android_release_publisher.ts").read_text(encoding="utf8")
+assert "jwtVerify" in internal_publisher and "job_workflow_ref" in internal_publisher, "GitHub OIDC scope missing"
+assert "AES-GCM" in internal_publisher and "private/signing/" in internal_publisher, "Protected signing key storage missing"
+assert "releases/latest.json" in internal_publisher, "Atomic release manifest missing"
 native = flutter / "android"
 gradle = (native / "app" / "build.gradle.kts").read_text(encoding="utf8")
 assert 'applicationId = "com.example.sales_mien_tay"' in gradle, "Existing app ID changed"
