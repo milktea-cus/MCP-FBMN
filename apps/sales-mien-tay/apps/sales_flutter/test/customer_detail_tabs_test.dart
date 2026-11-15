@@ -372,15 +372,20 @@ void main(){
    addTearDown(tester.view.resetDevicePixelRatio);
    final factory=newIdbFactoryMemory();
    final queue=OfflineQueue(SalesSession(),'sales-1','scope-1',factory:factory);
-   await queue.cache('customer-media:$customerId',[images.first]);
-   await queue.cache('visits:$customerId',[]);
-   final png=base64Decode(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/hoUAAAAASUVORK5CYII=');
-   await CustomerPhotoCache(queue).put(customerId,'customer',coverId,png);
+   await tester.runAsync(()async{
+    await queue.cache('customer-media:$customerId',[images.first]);
+    await queue.cache('visits:$customerId',[]);
+    final png=base64Decode(
+     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/hoUAAAAASUVORK5CYII=');
+    await CustomerPhotoCache(queue).put(customerId,'customer',coverId,png);
+   });
    final service=PendingMediaService();
    await tester.pumpWidget(MaterialApp(home:CustomerDetail(
     service:service,customer:customer(),queue:queue,
     regions:const RegionCatalog(<String,List<String>>{}))));
+   await tester.runAsync(()async{
+    await Future<void>.delayed(const Duration(milliseconds:50));
+   });
    await tester.pump();
    await tester.pump();
    await tester.tap(find.text('Hình ảnh'));
@@ -402,13 +407,18 @@ void main(){
     (tester)async{
    final factory=newIdbFactoryMemory();
    final queue=OfflineQueue(SalesSession(),'sales-1','scope-1',factory:factory);
-   await queue.cache('customer-media:$customerId',[images.first]);
-   await CustomerPhotoCache(queue).put(customerId,'customer',coverId,
-    Uint8List.fromList([1,2,3]));
+   await tester.runAsync(()async{
+    await queue.cache('customer-media:$customerId',[images.first]);
+    await CustomerPhotoCache(queue).put(customerId,'customer',coverId,
+     Uint8List.fromList([1,2,3]));
+   });
    final service=PendingMediaService();
    await tester.pumpWidget(MaterialApp(home:CustomerDetail(
     service:service,customer:customer(),queue:queue,
     regions:const RegionCatalog(<String,List<String>>{}))));
+   await tester.runAsync(()async{
+    await Future<void>.delayed(const Duration(milliseconds:50));
+   });
    await tester.pump();
    await tester.pump();
    service.galleryResponse.completeError(
@@ -420,8 +430,11 @@ void main(){
     await Future<void>.delayed(const Duration(milliseconds:40));
    });
    await tester.pump();
-   expect(await queue.cached('customer-media:$customerId'),isEmpty);
-   expect((await CustomerPhotoCache(queue).usage())['entries'],0);
+   final removed=await tester.runAsync(()async=>(
+    await queue.cached('customer-media:$customerId'),
+    await CustomerPhotoCache(queue).usage()));
+   expect(removed?.$1,isEmpty);
+   expect(removed?.$2['entries'],0);
    expect(find.text('Không có quyền xem dữ liệu này'),findsOneWidget);
    await tester.pumpWidget(const SizedBox.shrink());
    queue.dispose();
