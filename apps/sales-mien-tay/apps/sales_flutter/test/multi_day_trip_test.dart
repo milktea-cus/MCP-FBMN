@@ -80,8 +80,11 @@ void main(){
    'route_date':'2026-10-28','status':'ready',
    'plan_status':'planned','work_session_state':'open','trip_id':null};
   final finished={...old,'work_session_state':'done'};
-  final expired=mergeTripRoutes([], [trip(from:'2026-10-01',to:'2026-10-31')],
-   [],'sales-1','2026-11-15');
+  final expired=<Map<String,dynamic>>[{
+   'id':routeId,'trip_id':tripId,'trip_start_date':'2026-10-01',
+   'trip_end_date':'2026-10-31','trip_closed_at':null,
+   'status':'ready','plan_status':'planned',
+  }];
   expect(expired,hasLength(1));
   final rows=outstandingWorkRoutes([old],expired,'2026-11-15','2026-11-15');
   expect(rows,hasLength(2));

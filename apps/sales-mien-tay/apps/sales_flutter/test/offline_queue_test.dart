@@ -256,4 +256,74 @@ void main(){
   q.dispose();
  });
 
+ test('P0 read-only plan 409 reconciliation rewrites child route dependency',()async{
+  const old='11111111-1111-4111-8111-111111111111',
+    canonical='99999999-9999-4999-8999-999999999999',
+    child='22222222-2222-4222-8222-222222222222';
+  final network=MockClient((req)async{
+   expect(req.method,'GET',reason:'Reconciliation never POSTs the same plan');
+   return http.Response(jsonEncode({'items':[{
+    'id':canonical,'owner_sub':'sales-409','period_ym':'2026-11',
+    'work_date':'2026-11-14','scope_kind':'territory',
+    'scope_key':'Bến Tre|','province':'Bến Tre','district':'',
+    'purpose':'Tìm khách mới','note':'','status':'planned',
+    'target_new_customers':0}]}),200,
+    headers:{'content-type':'application/json'});
+  });
+  final q=OfflineQueue(Disconnected(),'sales-409','1',
+   factory:newIdbFactoryMemory(),networkClient:network);
+  await q.enqueue('/api/v1/monthly-plans',{
+   'client_ref':old,'period_ym':'2026-11','work_date':'2026-11-14',
+   'scope_kind':'territory','scope_key':'Bến Tre|',
+   'province':'Bến Tre','district':'','purpose':'Tìm khách mới',
+   'note':'','status':'planned','target_new_customers':0});
+  await q.enqueue('/api/v1/day-routes',{
+   'client_ref':child,'monthly_plan_id':old,
+   'route_date':'2026-11-14'},dependsOn:[old]);
+  final original=q.pending.first;
+  final d=await q.db,t=d.transaction('outbox',idbModeReadWrite);
+  await t.objectStore('outbox').put({...original,'status':'blocked',
+   'error':'HTTP 409: Trùng lịch'});await t.completed;await q.reload();
+  await q.reconcileBlockedRoutes();
+  expect(q.pending,hasLength(1));
+  expect((q.pending.single['payload'] as Map)['monthly_plan_id'],canonical);
+  expect(q.pending.single['depends_on'],isEmpty);
+  q.dispose();network.close();
+ });
+
+ test('P0 trip 409 match preserves mutation and rebinds extend to canonical trip',()async{
+  const old='33333333-3333-4333-8333-333333333333',
+    canonical='88888888-8888-4888-8888-888888888888',
+    route='22222222-2222-4222-8222-222222222222',
+    extension='77777777-7777-4777-8777-777777777777';
+  final scope={'scope_kind':'territory','scope_key':'Bến Tre|',
+   'province':'Bến Tre','district':''};
+  final network=MockClient((req)async{
+   expect(req.method,'GET',reason:'Only read canonical trip');
+   return http.Response(jsonEncode({'items':[{
+    'id':canonical,'day_route_id':route,'owner_sub':'sales-trip',
+    'start_date':'2026-11-14','end_date':'2026-11-16',
+    'purpose':'Đi thị trường','note':'','scopes':[scope],
+    'priority_customer_ids':[]}]}),200,headers:{'content-type':'application/json'});
+  });
+  final q=OfflineQueue(Disconnected(),'sales-trip','1',
+   factory:newIdbFactoryMemory(),networkClient:network);
+  await q.enqueue('/api/v1/trips',{
+   'client_ref':old,'mutation_ref':old,'day_route_id':route,
+   'start_date':'2026-11-14','end_date':'2026-11-16',
+   'purpose':'Đi thị trường','note':'',
+   'scopes':[scope],'priorities':<String>[]});
+  await q.enqueue('/api/v1/trips/$old/extend',{
+   'client_ref':extension,'version':1,'end_date':'2026-11-18'},dependsOn:[old]);
+  final first=q.pending.first,d=await q.db;
+  final t=d.transaction('outbox',idbModeReadWrite);
+  await t.objectStore('outbox').put({...first,'status':'blocked','error':'HTTP 409'});
+  await t.completed;await q.reload();
+  await q.reconcileBlockedRoutes();
+  expect(q.pending,hasLength(1));
+  expect(q.pending.single['path'],'/api/v1/trips/$canonical/extend');
+  expect(q.pending.single['depends_on'],isEmpty);
+  q.dispose();network.close();
+ });
+
 }
