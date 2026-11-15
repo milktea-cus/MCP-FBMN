@@ -43,3 +43,36 @@ Map<String,dynamic> effectiveRouteDate(Map<String,dynamic> route,
  }
  return route;
 }
+
+/// All work evidence queued for this route must be acknowledged before its
+/// closing mutation. Unrelated blocked work must not lock this route.
+List<String> workSessionClosureDependencies({
+ required String routeId,required String sessionId,
+ required List<Map<String,dynamic>> pending,
+ Iterable<String> stopIds=const <String>[],
+}){
+ final relevant=<String>{routeId,sessionId,...stopIds};
+ final captured=<String>{};
+ var changed=true;
+ while(changed){
+  changed=false;
+  for(final job in pending){
+   final payload=job['payload'] as Map?;
+   final ref=payload?['client_ref']?.toString()??'';
+   final path=job['path']?.toString()??'';
+   final linked=path.startsWith('/api/v1/day-routes/$routeId')||
+    path.startsWith('/api/v1/work-sessions/$sessionId')||
+    ref==routeId||ref==sessionId||
+    relevant.contains(payload?['day_route_id']?.toString())||
+    relevant.contains(payload?['route_stop_id']?.toString())||
+    relevant.contains(payload?['day_route_stop_id']?.toString())||
+    relevant.contains(job['session_id']?.toString())||
+    (job['depends_on'] as List? ?? []).any((v)=>relevant.contains(v.toString()));
+   if(linked&&ref.isNotEmpty){
+    if(captured.add(ref))changed=true;
+    relevant.add(ref);
+   }
+  }
+ }
+ return captured.toList();
+}

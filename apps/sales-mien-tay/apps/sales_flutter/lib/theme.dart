@@ -38,6 +38,15 @@ class SalesTheme {
   static const tableHeader = Color(0xFFF4EDFA);
   static const tableInk = Color(0xFF43215F);
   static const caution = Color(0xFFAD6317);
+  // Shared route lifecycle colors (paired contrast for light and dark).
+  static const statusRunning = Color(0xFF1558B0);
+  static const statusRunningDark = Color(0xFF8FB9FF);
+  static const statusCompleted = Color(0xFF187A46);
+  static const statusCompletedDark = Color(0xFF8ADDAD);
+  static const statusOverdue = Color(0xFF9E5613);
+  static const statusOverdueDark = Color(0xFFFFC481);
+  static const statusPending = Color(0xFF8A6600);
+  static const statusPendingDark = Color(0xFFFFD77E);
   static const controlRadius = 9.0;
   static const fieldHeight = 40.0;
   static const controlFontSize = 13.0;
