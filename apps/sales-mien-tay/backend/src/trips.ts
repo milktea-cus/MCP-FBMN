@@ -79,6 +79,7 @@ export async function tripRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL):Pr
  const suffix=url.pathname.slice('/api/v1/trips'.length),db=neon(env.DATABASE_URL);
  if(suffix===''&&req.method==='GET'){
   const from=url.searchParams.get('from'),to=url.searchParams.get('to');
+  const includeOverdue=url.searchParams.get('include_overdue')==='1';
   if((from!==null&&!isDay(from))||(to!==null&&!isDay(to))||(from&&to&&(from>to||days(from,to)>400)))
    return fail('TRIP_INVALID','Khoảng ngày không hợp lệ');
   const rows=await db`SELECT t.*,r.status AS route_status,p.scope_kind,p.scope_key,p.province,p.district,
@@ -93,8 +94,10 @@ export async function tripRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL):Pr
         WHEN t.end_date<(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date THEN 'overdue' ELSE 'active' END AS trip_state
    FROM public.field_trips t JOIN public.field_day_routes r ON r.id=t.day_route_id
    JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id
-   WHERE (${from}::date IS NULL OR t.end_date>=${from}::date)
-     AND (${to}::date IS NULL OR t.start_date<=${to}::date)
+   WHERE (( (${from}::date IS NULL OR t.end_date>=${from}::date)
+       AND (${to}::date IS NULL OR t.start_date<=${to}::date))
+     OR (${includeOverdue} AND t.closed_at IS NULL AND
+       t.end_date<(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date))
      AND (t.owner_sub=${actor.sub} OR ${actor.admin} OR
        (${actor.manager} AND public.sales_staff_in_subtree(${actor.sub},t.owner_sub)))
    ORDER BY t.start_date,t.id LIMIT 500`;

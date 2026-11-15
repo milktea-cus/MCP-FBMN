@@ -52,6 +52,7 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
  if(suffix===''&&req.method==='GET'){
   const month=url.searchParams.get('month')??'';
   if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))return fail('Tháng không hợp lệ');
+  const includeOverdue=url.searchParams.get('include_overdue')==='1';
   const day=url.searchParams.get('day')??'';
   if(day&&(!/^\d{4}-\d{2}-\d{2}$/.test(day)||
     day.slice(0,7)!==month||!Number.isFinite(Date.parse(day))||
@@ -89,8 +90,11 @@ export async function dayRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:URL
    FROM public.field_day_routes r JOIN public.field_monthly_plans p ON p.id=r.monthly_plan_id
    LEFT JOIN public.field_work_sessions w ON w.day_route_id=r.id
    LEFT JOIN public.field_trips t ON t.day_route_id=r.id
-   WHERE p.period_ym=${month} AND
-    (${day||null}::date IS NULL OR r.route_date=${day||null}::date) AND
+   WHERE ((p.period_ym=${month} AND
+      (${day||null}::date IS NULL OR r.route_date=${day||null}::date))
+     OR (${includeOverdue} AND t.id IS NULL AND r.status='ready'
+      AND p.status='planned' AND r.route_date<(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+      AND coalesce(w.state,'open') NOT IN ('done','cancelled'))) AND
     (r.owner_sub=${actor.sub} OR ${actor.admin} OR
      (${actor.manager} AND public.sales_staff_in_subtree(${actor.sub},r.owner_sub)))
    ORDER BY r.route_date,r.created_at,r.id LIMIT 2000`;
