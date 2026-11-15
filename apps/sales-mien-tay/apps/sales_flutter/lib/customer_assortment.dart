@@ -388,6 +388,10 @@ class _CustomerBrandsPanelState extends State<_CustomerBrandsPanel>{
  }
  @override Widget build(BuildContext context){
   return Card(child:ExpansionTile(
+   // NestedScrollView stores the products ListView scroll offset as a double.
+   // Without an independent key, ExpansionTile reads that same PageStorage slot
+   // as a bool and crashes the entire Sản phẩm tab on Flutter 3.50.
+   key:const PageStorageKey<String>('customer-market-brands-expansion'),
    title:const Text('Nhãn hàng thị trường tại điểm bán'),
    subtitle:Text('${sightings.length} nhãn đang ghi nhận'),
    initiallyExpanded:false,
