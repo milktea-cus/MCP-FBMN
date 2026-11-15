@@ -164,7 +164,7 @@ class _ScopedRecordEditorState extends State<ScopedRecordEditor>{
         Padding(padding:const EdgeInsets.all(12),child:FilledButton(
          onPressed:()=>Navigator.pop(ctx),child:Text('Xong · ${_customerIds.length} khách'))),
        ])));
-    }))));
+    })));
   }finally{search.dispose();}
  }
  Widget _regionFields()=>Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
