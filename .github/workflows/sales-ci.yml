@@ -22,7 +22,7 @@ permissions:
 # Every main push tests the newest source; cancel stale intermediate commits,
 # so old Android builds cannot starve the production acceptance run.
 concurrency:
-  group: sales-ci-${{ github.workflow }}-${{ github.ref }}
+  group: sales-ci-forms-v2-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
@@ -102,6 +102,7 @@ jobs:
           retention-days: 7
 
   flutter-regression:
+    timeout-minutes: 6
     name: Flutter Regression / ${{ matrix.shard }}
     runs-on: ubuntu-latest
     strategy:
@@ -133,6 +134,7 @@ jobs:
           printf 'Running %s test files in shard %s\n' "${#group[@]}" "${{ matrix.shard }}"
           flutter test --concurrency=1 --timeout=75s "${group[@]}"
   flutter-form-lifecycle:
+    timeout-minutes: 4
     name: Flutter Form Lifecycle / Isolated
     runs-on: ubuntu-latest
     defaults:
