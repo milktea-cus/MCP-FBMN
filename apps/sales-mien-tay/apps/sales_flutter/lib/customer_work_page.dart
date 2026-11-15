@@ -127,6 +127,8 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
  final note=TextEditingController();
  Map<String,dynamic>? profile;
  Map<String,dynamic>? template;
+ List<Map<String,dynamic>> templateChoices=[];
+ String? selectedFormId;
  Map<String,dynamic> answers={};
  List<Map<String,dynamic>> history=[];
  bool loading=true,saving=false,denied=false,brandsChecked=false;
@@ -155,7 +157,7 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
  }
  Future<void> persistDraft(){
   final saved={'note':note.text,'answers':Map<String,dynamic>.from(answers),
-  'brands_checked':brandsChecked};
+  'brands_checked':brandsChecked,'form_id':selectedFormId};
   pendingWrites=pendingWrites.catchError((_){})
    .then((_)=>widget.queue.cache(draftKey,[saved]));
   return pendingWrites;
@@ -168,6 +170,7 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
     final a=drafts.first['answers'];
     setState((){
      note.text=drafts.first['note']?.toString()??'';
+     selectedFormId=drafts.first['form_id']?.toString();
      if(a is Map)answers=Map<String,dynamic>.from(a);
      brandsChecked=drafts.first.containsKey('brands_checked')
       ?drafts.first['brands_checked']==true:answers['brands'] is List;
@@ -188,25 +191,30 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
     inform('Hồ sơ đang dùng dữ liệu trên máy; chưa cập nhật từ máy chủ.');
    }
    final area=province;
-   final provinceKey='survey-template:$area',commonKey='survey-template:*';
-   final provinceSaved=area.isEmpty?<Map<String,dynamic>>[]:await cache(provinceKey);
-   final commonSaved=await cache(commonKey);
-   if(mounted)setState(()=>
-    template=mergeCustomerVisitTemplates([...provinceSaved,...commonSaved],area));
+   final key='survey-forms:'+area;
+   final cachedForms=await cache(key);
+   if(cachedForms.isNotEmpty&&mounted)setState((){
+    templateChoices=cachedForms;
+    template=selectedFormId==null?cachedForms.firstOrNull:
+     cachedForms.where((t)=>t['form_id']==selectedFormId).firstOrNull;
+    selectedFormId??=template?['form_id']?.toString();
+   });
    try{
     final res=decodeApi(await http.get(widget.service.uri(
      '/api/v1/survey-templates',{'province':area.isEmpty?'*':area}),
      headers:widget.service.headers).timeout(const Duration(seconds:15)));
     final items=((res['items'] as List?)??[])
      .map((v)=>Map<String,dynamic>.from(v as Map)).toList();
-    if(items.isNotEmpty){
-     if(mounted)setState(()=>template=mergeCustomerVisitTemplates(items,area));
-     for(final row in items){
-      try{
-       await widget.queue.cache('survey-template:${row['province']}',[row]);
-      }catch(_){}
+    if(mounted)setState((){
+     templateChoices=items;
+     template=selectedFormId==null?items.firstOrNull:
+      items.where((t)=>t['form_id']==selectedFormId).firstOrNull;
+     selectedFormId??=template?['form_id']?.toString();
+     if(template==null&&selectedFormId!=null){
+      message='Mẫu đã chọn không còn áp dụng; bản nháp vẫn được giữ trên máy. Hãy chọn mẫu khác.';
      }
-    }
+    });
+    await widget.queue.cache(key,items);
    }catch(e){
     if(e is ApiFailure&&(e.status==401||e.status==403)){
      if(mounted)setState(()=>denied=true);
@@ -224,6 +232,28 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
     // Assigned customers and offline drafts must remain available.
    }
   }finally{if(mounted)setState(()=>loading=false);}
+ }
+ Future<void> selectTemplate(String? id)async{
+  if(id==null||id==selectedFormId)return;
+  try{
+   await persistDraft();
+   if(selectedFormId!=null){
+    final old=await cache(draftKey);
+    if(old.isNotEmpty)await widget.queue.cache(draftKey+':'+selectedFormId!,old);
+   }
+   final saved=await cache(draftKey+':'+id);
+   if(!mounted)return;
+   setState((){
+    selectedFormId=id;
+    template=templateChoices.where((t)=>t['form_id']==id).firstOrNull;
+    answers=saved.isNotEmpty&&saved.first['answers'] is Map
+      ?Map<String,dynamic>.from(saved.first['answers'] as Map):{};
+    brandsChecked=saved.isNotEmpty&&saved.first['brands_checked']==true;
+    note.text=saved.isNotEmpty?saved.first['note']?.toString()??'':'';
+    message=null;
+   });
+   await persistDraft();
+  }catch(e){inform('Không đổi được mẫu: '+e.toString());}
  }
  void answer(String id,dynamic value){
   if(!writable||saving)return;
@@ -485,12 +515,19 @@ class _CustomerWorkPageState extends State<CustomerWorkPage>{
       :'Chưa ghi nhận hoạt động',
       style:Theme.of(context).textTheme.titleSmall),
     const SizedBox(height:10),
-    if(template==null)const Text('Chưa tải được mẫu hạng mục ghé khách. '
-     'Admin cấu hình tại Thiết lập · Mẫu làm việc; có thể ghi chú/GPS/ảnh/đơn.'),
+    if(template==null&&templateChoices.isEmpty)
+     const Text('Chưa có mẫu áp dụng. Có thể lưu GPS, ảnh và đơn; Admin tạo mẫu tại Thiết lập.'),
+    if(templateChoices.isNotEmpty)DropdownButtonFormField<String>(
+     key:ValueKey('customer-work-form:'+selectedFormId.toString()),
+     initialValue:templateChoices.any((f)=>f['form_id']==selectedFormId)
+      ?selectedFormId:null,
+     isExpanded:true,decoration:const InputDecoration(labelText:'Mẫu làm việc'),
+     items:[for(final f in templateChoices)DropdownMenuItem<String>(
+      value:f['form_id'].toString(),
+      child:Text(f['title']?.toString()??'Mẫu làm việc',
+       overflow:TextOverflow.ellipsis))],
+     onChanged:!writable||saving?null:(id)=>unawaited(selectTemplate(id))),
     if(template!=null)...[
-     Text('Mẫu chung v${template!['common_version']??'—'}'
-      '${template!['province_version']==null?'':' · $province v${template!['province_version']}'}',
-      style:Theme.of(context).textTheme.titleMedium),
      const SizedBox(height:8),
      for(final q in fields)...[
       if(q['catalog_source']=='brands')...[
