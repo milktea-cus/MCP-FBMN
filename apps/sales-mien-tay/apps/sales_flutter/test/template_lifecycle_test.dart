@@ -31,6 +31,7 @@ Future<void> settle(WidgetTester tester)async{
 
 void main(){
  testWidgets('Nhiều mẫu cùng tỉnh, mỗi mẫu bật ngưng áp dụng độc lập',(tester)async{
+  print('FBMN_LIFE:BEGIN');
   final state=['active','active'],revision=[1,1];
   final transitions=<String>[];
   final client=MockClient((request)async{
@@ -52,30 +53,43 @@ void main(){
    }
    return http.Response('{"items":[]}',200,headers:{'content-type':'application/json'});
   });
+  print('FBMN_LIFE:BEFORE_PUMPWIDGET');
   await tester.pumpWidget(MaterialApp(home:SurveyTemplateAdmin(
    service:CustomerService('https://example.test','token',client:client),
    regions:const RegionCatalog({'Bến Tre':['Bình Đại'],'Tiền Giang':['Mỹ Tho']}),
    embedded:true)));
+  print('FBMN_LIFE:AFTER_PUMPWIDGET');
   await settle(tester);
+  print('FBMN_LIFE:AFTER_SETTLE');
   expect(find.byKey(const Key('template-edit-button')),findsNWidgets(2));
   expect(find.text('Khảo sát NPP'),findsOneWidget);
   expect(find.text('Khảo sát nhà sách'),findsOneWidget);
   expect(find.textContaining('Lịch sử phiên bản'),findsNothing);
+  print('FBMN_LIFE:BEFORE_PAUSE_TAP');
   await tester.tap(find.byKey(const Key('template-pause-button')).first);
+  print('FBMN_LIFE:AFTER_PAUSE_TAP');
   await settle(tester);
+  print('FBMN_LIFE:BEFORE_CONFIRM_PAUSE');
   await tester.tap(find.widgetWithText(FilledButton,'Ngưng áp dụng').last);
+  print('FBMN_LIFE:AFTER_CONFIRM_PAUSE');
   await settle(tester);
   expect(state,['paused','active']);
   expect(find.byKey(const Key('template-resume-button')),findsOneWidget);
+  print('FBMN_LIFE:BEFORE_RESUME_TAP');
   await tester.tap(find.byKey(const Key('template-resume-button')));
+  print('FBMN_LIFE:AFTER_RESUME_TAP');
   await settle(tester);
+  print('FBMN_LIFE:BEFORE_CONFIRM_RESUME');
   await tester.tap(find.widgetWithText(FilledButton,'Áp dụng lại').last);
+  print('FBMN_LIFE:AFTER_CONFIRM_RESUME');
   await settle(tester);
   expect(state,['active','active']);
   expect(transitions,['paused','active']);
   await tester.pumpWidget(const SizedBox.shrink());
   await settle(tester);
+  print('FBMN_LIFE:BEFORE_CLIENT_CLOSE');
   client.close();
+  print('FBMN_LIFE:END');
  });
 
  testWidgets('Lỗi API không hiển thị danh sách rỗng giả và cho thử lại',(tester)async{
