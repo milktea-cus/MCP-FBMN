@@ -110,7 +110,9 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          # Android Lint in image_picker_android uses Java 21 List.removeLast().
+          # Running with JDK 17 crashes lintVitalAnalyzeRelease, not app code.
+          java-version: '21'
       - run: flutter pub get
       - name: Restore or bootstrap durable release keystore using GitHub OIDC
         run: python3 ../../scripts/github_oidc_release.py signing
