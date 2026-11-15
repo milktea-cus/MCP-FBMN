@@ -7,6 +7,7 @@ import 'offline_queue.dart';
 import 'monthly_plan.dart';
 import 'day_route.dart';
 import 'work_session_identity.dart';
+import 'route_status.dart';
 import 'planning_periods.dart';
 import 'session.dart';
 
@@ -129,7 +130,8 @@ List<Map<String,dynamic>> mergeTripRoutes(
 /// concluded. No date rollover may mark them complete or delete them.
 List<Map<String,dynamic>> outstandingWorkRoutes(
  List<Map<String,dynamic>> routes,List<Map<String,dynamic>> selectedRoutes,
- String selectedDate,String today){
+ String selectedDate,String today,
+ [List<Map<String,dynamic>> pending=const []]){
  if(selectedDate!=today)return [];
  final seen=<String>{};
  final overdue=<Map<String,dynamic>>[];
@@ -137,6 +139,7 @@ List<Map<String,dynamic>> outstandingWorkRoutes(
   final end=r['trip_end_date']?.toString()??'';
   if(r['trip_id']!=null&&r['trip_closed_at']==null&&
      end.length>=10&&end.substring(0,10).compareTo(today)<0&&
+     routeProgress(r,pending,today)==RouteProgress.overdue&&
      seen.add(r['id'].toString()))overdue.add(r);
  }
  for(final r in routes){
@@ -144,7 +147,7 @@ List<Map<String,dynamic>> outstandingWorkRoutes(
   if(r['trip_id']!=null||date.length<10||
     date.substring(0,10).compareTo(today)>=0||
     r['status']!='ready'||r['plan_status']!='planned'||
-    ['done','cancelled'].contains(r['work_session_state'])||
+    routeProgress(r,pending,today)!=RouteProgress.overdue||
     !seen.add(r['id'].toString()))continue;
   overdue.add(r);
  }
@@ -304,6 +307,108 @@ class _WorkHubPageState extends State<WorkHubPage>{
    queue:widget.queue,service:widget.service,routeId:id,cachedRoute:route)));
   if(mounted)await load();
  }
+
+ /// Close a previously started WorkSession even after its route date.
+ /// Records are never backdated or fabricated: server ACK is authoritative.
+ Future<void> completeOneDayRoute(Map<String,dynamic> route)async{
+  if(!mounted||route['trip_id']!=null||
+     route['owner_sub']!=widget.queue.identity)return;
+  final id=route['id']?.toString()??'';
+  final state=workSessionState(route,widget.queue.pending);
+  if(state!='ongoing'){
+   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+    content:Text('Tuyến chưa có phiên đang chạy. Không thể xác nhận đã đi khi chưa có phiên.')));
+   return;
+  }
+  if(isClosingRoute(route,widget.queue.pending)){
+   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+    content:Text('Đã lưu yêu cầu chốt. Xem tiến độ ở Chi tiết đồng bộ.')));
+   return;
+  }
+  final session=workSessionRouteId(route,widget.queue.identity);
+  final note=TextEditingController();
+  final counts=WorkCounts.fromRoutes([route]);
+  final confirm=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(
+   title:const Text('Chốt hoàn thành tuyến?'),
+   content:SingleChildScrollView(child:Column(
+    mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,
+    children:[
+     Text('Tuyến ngày ${(route['route_date']?.toString()??'').substring(0,10)}'),
+     Text('Đã ghé ${counts.visited} · Khảo sát ${counts.surveys} · '
+      'GPS thị trường ${counts.marketVisits} · Lead ${counts.leads}'),
+     const SizedBox(height:10),
+     const Text('Chỉ chốt trạng thái. Không tự tạo GPS, ảnh, khảo sát hay khách. '
+      'Kết quả được xác nhận sau khi tất cả công việc đã đồng bộ.'),
+     const SizedBox(height:10),
+     TextField(controller:note,maxLength:2000,maxLines:2,
+      decoration:const InputDecoration(labelText:'Ghi chú kết quả (tùy chọn)')),
+    ])),
+   actions:[
+    TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('Chưa chốt')),
+    FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('Chốt tuyến')),
+   ]));
+  final textNote=note.text.trim();note.dispose();
+  if(confirm!=true||!mounted)return;
+  // Collect real route stop IDs for dependent photos, surveys and visits.
+  List<Map<String,dynamic>> stops=[];
+  var detailsLoaded=false;
+  try{
+   final response=decodeApi(await (widget.service.client?.get(
+    widget.service.uri('/api/v1/day-routes/$id'),
+    headers:widget.service.headers)??
+    http.get(widget.service.uri('/api/v1/day-routes/$id'),
+     headers:widget.service.headers)).timeout(const Duration(seconds:18)));
+   stops=(response['stops'] as List? ?? []).map((x)=>
+    Map<String,dynamic>.from(x as Map)).toList();
+   detailsLoaded=true;
+  }catch(_){
+   try{
+    final rows=await widget.queue.cached('day-route:$id');
+    if(rows.isNotEmpty){
+     stops=(rows.first['stops'] as List? ?? [])
+      .map((x)=>Map<String,dynamic>.from(x as Map)).toList();
+     detailsLoaded=true;
+    }
+   }catch(_){}
+  }
+  // Without route detail, unknown evidence cannot safely be sequenced.
+  if(!detailsLoaded){
+   if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+    content:Text('Không xác minh được các việc của tuyến. Mở tuyến khi có mạng để kiểm tra rồi chốt.')));
+   return;
+  }
+  final refs=<String>{
+   for(final stop in stops)if(stop['id']!=null)stop['id'].toString(),
+   for(final job in widget.queue.pending)
+    if(job['path']=='/api/v1/day-routes/$id/stops'&&
+      (job['payload'] as Map?)?['client_ref']!=null)
+     (job['payload'] as Map)['client_ref'].toString(),
+  };
+  final deps=workSessionClosureDependencies(
+   routeId:id,sessionId:session,pending:widget.queue.pending,stopIds:refs);
+  try{
+   await widget.queue.enqueue('/api/v1/work-sessions/$session/close',{
+    'client_ref':const Uuid().v4(),
+    'version':(route['work_session_version'] as num?)?.toInt()??1,
+    'action':'done','note':textNote,
+    'captured_at':DateTime.now().toUtc().toIso8601String(),
+   },dependsOn:deps);
+   if(!mounted)return;
+   final originalDate=DateTime.tryParse(
+    (route['route_date']?.toString()??'').substring(0,10));
+   setState((){
+    tab=2;
+    if(originalDate!=null)day=originalDate;
+   });
+   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+    content:Text('Đã lưu yêu cầu chốt trên máy. Kết quả xác nhận sau khi đồng bộ.')));
+   await load();
+  }catch(e){
+   if(mounted)ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content:Text('Không chốt được tuyến: $e')));
+  }
+ }
+
  Future<void> mutateTrip(Map<String,dynamic> route,{required bool close})async{
   final id=route['trip_id']?.toString();
   if(id==null)return;
