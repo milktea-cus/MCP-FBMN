@@ -44,10 +44,12 @@ export async function schoolRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
  const province=(url.searchParams.get('province')??'').trim();
  const district=(url.searchParams.get('district')??'').trim();
  const search=(url.searchParams.get('q')??'').trim();
+ const level=(url.searchParams.get('level')??'').trim();
  const page=pageNumber(url.searchParams.get('page'),1,500);
  const size=pageNumber(url.searchParams.get('size'),20,50);
  if(province.length>120||district.length>120||search.length>100||
-   !page||!size||(district!==''&&province===''))
+   !['','1','2','3'].includes(level)||!page||!size||
+   (district!==''&&province===''))
   return invalid('Bộ lọc hoặc phân trang không hợp lệ');
  const result=await db`
    WITH visible AS (
@@ -58,6 +60,15 @@ export async function schoolRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
     WHERE (${province}='' OR s.province_old=${province})
       AND (${district}='' OR s.district_old=${district})
       AND (${search}='' OR position(lower(${search}) in lower(s.name))>0)
+      AND (
+       ${level}=''
+       OR (${level}='1' AND s.education_level IN (
+         'Tiểu học','Tiểu học & THCS','Tiểu học & THCS & THPT'))
+       OR (${level}='2' AND s.education_level IN (
+         'THCS','Tiểu học & THCS','THCS & THPT','Tiểu học & THCS & THPT'))
+       OR (${level}='3' AND s.education_level IN (
+         'THPT','THCS & THPT','Tiểu học & THCS & THPT'))
+      )
       AND (
        ${actor.admin}
        OR EXISTS(SELECT 1 FROM public.staff_scopes ss
