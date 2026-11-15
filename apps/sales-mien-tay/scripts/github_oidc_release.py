@@ -52,6 +52,17 @@ def call(path, method="GET", payload=None, headers=None, stream=False):
         return json.load(response)
 
 
+def safe_oidc_claims():
+    """Only public workflow identity claims for troubleshooting, never the JWT."""
+    token = oidc()
+    encoded = token.split(".")[1]
+    encoded += "=" * (-len(encoded) % 4)
+    claims = json.loads(base64.urlsafe_b64decode(encoded))
+    keys = ("iss", "aud", "sub", "repository", "repository_id",
+            "actor", "event_name", "ref", "job_workflow_ref")
+    return {key: claims.get(key) for key in keys}
+
+
 def fingerprint(path, password):
     report = subprocess.check_output([
         "keytool", "-list", "-v", "-keystore", str(path),
@@ -89,7 +100,12 @@ def signing():
         first = False
     except urllib.error.HTTPError as exc:
         if exc.code != 404:
-            raise RuntimeError("Cloudflare signing retrieval failed: HTTP " + str(exc.code)) from None
+            if exc.code == 403:
+                print("OIDC rejected; public claim metadata:",
+                      json.dumps(safe_oidc_claims(), ensure_ascii=False))
+            message = exc.read(200).decode("utf-8", errors="replace")
+            raise RuntimeError("Cloudflare signing retrieval failed: HTTP " +
+                               str(exc.code) + " response=" + message[:160]) from None
         first = True
         config = generate(target)
         try:
