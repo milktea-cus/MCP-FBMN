@@ -21,6 +21,14 @@ final forms=[
   'provinces':['Bến Tre','Tiền Giang'],'questions':[{'id':'q2','label':'Trưng bày','type':'text','required':false}]},
 ];
 
+// Use bounded frame pumps: a failed API can coexist with indefinite animations
+// elsewhere in the widget tree; test actions must not hang the entire CI runner.
+Future<void> settle(WidgetTester tester)async{
+ await tester.pump();
+ await tester.pump(const Duration(milliseconds:100));
+ await tester.pump(const Duration(milliseconds:250));
+}
+
 void main(){
  testWidgets('Nhiều mẫu cùng tỉnh, mỗi mẫu bật ngưng áp dụng độc lập',(tester)async{
   final state=['active','active'],revision=[1,1];
@@ -48,21 +56,21 @@ void main(){
    service:CustomerService('https://example.test','token',client:client),
    regions:const RegionCatalog({'Bến Tre':['Bình Đại'],'Tiền Giang':['Mỹ Tho']}),
    embedded:true)));
-  await tester.pumpAndSettle();
+  await settle(tester);
   expect(find.byKey(const Key('template-edit-button')),findsNWidgets(2));
   expect(find.text('Khảo sát NPP'),findsOneWidget);
   expect(find.text('Khảo sát nhà sách'),findsOneWidget);
   expect(find.textContaining('Lịch sử phiên bản'),findsNothing);
   await tester.tap(find.byKey(const Key('template-pause-button')).first);
-  await tester.pumpAndSettle();
+  await settle(tester);
   await tester.tap(find.widgetWithText(FilledButton,'Ngưng áp dụng').last);
-  await tester.pumpAndSettle();
+  await settle(tester);
   expect(state,['paused','active']);
   expect(find.byKey(const Key('template-resume-button')),findsOneWidget);
   await tester.tap(find.byKey(const Key('template-resume-button')));
-  await tester.pumpAndSettle();
+  await settle(tester);
   await tester.tap(find.widgetWithText(FilledButton,'Áp dụng lại').last);
-  await tester.pumpAndSettle();
+  await settle(tester);
   expect(state,['active','active']);
   expect(transitions,['paused','active']);
   client.close();
@@ -82,12 +90,12 @@ void main(){
   await tester.pumpWidget(MaterialApp(home:SurveyTemplateAdmin(
    service:CustomerService('https://example.test','token',client:client),
    regions:const RegionCatalog({'Bến Tre':['Bình Đại']}),embedded:true)));
-  await tester.pumpAndSettle();
+  await settle(tester);
   expect(find.byKey(const Key('template-load-error')),findsOneWidget);
   expect(find.byKey(const Key('template-edit-button')),findsNothing);
   broken=false;
   await tester.tap(find.byKey(const Key('template-retry-button')));
-  await tester.pumpAndSettle();
+  await settle(tester);
   expect(find.byKey(const Key('template-edit-button')),findsOneWidget);
   client.close();
  });
@@ -100,7 +108,7 @@ void main(){
    service:CustomerService('https://example.test','token',client:client),
    queue:queue,regions:const RegionCatalog({'Bến Tre':['Bình Đại']}),
    admin:true)));
-  await tester.pumpAndSettle();
+  await settle(tester);
   final controller=DefaultTabController.of(tester.element(find.byType(TabBar)));
   expect(controller.index,1);
   client.close();queue.dispose();
