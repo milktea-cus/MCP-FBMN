@@ -27,6 +27,7 @@ on:
 permissions:
   contents: read
   actions: read
+  id-token: write
 
 concurrency:
   group: field-work-android-r2-production
@@ -111,29 +112,13 @@ jobs:
           distribution: temurin
           java-version: '17'
       - run: flutter pub get
-      - name: Configure release keystore without logging or storing it in Git
-        env:
-          ENCODED_KEYSTORE: ${{ secrets.FIELD_WORK_ANDROID_KEYSTORE_BASE64 }}
-          FIELD_WORK_ANDROID_STORE_PASSWORD: ${{ secrets.FIELD_WORK_ANDROID_STORE_PASSWORD }}
-          FIELD_WORK_ANDROID_KEY_ALIAS: ${{ secrets.FIELD_WORK_ANDROID_KEY_ALIAS }}
-          FIELD_WORK_ANDROID_KEY_PASSWORD: ${{ secrets.FIELD_WORK_ANDROID_KEY_PASSWORD }}
-          CERT_PIN: ${{ secrets.FIELD_WORK_ANDROID_CERT_SHA256 }}
-        run: |
-          set -euo pipefail
-          for var in ENCODED_KEYSTORE FIELD_WORK_ANDROID_STORE_PASSWORD FIELD_WORK_ANDROID_KEY_ALIAS FIELD_WORK_ANDROID_KEY_PASSWORD CERT_PIN; do
-            test -n "${!var}" || { echo "Missing protected release signing setting"; exit 1; }
-          done
-          printf '%s' "$ENCODED_KEYSTORE" | base64 --decode > "$RUNNER_TEMP/field-work-release.jks"
-          chmod 600 "$RUNNER_TEMP/field-work-release.jks"
-          echo "FIELD_WORK_ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/field-work-release.jks" >> "$GITHUB_ENV"
-          echo "FIELD_WORK_ANDROID_STORE_PASSWORD=$FIELD_WORK_ANDROID_STORE_PASSWORD" >> "$GITHUB_ENV"
-          echo "FIELD_WORK_ANDROID_KEY_ALIAS=$FIELD_WORK_ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
-          echo "FIELD_WORK_ANDROID_KEY_PASSWORD=$FIELD_WORK_ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
+      - name: Restore or bootstrap durable release keystore using GitHub OIDC
+        run: python3 ../../scripts/github_oidc_release.py signing
       - name: Build signed release APK (never debug signing)
         run: flutter build apk --release
       - name: Verify APK package code and certificate with Android build tools
         env:
-          EXPECTED_CERT: ${{ secrets.FIELD_WORK_ANDROID_CERT_SHA256 }}
+          EXPECTED_CERT: ${{ env.FIELD_WORK_CERT_SHA256 }}
           EXPECTED_CODE: ${{ env.FIELD_WORK_RELEASE_CODE }}
         run: |
           set -euo pipefail
@@ -167,25 +152,18 @@ jobs:
           name: field-work-android-signed-${{ env.FIELD_WORK_RELEASE_CODE }}
           path: apps/sales-mien-tay/apps/sales_flutter/build/app/outputs/flutter-apk/app-release.apk
           retention-days: 30
-      - name: Publish immutable APK and atomically advance private R2 latest
+      - name: Publish signed APK to private R2 through verified GitHub OIDC
         if: inputs.publish_production == 'yes' || github.event_name == 'issue_comment'
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.FIELD_WORK_R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.FIELD_WORK_R2_SECRET_ACCESS_KEY }}
-          CF_ACCOUNT_ID: e29ec156139b3750d875a9c45ed477ec
           EXPECTED_CODE: ${{ env.FIELD_WORK_RELEASE_CODE }}
           RELEASE_NOTES: ${{ env.FIELD_WORK_RELEASE_NOTES }}
         run: |
           set -euo pipefail
-          test -n "$AWS_ACCESS_KEY_ID" && test -n "$AWS_SECRET_ACCESS_KEY" ||
-            { echo "Private R2 publisher credentials are not configured"; exit 1; }
-          python3 -m pip install --quiet 'boto3>=1.35,<2'
           VERSION="$(sed -n 's/^version: //p' pubspec.yaml | head -n1 | cut -d+ -f1)"
-          SIGNER="$(cat "$RUNNER_TEMP/field-work-signer.txt")"
-          python3 ../../scripts/publish_android_release.py \
+          python3 ../../scripts/github_oidc_release.py publish \
             --apk build/app/outputs/flutter-apk/app-release.apk \
             --version-code "$EXPECTED_CODE" --version-name "$VERSION" \
-            --signer-sha256 "$SIGNER" --notes "$RELEASE_NOTES"
+            --notes "$RELEASE_NOTES"
       - name: Remove keystore from runner
         if: always()
         run: rm -f "$RUNNER_TEMP/field-work-release.jks" "$RUNNER_TEMP/field-work-signer.txt"
