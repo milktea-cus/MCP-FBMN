@@ -5,6 +5,7 @@ import 'pwa_update_page.dart';
 import 'api.dart';
 import 'customers.dart';
 import 'editor.dart';
+import 'scoped_record_editor.dart';
 import 'models.dart';
 import 'theme.dart';
 import 'session.dart';
@@ -250,6 +251,12 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
   }
 
   Future<void> _addRecord(String kind) async {
+    if(kind=='support'||kind=='competitor'){
+      await Navigator.of(context).push(MaterialPageRoute(builder:(_)=>ScopedRecordEditor(
+       kind:kind,regions:_catalog,service:CustomerService(_apiUrl,_accessToken,
+         identity:_queue.identity,revision:_queue.revision),queue:_queue,
+       onSaved:(){_notify('Đã lưu trên máy · chờ đồng bộ');if(mounted)setState((){});})));return;
+    }
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => RecordEditor(
       kind: kind, catalog: _catalog, onSave: (record) async {
         await _queue.enqueue('/api/v1/records',record);
@@ -263,11 +270,61 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
       await _queue.enqueue('/api/v1/records/${record.id}',{'data':data['data'],'version':record.version},method:'PATCH');_notify('Đã lưu thay đổi trên máy · chờ đồng bộ');
     })));
   }
+  Future<void> _editScopedRecord(SalesRecord record)async{
+    await Navigator.push(context,MaterialPageRoute(builder:(_)=>ScopedRecordEditor(
+      kind:record.kind,regions:_catalog,queue:_queue,
+      service:CustomerService(_apiUrl,_accessToken,identity:_queue.identity,revision:_queue.revision),
+      initial:record,onSaved:(){_notify('Đã lưu sửa đổi trên máy · chờ đồng bộ');if(mounted)setState((){});} )));
+  }
+  bool _recordPending(SalesRecord r)=>_queue.pending.any((p){
+    final payload=p['payload'];if(payload is! Map)return false;
+    final path=p['path']?.toString()??'';
+    return (path=='/api/v1/scoped-records'&&payload['client_ref']==r.id)||
+      path=='/api/v1/scoped-records/${r.id}';
+  });
+  bool _recordBlocked(SalesRecord r)=>_queue.pending.any((p){
+    final payload=p['payload'];if(payload is! Map||p['status']!='blocked')return false;
+    return (p['path']=='/api/v1/scoped-records'&&payload['client_ref']==r.id)||
+       p['path']=='/api/v1/scoped-records/${r.id}';
+  });
   String _money(num value) {
     final digits = value.round().toString();
     return '${digits.replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => '.')} đ';
   }
-  List<SalesRecord> _ofKind(String kind) => _items.where((e) => e.kind == kind && (_province.isEmpty || e.province == _province)).toList();
+  List<SalesRecord> _ofKind(String kind) {
+    final current=_items.where((e)=>e.kind==kind).toList();
+    if(kind=='support'||kind=='competitor'){
+      for(final op in _queue.pending){
+        final path=op['path']?.toString()??'';
+        if(!path.startsWith('/api/v1/scoped-records'))continue;
+        final payload=op['payload'];
+        if(payload is! Map||payload['kind']!=kind)continue;
+        final data=payload['data'];
+        if(data is! Map)continue;
+        final initial=path=='/api/v1/scoped-records';
+        final id=initial?payload['client_ref']?.toString()??'':
+          path.substring('/api/v1/scoped-records/'.length);
+        final provinces=(payload['provinces'] as List?)?.cast<String>()??<String>[];
+        final preview=SalesRecord(id:id,kind:kind,owner:_queue.identity,
+          province:provinces.isEmpty?null:provinces.first,
+          district:payload['district']?.toString(),
+          version:(payload['version'] as num?)?.toInt()??0,
+          data:{...Map<String,dynamic>.from(data),
+            'provinces':provinces,
+            'customerIds':payload['customer_ids']??<String>[]});
+        final index=current.indexWhere((r)=>r.id==id);
+        if(index>=0){current[index]=preview;}else{current.insert(0,preview);}
+      }
+    }
+    return current.where((e){
+      if(_province.isEmpty)return true;
+      if(kind=='support'||kind=='competitor'){
+        final provinces=e.data['provinces'];
+        return provinces is List?provinces.contains(_province):e.province==_province;
+      }
+      return e.province==_province;
+    }).toList();
+  }
 
   Widget _coverageTable(List<SalesRecord> surveys) => SalesBrandCoverageTable(
     surveys: surveys,brandNames:_brandCatalog,brandEntries:_brandEntries,
@@ -334,7 +391,15 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
             final record = items[index];
             String detail = record.subtitle;
             if (kind == 'forecast') detail = '${_money(record.forecastTotal)} · $detail';
-            if (kind == 'survey') {
+            if(kind=='competitor'||kind=='support'){
+               final provinces=record.data['provinces'];
+               final provinceText=provinces is List&&provinces.isNotEmpty
+                 ?provinces.join(', '):record.province??'';
+               detail=provinceText;
+               if(record.district!=null&&record.district!.isNotEmpty)detail+=' · ${record.district}';
+               if(kind=='competitor')detail+=' · ${(record.data['customerIds'] as List?)?.length??0} khách';
+             }
+             if (kind == 'survey') {
               detail = 'NPP: ${record.data['distributorCount'] ?? 0} · '
                   'Nhãn: ${record.data['brandCount'] ?? 0} · $detail';
             }
@@ -342,7 +407,14 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
               title: Text(record.title),
               subtitle: Text(detail.isEmpty ? (record.data['notes']?.toString() ?? 'Chưa có ghi chú') : detail),
               leading: Icon(_icons[_selectedIndex], color: SalesTheme.brand),
-              trailing: ['target','forecast'].contains(kind)&&record.owner==_queue.identity?IconButton(tooltip:'Sửa kế hoạch',icon:const Icon(Icons.edit_outlined),onPressed:()=>_editPlan(record)):const Icon(Icons.cloud_done_outlined),
+              trailing: (kind=='support'||kind=='competitor')?Row(mainAxisSize:MainAxisSize.min,children:[
+                 if(_recordPending(record))Icon(_recordBlocked(record)?Icons.error_outline:Icons.cloud_upload_outlined,
+                   color:_recordBlocked(record)?Theme.of(context).colorScheme.error:null)
+                 else const Icon(Icons.cloud_done_outlined),
+                 if(!_recordPending(record)&&(record.owner==_queue.identity||widget.me['role']=='admin'))
+                  IconButton(tooltip:'Sửa bản ghi',icon:const Icon(Icons.edit_outlined),
+                    onPressed:()=>_editScopedRecord(record)),
+                ]):['target','forecast'].contains(kind)&&record.owner==_queue.identity?IconButton(tooltip:'Sửa kế hoạch',icon:const Icon(Icons.edit_outlined),onPressed:()=>_editPlan(record)):const Icon(Icons.cloud_done_outlined),
             ));
           })),
     ]);

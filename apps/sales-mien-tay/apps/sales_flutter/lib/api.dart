@@ -27,7 +27,7 @@ class SalesApi {
   Map<String, String> get _headers => {...sessionHeaders(accessToken),if(identity!=null)'X-Sync-Identity':identity!,if(revision!=null)'X-Sync-Revision':revision!};
   Future<List<SalesRecord>> list(String kind) async {
     // A single stalled module must never pin the whole Field Work dashboard.
-    final uri=_uri('/api/v1/records', {'kind': kind});
+    final uri=_uri((kind=='support'||kind=='competitor')?'/api/v1/scoped-records':'/api/v1/records', {'kind': kind});
     final res = await (client?.get(uri,headers:_headers) ??
       http.get(uri,headers:_headers)).timeout(listTimeout);
     final data = decodeApi(res);
