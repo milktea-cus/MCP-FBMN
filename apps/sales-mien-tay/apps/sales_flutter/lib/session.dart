@@ -9,6 +9,9 @@ const sessionCookieName = '__Host-sales-session';
 String get salesOrigin => kIsWeb ? Uri.base.origin : productionOrigin;
 Map<String,String> sessionHeaders(String cookie) => {
   'Content-Type':'application/json',
+  // Cloudflare Browser Integrity Check must not see the Dart HTTP default UA.
+  // Browsers forbid overriding User-Agent; include this on native only.
+  if (!kIsWeb) 'User-Agent':'FieldWork-Android/1.0',
   if (!kIsWeb) 'Origin':productionOrigin,
   if (!kIsWeb && cookie.isNotEmpty) 'Cookie':'$sessionCookieName=$cookie',
 };
