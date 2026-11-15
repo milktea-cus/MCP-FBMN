@@ -66,6 +66,50 @@ async function activeRelease(bucket:R2Bucket):Promise<AndroidRelease|null>{
     throw Error('release APK not verified');
   return release;
 }
+/**
+ * Public first-install URL. Only the independently verified, immutable signed
+ * release may be downloaded here. No authentication or customer data is exposed.
+ * Subsequent in-app upgrades retain the authenticated HMAC ticket protocol.
+ * R2 stays private: no direct bucket URL or credentials are returned.
+ */
+export async function publicAndroidInstaller(
+ req:Request,env:ReleaseEnv,url:URL,
+):Promise<Response|null>{
+ if(url.pathname!=='/api/v1/app/releases/install.apk')return null;
+ if(req.method!=='GET')return error('Phương thức không được hỗ trợ',405);
+ const bucket=env.APP_RELEASES_BUCKET;
+ if(!bucket)return error('Chưa có bản Android được phát hành',503);
+ try{
+  const release=await activeRelease(bucket);
+  if(!release)return error('Chưa có bản Android được phát hành',404);
+  const range=req.headers.get('Range');
+  let offset=0;
+  if(range){
+   const match=/^bytes=(\d+)-$/.exec(range);
+   if(!match||!Number.isSafeInteger(Number(match[1]))||
+      Number(match[1])>=release.size)
+    return new Response(null,{status:416,headers:{'Content-Range':`bytes */${release.size}`}});
+   offset=Number(match[1]);
+  }
+  const apk=await bucket.get(release.objectKey,
+    offset?{range:{offset}}:undefined);
+  if(!apk)return error('Không tìm thấy APK đã xác minh',503);
+  const headers=new Headers({
+   'Content-Type':'application/vnd.android.package-archive',
+   'Content-Disposition':`attachment; filename="field-work-${release.versionCode}.apk"`,
+   'Content-Length':String(release.size-offset),
+   'Cache-Control':'no-store',
+   'X-Content-Type-Options':'nosniff',
+   'Accept-Ranges':'bytes',
+  });
+  if(offset)headers.set('Content-Range',
+   `bytes ${offset}-${release.size-1}/${release.size}`);
+  return new Response(apk.body,{status:offset?206:200,headers});
+ }catch{
+  return error('Bản Android chưa được xác minh',503);
+ }
+}
+
 const encoder=new TextEncoder();
 function toHex(input:ArrayBuffer):string{
   return [...new Uint8Array(input)].map(n=>n.toString(16).padStart(2,'0')).join('');
