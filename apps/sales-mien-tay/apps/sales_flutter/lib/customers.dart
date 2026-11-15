@@ -882,6 +882,8 @@ class CustomerDetail extends StatefulWidget {
 
 class _CustomerDetailState extends State<CustomerDetail> {
   List<Map<String,dynamic>> gallery=[],visits=[];
+  FieldCustomer? _sellingCurrent;
+  bool _sellingBusy=false,_hadSellingPending=false;
   String? selectedCoverId;
   final Map<String,Future<Uint8List>> imageTasks={};
   int _loadEpoch=0;
@@ -892,6 +894,7 @@ class _CustomerDetailState extends State<CustomerDetail> {
   bool busy=false;
   @override void initState(){
     super.initState();
+    _hadSellingPending=pendingCustomerSelling(widget.queue,widget.customer.id)!=null;
     widget.queue?.addListener(_queueChanged);
     unawaited(load());
   }
@@ -899,7 +902,50 @@ class _CustomerDetailState extends State<CustomerDetail> {
     widget.queue?.removeListener(_queueChanged);
     super.dispose();
   }
-  void _queueChanged(){if(mounted)setState((){});}
+  void _queueChanged(){
+    if(!mounted)return;
+    final waiting=pendingCustomerSelling(widget.queue,widget.customer.id)!=null;
+    final settled=_hadSellingPending&&!waiting;
+    _hadSellingPending=waiting;
+    setState((){});
+    if(settled)unawaited(_refreshSelling());
+  }
+  Future<void> _refreshSelling()async{
+    try{
+      final next=await widget.service.getById(widget.customer.id);
+      if(!mounted||_accessDenied)return;
+      setState(()=>_sellingCurrent=next);
+    }catch(_){
+      // A failed network refresh never confirms an unacknowledged mutation.
+    }
+  }
+  Future<void> _setSelling(bool desired)async{
+    final c=_sellingCurrent??widget.customer;
+    if(_sellingBusy||busy||_accessDenied||
+       c.owner==null||c.owner!=widget.service.identity||
+       hasCustomerPatchPending(widget.queue,c.id))return;
+    setState(()=>_sellingBusy=true);
+    try{
+      if(widget.queue!=null){
+        if(!_scopeMatches)throw StateError('Tài khoản hoặc phạm vi quyền đã thay đổi');
+        await widget.queue!.enqueue('/api/v1/customers/${c.id}',{
+          'is_selling':desired,'version':c.version,
+          'client_ref':const Uuid().v4(),
+        },method:'PATCH');
+        if(mounted)setState(()=>message='Đã lưu trạng thái trên máy · chờ đồng bộ');
+      }else{
+        final updated=await widget.service.update(c,{'is_selling':desired});
+        if(mounted)setState((){
+          _sellingCurrent=updated;
+          message=desired?'Đã đánh dấu khách đang bán':'Đã đánh dấu khách chưa bán';
+        });
+      }
+    }catch(e){
+      if(mounted)setState(()=>message='Chưa lưu được trạng thái bán hàng: $e');
+    }finally{
+      if(mounted)setState(()=>_sellingBusy=false);
+    }
+  }
   String _date(Object? source){
     final d=DateTime.tryParse(source?.toString()??'')?.toLocal();
     if(d==null)return 'Chưa xác định';
@@ -1207,7 +1253,12 @@ class _CustomerDetailState extends State<CustomerDetail> {
     ));
   }
   @override Widget build(BuildContext context){
-    final c=widget.customer,own=c.owner==widget.service.identity;
+    final c=_sellingCurrent??widget.customer,own=widget.customer.owner==widget.service.identity;
+    final sellingPending=pendingCustomerSelling(widget.queue,c.id)!=null;
+    final selling=customerSellingForDisplay(c,widget.queue);
+    final sellingEditable=c.owner!=null&&c.owner==widget.service.identity&&
+      !_sellingBusy&&!busy&&!_accessDenied&&
+      !hasCustomerPatchPending(widget.queue,c.id);
     final cover=_coverPhoto;
     final gps=c.latitude==null||c.longitude==null?'Chưa ghi nhận':
       '${c.latitude!.toStringAsFixed(6)}, ${c.longitude!.toStringAsFixed(6)}';
@@ -1244,9 +1295,24 @@ class _CustomerDetailState extends State<CustomerDetail> {
                   Expanded(child:Text(c.name,style:Theme.of(context).textTheme.titleMedium,
                     maxLines:2,overflow:TextOverflow.ellipsis)),
                   const SizedBox(width:8),
-                  Text(switch(c.status){'active'=>'Đang hoạt động','inactive'=>'Ngừng hoạt động',
-                    'potential'=>'Tiềm năng',_=>c.status},
-                    style:Theme.of(context).textTheme.labelSmall),
+                  Column(crossAxisAlignment:CrossAxisAlignment.end,children:[
+                    Text(switch(c.status){'active'=>'Đang hoạt động',
+                      'inactive'=>'Ngừng hoạt động','potential'=>'Tiềm năng',
+                      _=>c.status},style:Theme.of(context).textTheme.labelSmall),
+                    const SizedBox(height:2),
+                    Row(mainAxisSize:MainAxisSize.min,children:[
+                      Text(selling?'Đang bán':'Chưa bán',
+                        style:Theme.of(context).textTheme.labelSmall),
+                      const SizedBox(width:4),
+                      SizedBox(height:40,child:Switch.adaptive(
+                        key:const Key('customer-selling-switch'),
+                        value:selling,
+                        onChanged:sellingEditable?(value)=>_setSelling(value):null,
+                      )),
+                    ]),
+                    if(sellingPending)Text('Chờ đồng bộ',
+                      style:Theme.of(context).textTheme.labelSmall),
+                  ]),
                 ]),
                 const SizedBox(height:3),
                 CustomerCategoryLabel(category:c.category),
