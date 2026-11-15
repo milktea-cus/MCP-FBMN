@@ -134,13 +134,29 @@ jobs:
           if not tools or not aapts:
               raise SystemExit('Android signature inspection tools missing')
           apk='build/app/outputs/flutter-apk/app-release.apk'
-          result=subprocess.check_output([tools[-1],'verify','--print-certs',apk],text=True)
-          match=re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-fA-F:]+)',result)
-          if not match:
-              raise SystemExit('Certificate digest missing')
-          signer=match.group(1).lower().replace(':','')
+          result=subprocess.check_output(
+              [tools[-1],'verify','--verbose','--print-certs',apk],
+              text=True,stderr=subprocess.STDOUT)
           expected=os.environ['EXPECTED_CERT'].lower().replace(':','')
-          if len(expected)!=64 or signer!=expected:
+          if not re.fullmatch(r'[0-9a-f]{64}',expected):
+              raise SystemExit('Authorized signer pin invalid')
+          # apksigner output varies by Android Build Tools version and label
+          # wording. Match only signer certificate SHA-256 digests, not SHA-1
+          # nor APK SHA-256; fail closed on zero or multiple unique signers.
+          candidates=set()
+          for line in result.splitlines():
+              lower=line.lower()
+              if ('cert' in lower and 'sha-256' in lower and 'digest' in lower):
+                  match=re.search(r'(?<![0-9a-f])(?:[0-9a-f]{2}:){31}[0-9a-f]{2}(?![0-9a-f])|(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])',lower)
+                  if match:
+                      candidates.add(match.group(0).replace(':',''))
+          if len(candidates)!=1:
+              # Labels only, no raw signing data or secrets.
+              labels=[line.split(':',1)[0].strip()[:96] for line in result.splitlines()
+                      if 'signer' in line.lower() or 'sha-256' in line.lower()]
+              raise SystemExit(f'Cannot unambiguously inspect signer certificate: {labels}')
+          signer=candidates.pop()
+          if signer!=expected:
               raise SystemExit('Signer is not the authorized release certificate')
           badging=subprocess.check_output([aapts[-1],'dump','badging',apk],text=True)
           package=re.search(r"package: name='([^']+)' versionCode='([^']+)'",badging)
