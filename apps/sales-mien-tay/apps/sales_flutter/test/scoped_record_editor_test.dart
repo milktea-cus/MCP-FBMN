@@ -147,17 +147,24 @@ void main(){
    'data':{'title':'Bản nháp cũ'}
   };
   await queue.enqueue('/api/v1/scoped-records',payload);
+  // The durable operation is already seeded before mounting the editor.
+  print('SCOPED_EDIT_TEST seeded');
   final initial=SalesRecord(
    id:id,kind:'support',owner:'owner-d',version:0,province:'Bến Tre',
    data:{'title':'Bản nháp cũ','provinces':['Bến Tre'],'customerIds':<String>[]});
   await tester.pumpWidget(MaterialApp(home:ScopedRecordEditor(
    kind:'support',regions:regions,queue:queue,initial:initial,
    service:const PickerCustomers(),onSaved:(){})));
-  await tester.pumpAndSettle();
+  // Do not wait on unrelated customer-cache animations in a local draft test.
+  await tester.pump(const Duration(milliseconds:100));
+  print('SCOPED_EDIT_TEST mounted');
   await tester.enterText(find.byType(TextFormField).first,'Bản nháp đã sửa');
+  print('SCOPED_EDIT_TEST typed');
   await tester.scrollUntilVisible(find.text('Lưu trên máy · Đồng bộ khi có mạng'),240,
    scrollable:find.byType(Scrollable).first);
+  print('SCOPED_EDIT_TEST scrolled');
   await tester.tap(find.text('Lưu trên máy · Đồng bộ khi có mạng'));
+  print('SCOPED_EDIT_TEST tapped');
   // A busy indicator may animate indefinitely while the DB future resolves.
   // A bounded pump proves the durable write, without a hanging pumpAndSettle.
   for(var i=0;i<30;i++){
