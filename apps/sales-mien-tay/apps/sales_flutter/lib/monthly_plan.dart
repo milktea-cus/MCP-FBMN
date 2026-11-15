@@ -375,8 +375,7 @@ class _MonthlyPlanPageState extends State<MonthlyPlanPage> {
     for(final r in visible)Card(child:ListTile(
      leading:CircleAvatar(child:Text(DateTime.tryParse(r['work_date'].toString())?.day.toString()??'–')),
      title:Text(r['purpose']?.toString()??''),
-     subtitle:Text("${r['work_date'].toString().substring(0,10)} · ${r['scope_kind']=='chain'?'Chuỗi':r['district']==''?'Toàn tỉnh':'Địa bàn'}: ${r['scope_kind']=='chain'?scopes.where((s)=>s['scope_key']==r['scope_key']).map((s)=>s['label']).firstOrNull??'Chuỗi':r['scope_key']}\nMục tiêu khách mới: ${r['target_new_customers']} · ${r['status']=='cancelled'?'Đã hủy':'Đã lập kế hoạch'}
-${r['status']=='cancelled'?'Đã hủy':planGraphStatus(r)}"),
+     subtitle:Text("${r['work_date'].toString().substring(0,10)} · ${r['scope_kind']=='chain'?'Chuỗi':r['district']==''?'Toàn tỉnh':'Địa bàn'}: ${r['scope_kind']=='chain'?scopes.where((s)=>s['scope_key']==r['scope_key']).map((s)=>s['label']).firstOrNull??'Chuỗi':r['scope_key']}\nMục tiêu khách mới: ${r['target_new_customers']} · ${r['status']=='cancelled'?'Đã hủy':'Đã lập kế hoạch'}\n${r['status']=='cancelled'?'Đã hủy':planGraphStatus(r)}"),
      isThreeLine:true,
      trailing:Builder(builder:(ctx){
        final matching=dayRoutes.where((t)=>t['monthly_plan_id']==r['id']).toList();
