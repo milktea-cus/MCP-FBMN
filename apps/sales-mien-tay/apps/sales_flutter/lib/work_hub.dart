@@ -541,9 +541,17 @@ class _WorkHubPageState extends State<WorkHubPage>{
   routes,trips,widget.queue.pending,widget.queue.identity,dayKey(day));
  @override Widget build(BuildContext context){
   final today=dayKey(DateTime.now().toUtc().add(const Duration(hours:7)));
-  final overdue=outstandingWorkRoutes(routes,dayRoutes,dayKey(day),today);
+  final overdue=tab==1?outstandingWorkRoutes(
+   routes,dayRoutes,dayKey(day),today,widget.queue.pending):<Map<String,dynamic>>[];
   final overdueIds={for(final r in overdue)r['id'].toString()};
-  final activeRoutes=dayRoutes.where((r)=>!overdueIds.contains(r['id'].toString())).toList();
+  final activeRoutes=dayRoutes.where((r){
+   if(overdueIds.contains(r['id'].toString()))return false;
+   final progress=routeProgress(r,widget.queue.pending,today);
+   final closing=isClosingRoute(r,widget.queue.pending);
+   return tab==2
+    ?(progress==RouteProgress.completed||closing)
+    :(progress!=RouteProgress.completed&&!closing);
+  }).toList();
   final totals=WorkCounts.fromRoutes(activeRoutes);
   return Column(children:[
    Padding(padding:const EdgeInsets.fromLTRB(12,12,12,6),child:Column(
@@ -566,7 +574,7 @@ class _WorkHubPageState extends State<WorkHubPage>{
     ?MonthlyPlanPage(queue:widget.queue,service:widget.service)
     :ListView(padding:const EdgeInsets.all(12),children:[
       Row(children:[
-       Expanded(child:Text(tab==1?'Tuyến ngày':'Đối chiếu kế hoạch – thực tế',
+       Expanded(child:Text(tab==1?'Tuyến ngày':'Kết quả công tác',
         style:Theme.of(context).textTheme.titleMedium)),
        IconButton(tooltip:'Chọn ngày',icon:const Icon(Icons.calendar_today_outlined),
         onPressed:chooseDay),
@@ -582,7 +590,9 @@ class _WorkHubPageState extends State<WorkHubPage>{
         error!=null||offline
           ?'Chưa xác nhận được tuyến ngày từ máy chủ. Không có nghĩa là lịch bị mất. '
            'Bấm Làm mới hoặc mở Kế hoạch để kiểm tra lịch chờ đồng bộ.'
-          :'Chưa có tuyến cho ngày này. Nếu đã lập lịch, mở Kế hoạch để kiểm tra tuyến ngày.')),
+          :tab==2
+           ?'Chưa có tuyến đã chốt trong ngày này. Chọn ngày công tác cũ để xem kết quả.'
+           :'Chưa có tuyến cho ngày này. Nếu đã lập lịch, mở Kế hoạch để kiểm tra tuyến ngày.')),
        TextButton.icon(onPressed:()=>setState(()=>tab=0),
         icon:const Icon(Icons.calendar_month_outlined),
         label:const Text('Mở Kế hoạch')),
@@ -600,6 +610,7 @@ class _WorkHubPageState extends State<WorkHubPage>{
        ))),
       for(final route in activeRoutes)Builder(builder:(context){
        final c=WorkCounts.fromRoutes([route]);
+       final progressState=routeProgress(route,widget.queue.pending,today);
        final state=workSessionState(route,widget.queue.pending);
        final own=route['owner_sub']==widget.queue.identity;
        final trip=route['trip_id']!=null;
@@ -624,13 +635,23 @@ class _WorkHubPageState extends State<WorkHubPage>{
         ListTile(
          leading:Icon(state=='ongoing'?Icons.directions_walk_outlined:Icons.route_outlined),
          title:Text(route['purpose']?.toString()??'Công tác'),
-         subtitle:Text(
-          '${trip?'${scopesCount} phạm vi':route['scope_kind']=='territory'?'Địa bàn':route['scope_kind']=='chain'?'Chuỗi':'Khách cụ thể'} · ${trip?'${rangeStart} – ${rangeEnd} · ngày ${progress.clamp(1,tripLength)}/${tripLength}':route['scope_key']}\n'
-          '${trip?tripState:status} · Ưu tiên ${trip?(route['priority_customer_ids'] as List?)?.length??0:c.planned} · Đã ghé ${c.visited}\n'
-          'Khảo sát ${c.surveys} · Lead ${c.leads} · GPS thị trường ${c.marketVisits}',
-         ),
-         isThreeLine:true,onTap:()=>openRoute(route),
+         subtitle:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+          const SizedBox(height:5),
+          RouteStatusChip(progress:progressState),
+          const SizedBox(height:5),
+          Text('${trip?'${scopesCount} phạm vi':route['scope_kind']=='territory'?'Địa bàn':route['scope_kind']=='chain'?'Chuỗi':'Khách cụ thể'} · '
+           '${trip?'${rangeStart} – ${rangeEnd} · ngày ${progress.clamp(1,tripLength)}/${tripLength}':route['scope_key']}'),
+          Text('Ưu tiên ${trip?(route['priority_customer_ids'] as List?)?.length??0:c.planned} · Đã ghé ${c.visited} · '
+           'Khảo sát ${c.surveys} · Lead ${c.leads} · GPS thị trường ${c.marketVisits}'),
+         ]),
+         onTap:()=>openRoute(route),
         ),
+        if(!trip&&own&&state=='ongoing'&&
+          !isClosingRoute(route,widget.queue.pending))
+         Align(alignment:Alignment.centerRight,child:TextButton.icon(
+          key:ValueKey('finish-day-route:${route['id']}'),
+          onPressed:()=>completeOneDayRoute(route),
+          icon:const Icon(Icons.flag_outlined),label:const Text('Chốt tuyến'))),
         if(trip&&own&&route['trip_closed_at']==null)
          Wrap(alignment:WrapAlignment.end,spacing:4,runSpacing:0,children:[
           TextButton.icon(onPressed:()=>mutateTrip(route,close:false),
@@ -662,16 +683,29 @@ class _WorkHubPageState extends State<WorkHubPage>{
          ListTile(
           leading:const Icon(Icons.pending_actions_outlined),
           title:Text(route['purpose']?.toString()??'Công tác'),
-          subtitle:Text(
-           '${route['trip_id']!=null?'Quá hạn · chưa kết thúc':'Chưa hoàn thành · chưa liên kết chuyến'}'
-           ' · ${(route['trip_end_date']??route['route_date']).toString().substring(0,10)}'),
+          subtitle:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+           const SizedBox(height:5),
+           RouteStatusChip(progress:routeProgress(route,widget.queue.pending,today)),
+           const SizedBox(height:5),
+           Text('${(route['trip_end_date']??route['route_date']).toString().substring(0,10)}'
+            '${route['trip_id']==null&&route['work_session_state']=='ongoing'?' · Phiên đang chạy chưa chốt':''}'),
+          ]),
           onTap:()=>openRoute(route),
          ),
          Wrap(alignment:WrapAlignment.end,spacing:5,runSpacing:3,children:[
           TextButton.icon(
            onPressed:()=>openRoute(route),icon:const Icon(Icons.folder_open_outlined),
            label:const Text('Mở lại')),
-          if(route['owner_sub']==widget.queue.identity&&route['trip_id']==null)
+          if(route['owner_sub']==widget.queue.identity&&route['trip_id']==null&&
+             workSessionState(route,widget.queue.pending)=='ongoing')
+           FilledButton.icon(
+            key:ValueKey('finish-overdue-route:${route['id']}'),
+            onPressed:isClosingRoute(route,widget.queue.pending)?null:
+             ()=>completeOneDayRoute(route),
+            icon:const Icon(Icons.check_circle_outline),
+            label:const Text('Chốt tuyến')),
+          if(route['owner_sub']==widget.queue.identity&&route['trip_id']==null&&
+             workSessionState(route,widget.queue.pending)=='open')
            OutlinedButton.icon(
             key:ValueKey('recover-legacy-trip:${route['id']}'),
             onPressed:()=>recoverLegacyTrip(route),
