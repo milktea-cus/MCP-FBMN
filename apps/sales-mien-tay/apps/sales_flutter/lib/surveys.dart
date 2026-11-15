@@ -529,7 +529,7 @@ class SurveyTemplateAdmin extends StatefulWidget{
  @override State<SurveyTemplateAdmin> createState()=>_SurveyTemplateAdminState();
 }
 class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
- String province='';int version=0;bool busy=false;
+ String province='';int version=0;bool busy=false,loadFailed=false;
  String lifecycle='active';String? message;
  String templateTitle='Mẫu chung · Gặp khách';
  List<Map<String,dynamic>> qs=[];
@@ -560,7 +560,7 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
  }
  Future<void> load(String p)async{
   setState((){
-   province=p;busy=true;lifecycle='active';message=null;qs=[];publishedVersions=[];version=0;
+   province=p;busy=true;loadFailed=false;lifecycle='active';message=null;qs=[];publishedVersions=[];version=0;
     templateTitle=p=='*'?'Mẫu chung · Gặp khách':'Mẫu gặp khách · '+p;
    supplierOptions=supplySourceOptions(
     knownCustomers.where((c)=>c.province==p));
@@ -578,7 +578,10 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
     qs=selected==null?[]:asRows(selected['questions']);
    });
   }
-  catch(e){if(mounted)setState(()=>message=e.toString());}
+  catch(e){if(mounted)setState((){
+   loadFailed=true;
+   message='Không tải được mẫu. Vui lòng kiểm tra kết nối rồi thử lại.';
+  });}
   finally{if(mounted)setState(()=>busy=false);}
  }
  Future<void> changeAvailability(String next)async{
@@ -623,7 +626,7 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
   finally{if(mounted)setState(()=>busy=false);}
  }
  Future<void> openEditor({List<Map<String,dynamic>>? fromQuestions,String? fromTitle})async{
-  if(busy||province.isEmpty)return;
+  if(busy||loadFailed||province.isEmpty)return;
   final saved=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>
    SurveyTemplateEditorPage(
     service:widget.service,queue:widget.queue,province:province,
@@ -652,10 +655,21 @@ class _SurveyTemplateAdminState extends State<SurveyTemplateAdmin>{
      for(final p in widget.regions.provinces)DropdownMenuItem(value:p,child:Text('Theo tỉnh · '+p))],
     onChanged:busy?null:(p){if(p!=null)load(p);}),
    if(busy)const Padding(padding:EdgeInsets.only(top:12),child:LinearProgressIndicator()),
-   if(message!=null)Padding(padding:const EdgeInsets.only(top:8),
+   if(message!=null&&!loadFailed)Padding(padding:const EdgeInsets.only(top:8),
     child:Text(message!,style:TextStyle(color:Theme.of(context).colorScheme.error))),
    const SizedBox(height:14),
-   if(province.isNotEmpty)Card(child:Padding(
+   if(loadFailed)Card(key:const Key('template-load-error'),child:Padding(
+    padding:const EdgeInsets.all(14),child:Column(
+     crossAxisAlignment:CrossAxisAlignment.start,children:[
+      const Text('Không tải được mẫu'),
+      const SizedBox(height:8),
+      const Text('Không thể xác nhận mẫu đang áp dụng. Không tạo hoặc sửa mẫu khi chưa tải được dữ liệu.'),
+      const SizedBox(height:12),
+      OutlinedButton.icon(key:const Key('template-retry-button'),
+       onPressed:busy?null:()=>load(province),
+       icon:const Icon(Icons.refresh),label:const Text('Thử lại')),
+     ]))),
+   if(!loadFailed&&province.isNotEmpty)Card(child:Padding(
     padding:const EdgeInsets.all(14),
     child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
      Text(templateTitle,style:Theme.of(context).textTheme.titleMedium),

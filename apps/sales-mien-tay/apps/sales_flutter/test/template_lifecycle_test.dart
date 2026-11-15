@@ -124,4 +124,38 @@ void main(){
   expect(controller.index,1);
   client.close();queue.dispose();
  });
+
+ testWidgets('Lỗi tải mẫu không hiển thị giả là chưa phát hành; thử lại hồi phục',(tester)async{
+  var broken=true;
+  final client=MockClient((request)async{
+   if(request.url.path.endsWith('survey-templates')){
+    if(broken)return http.Response('{"error":"Lỗi hệ thống"}',500,
+     headers:{'content-type':'application/json'});
+    return http.Response(jsonEncode({'items':[{
+     'id':'11111111-1111-4111-8111-111111111111',
+     'province':'*','title':'Mẫu chung · Gặp khách',
+     'version':4,'created_by':'admin','status':'active',
+     'questions':[{'id':'q1','label':'Nội dung khảo sát',
+      'type':'text','required':false}]
+    }]}),200,headers:{'content-type':'application/json'});
+   }
+   return http.Response('{"items":[]}',200,headers:{'content-type':'application/json'});
+  });
+  await tester.pumpWidget(MaterialApp(home:SurveyTemplateAdmin(
+   service:CustomerService('https://example.test','token',client:client),
+   regions:const RegionCatalog({'Bến Tre':['Bình Đại']}),embedded:true,
+  )));
+  await tester.pumpAndSettle();
+  expect(find.byKey(const Key('template-load-error')),findsOneWidget);
+  expect(find.byKey(const Key('template-edit-button')),findsNothing);
+  expect(find.text('Chưa phát hành'),findsNothing);
+  broken=false;
+  await tester.tap(find.byKey(const Key('template-retry-button')));
+  await tester.pumpAndSettle();
+  expect(find.byKey(const Key('template-load-error')),findsNothing);
+  expect(find.byKey(const Key('template-edit-button')),findsOneWidget);
+  expect(find.textContaining('Đang áp dụng · v4'),findsOneWidget);
+  client.close();
+ });
+
 }
