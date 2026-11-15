@@ -476,16 +476,62 @@ void showSyncQueueDetails(BuildContext context,OfflineQueue queue)=>showDialog<v
           if((job['depends_on'] as List? ?? []).isNotEmpty)
            const Text('Có thao tác cần hoàn tất trước mục này.'),
           if(job['status']=='blocked')
-           Align(alignment:Alignment.centerRight,child:TextButton.icon(
-            onPressed:(){
-             if(queue.syncing||queue.reconciling){
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-               content:Text('Đang xử lý một lượt đồng bộ. Mở lại chi tiết để đối chiếu sau khi lượt hiện tại kết thúc.')));
-             }else{unawaited(queue.retryBlocked(job['key'].toString()));}
-            },
-            icon:const Icon(Icons.refresh),label:Text(queue.isRouteDuplicateConflict(job)
-             ?'Đối chiếu tuyến đã lưu':'Thử gửi lại'))),
+           Align(alignment:Alignment.centerRight,child:Wrap(
+            spacing:4,runSpacing:2,alignment:WrapAlignment.end,children:[
+             TextButton.icon(
+              onPressed:queue.syncing||queue.reconciling?null:()async{
+               try{await queue.reviewBlocked(job['key'].toString());}
+               catch(e){if(context.mounted)ScaffoldMessenger.of(context)
+                .showSnackBar(SnackBar(content:Text('Không đối chiếu được: $e')));}
+              },
+              icon:const Icon(Icons.fact_check_outlined,size:17),
+              label:const Text('Đối chiếu')),
+             TextButton.icon(
+              onPressed:queue.syncing||queue.reconciling?null:()async{
+               try{await queue.retryBlocked(job['key'].toString());}
+               catch(e){if(context.mounted)ScaffoldMessenger.of(context)
+                .showSnackBar(SnackBar(content:Text('Không thử lại được: $e')));}
+              },
+              icon:const Icon(Icons.refresh,size:17),
+              label:const Text('Thử lại')),
+             if(queue.canRescue(job))TextButton.icon(
+              key:ValueKey('sync-rescue:'+job['key'].toString()),
+              onPressed:queue.syncing||queue.reconciling?null:()async{
+               final ok=await showDialog<bool>(context:context,builder:(c)=>AlertDialog(
+                title:const Text('Ngưng gửi thao tác?'),
+                content:const Text('Thao tác sẽ rời hàng đợi và được lưu riêng đầy đủ trên máy. '
+                 'Không xóa dữ liệu. Anh có thể khôi phục lại ở Chi tiết đồng bộ.'),
+                actions:[
+                 TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Giữ')),
+                 FilledButton(onPressed:()=>Navigator.pop(c,true),
+                  child:const Text('Lưu riêng')),
+                ]));
+               if(ok!=true)return;
+               try{await queue.rescueBlocked(job['key'].toString());}
+               catch(e){if(context.mounted)ScaffoldMessenger.of(context)
+                .showSnackBar(SnackBar(content:Text('Chưa thể lưu riêng: $e')));}
+              },
+              icon:const Icon(Icons.inventory_2_outlined,size:17),
+              label:const Text('Hủy gửi')),
+            ])),
          ]))),
+       if(queue.rescued.isNotEmpty)...[
+        const Divider(),
+        Text('Đã lưu riêng: ${queue.rescued.length} thao tác',
+         style:Theme.of(context).textTheme.titleSmall),
+        const Text('Bản sao vẫn trên máy, không tự gửi lên server.'),
+        for(final saved in queue.rescued)ListTile(
+         contentPadding:EdgeInsets.zero,
+         title:Text(queue.describe(saved)),
+         subtitle:Text(saved['error']?.toString()??'Chưa đồng bộ',
+          maxLines:2,overflow:TextOverflow.ellipsis),
+         trailing:TextButton(
+          onPressed:queue.syncing||queue.reconciling?null:()async{
+           try{await queue.restoreRescued(saved['key'].toString());}
+           catch(e){if(context.mounted)ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content:Text('Không khôi phục được: $e')));}
+          },child:const Text('Khôi phục'))),
+       ],
        const SizedBox(height:8),
        const Text('Với lỗi 409 trùng tuyến, Đối chiếu chỉ đọc dữ liệu máy chủ: '
         'nếu trùng hoàn toàn sẽ xác nhận đã lưu; nếu khác sẽ giữ dữ liệu trên máy. '
@@ -569,6 +615,14 @@ class SyncQueueBanner extends StatelessWidget{
           visualDensity:VisualDensity.compact,
          ),
         ),
+        if(blocked>0)IconButton(
+         key:const ValueKey('sync-banner-close'),
+         tooltip:'Ẩn cảnh báo, giữ dữ liệu',
+         icon:const Icon(Icons.close,size:20),
+         color:colors.onPrimaryContainer,
+         visualDensity:VisualDensity.compact,
+         constraints:const BoxConstraints(minWidth:36,minHeight:36),
+         onPressed:()=>unawaited(queue.dismissBlockedBanner())),
        ]),
        const SizedBox(height:4),
        Text(subtitle,maxLines:3,overflow:TextOverflow.ellipsis,
