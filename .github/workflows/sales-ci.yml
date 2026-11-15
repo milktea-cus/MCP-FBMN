@@ -160,6 +160,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate inventory, district data and source restrictions
         run: python3 apps/sales-mien-tay/scripts/verify_source.py
+      - name: Validate one-shot school importer against all 134 old districts
+        run: python3 -m unittest discover -s apps/sales-mien-tay/scripts -p 'test_schools_bulk_ingest.py' -v
 
   flutter-android:
     name: Android / Debug APK build
