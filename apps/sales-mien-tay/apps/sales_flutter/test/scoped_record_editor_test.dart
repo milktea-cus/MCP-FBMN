@@ -10,6 +10,16 @@ import 'package:sales_mien_tay/session.dart';
 class OfflineSession extends SalesSession {
  @override Future<Map<String,dynamic>> get(String path)async=>throw const ApiFailure(503,'offline');
 }
+/// The widget contract is verified independently from the real IndexedDB transaction.
+/// The adjacent unit test reopens the real durable outbox and checks persisted bytes.
+class RecordingScopedDraftQueue extends OfflineQueue {
+ String? savedDraftId;
+ Map<String,dynamic>? savedDraft;
+ RecordingScopedDraftQueue():super(OfflineSession(),'owner-d','9',factory:newIdbFactoryMemory());
+ @override Future<void> replaceScopedDraft(String id,Map<String,dynamic> data)async{
+  savedDraftId=id;savedDraft=Map<String,dynamic>.from(data);
+ }
+}
 class PickerCustomers extends CustomerService {
  const PickerCustomers():super('https://example.test','');
  @override Future<List<FieldCustomer>> list({void Function(List<FieldCustomer> partial)? onPage})async=>[
@@ -138,44 +148,27 @@ void main(){
    ['11111111-1111-4111-8111-111111111111']);
   queue.dispose();
  });
- testWidgets('editing a pending offline draft retains the original client_ref',(tester)async{
-  final queue=OfflineQueue(OfflineSession(),'owner-d','9',factory:newIdbFactoryMemory());
+ testWidgets('pending offline editor submits original client_ref to durable outbox',(tester)async{
+  final queue=RecordingScopedDraftQueue();
   const id='33333333-3333-4333-8333-333333333333';
-  final payload=<String,dynamic>{
-   'client_ref':id,'kind':'support','version':0,
-   'provinces':['Bến Tre'],'district':'','customer_ids':<String>[],
-   'data':{'title':'Bản nháp cũ'}
-  };
-  await queue.enqueue('/api/v1/scoped-records',payload);
-  // The durable operation is already seeded before mounting the editor.
-  print('SCOPED_EDIT_TEST seeded');
-  final initial=SalesRecord(
-   id:id,kind:'support',owner:'owner-d',version:0,province:'Bến Tre',
+  final initial=SalesRecord(id:id,kind:'support',owner:'owner-d',
+   version:0,province:'Bến Tre',
    data:{'title':'Bản nháp cũ','provinces':['Bến Tre'],'customerIds':<String>[]});
   await tester.pumpWidget(MaterialApp(home:ScopedRecordEditor(
    kind:'support',regions:regions,queue:queue,initial:initial,
    service:const PickerCustomers(),onSaved:(){})));
-  // Do not wait on unrelated customer-cache animations in a local draft test.
-  await tester.pump(const Duration(milliseconds:100));
-  print('SCOPED_EDIT_TEST mounted');
+  await tester.pump();
+  expect(tester.widget<TextFormField>(find.byType(TextFormField).first).controller!.text,
+   'Bản nháp cũ');
   await tester.enterText(find.byType(TextFormField).first,'Bản nháp đã sửa');
-  print('SCOPED_EDIT_TEST typed');
   await tester.scrollUntilVisible(find.text('Lưu trên máy · Đồng bộ khi có mạng'),240,
    scrollable:find.byType(Scrollable).first);
-  print('SCOPED_EDIT_TEST scrolled');
   await tester.tap(find.text('Lưu trên máy · Đồng bộ khi có mạng'));
-  print('SCOPED_EDIT_TEST tapped');
-  // A busy indicator may animate indefinitely while the DB future resolves.
-  // A bounded pump proves the durable write, without a hanging pumpAndSettle.
-  for(var i=0;i<30;i++){
-    await tester.pump(const Duration(milliseconds:50));
-    if(queue.pending.length==1 &&
-      queue.pending.single['payload']['data']['title']=='Bản nháp đã sửa')break;
-  }
-  expect(queue.pending.length,1);
-  expect(queue.pending.single['method'],'POST');
-  expect(queue.pending.single['payload']['client_ref'],id);
-  expect(queue.pending.single['payload']['data']['title'],'Bản nháp đã sửa');
+  await tester.pump(const Duration(milliseconds:80));
+  expect(queue.savedDraftId,id);
+  expect(queue.savedDraft?['client_ref'],id);
+  expect(queue.savedDraft?['version'],0);
+  expect((queue.savedDraft?['data'] as Map?)?['title'],'Bản nháp đã sửa');
   queue.dispose();
  });
 
