@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
@@ -252,7 +253,7 @@ class _CustomerDirectoryCoverState extends State<CustomerDirectoryCover>{
    await cache.put(c.id,'customer',photo,image);
    if(mounted)setState(()=>bytes=image);
   }on ApiFailure catch(e){
-   if(e.status==401||e.status==403)await cache.revokeCustomer(c.id);
+   if(e.status==401||e.status==403||e.status==404)await cache.revokeCustomer(c.id);
   }catch(_){
    // A slow or offline thumbnail must not block the customer directory.
   }
@@ -364,7 +365,7 @@ class _CustomerDirectoryPageState extends State<CustomerDirectoryPage> {
       }
     } catch(e) {
       if(!mounted)return;
-      final denied=e is ApiFailure&&(e.status==401||e.status==403);
+      final denied=e is ApiFailure&&(e.status==401||e.status==403||e.status==404);
       setState((){
         if(denied){
           customers=[];
@@ -903,7 +904,7 @@ class _CustomerDetailState extends State<CustomerDetail> {
      }catch(_){}
     }
    }on ApiFailure catch(e){
-    if(e.status==401||e.status==403){await _revokeCustomer();return;}
+    if(e.status==401||e.status==403||e.status==404){await _revokeCustomer();return;}
     if(mounted&&epoch==_loadEpoch&&gallery.isEmpty)
      setState(()=>message='Không tải được ảnh mới. Kiểm tra kết nối.');
    }catch(_){
@@ -920,7 +921,7 @@ class _CustomerDetailState extends State<CustomerDetail> {
      await widget.queue!.cache('visits:$cid',history);
     }catch(_){}
    }on ApiFailure catch(e){
-    if(e.status==401||e.status==403){await _revokeCustomer();}
+    if(e.status==401||e.status==403||e.status==404){await _revokeCustomer();}
    }catch(_){
     // Historic visits are independent of the photo metadata.
    }
@@ -946,10 +947,14 @@ class _CustomerDetailState extends State<CustomerDetail> {
      if(old.isNotEmpty&&old.first['bytes'] is List){
       final bytes=Uint8List.fromList((old.first['bytes'] as List).cast<int>());
       if(bytes.length<=2*1024*1024&&bytes.isNotEmpty){
-       await cache.put(cid,source,id,bytes,
-        thumbnail:thumbnail,expectedSha:sha);
-       await widget.queue!.cache(oldKey,[]);
-       return bytes;
+       if(sha!=null&&sha256.convert(bytes).toString()!=sha){
+        await widget.queue!.cache(oldKey,[]);
+       }else{
+        await cache.put(cid,source,id,bytes,
+         thumbnail:thumbnail,expectedSha:sha);
+        await widget.queue!.cache(oldKey,[]);
+        return bytes;
+       }
       }
      }
     }catch(_){}
@@ -963,7 +968,7 @@ class _CustomerDetailState extends State<CustomerDetail> {
     }catch(_){}
     return bytes;
    }on ApiFailure catch(e){
-    if(e.status==401||e.status==403)await _revokeCustomer();
+    if(e.status==401||e.status==403||e.status==404)await _revokeCustomer();
     rethrow;
    }
   }
