@@ -73,6 +73,8 @@ void main(){
   await settle(tester);
   expect(state,['active','active']);
   expect(transitions,['paused','active']);
+  await tester.pumpWidget(const SizedBox.shrink());
+  await settle(tester);
   client.close();
  });
 
@@ -97,6 +99,8 @@ void main(){
   await tester.tap(find.byKey(const Key('template-retry-button')));
   await settle(tester);
   expect(find.byKey(const Key('template-edit-button')),findsOneWidget);
+  await tester.pumpWidget(const SizedBox.shrink());
+  await settle(tester);
   client.close();
  });
 
@@ -111,6 +115,8 @@ void main(){
   await settle(tester);
   final controller=DefaultTabController.of(tester.element(find.byType(TabBar)));
   expect(controller.index,1);
+  await tester.pumpWidget(const SizedBox.shrink());
+  await settle(tester);
   client.close();queue.dispose();
  });
 }
