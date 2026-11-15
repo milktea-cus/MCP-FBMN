@@ -32,6 +32,9 @@ CREATE INDEX IF NOT EXISTS schools_old_geography_idx
  ON public.schools(province_old, district_old, name);
 CREATE INDEX IF NOT EXISTS schools_search_name_idx ON public.schools(lower(name));
 REVOKE ALL ON public.schools FROM PUBLIC;
+-- Default privileges on this database also grant DML to sales_api.
+-- Restrict this directory to SELECT; all changes go through reviewed migrations.
+REVOKE ALL ON public.schools FROM sales_api;
 -- Existing sales_api backend can read shared school directory. HTTP endpoints
 -- must still authenticate and check role/scope; never expose public direct access.
 GRANT SELECT ON public.schools TO sales_api;
