@@ -19,10 +19,11 @@ on:
 permissions:
   contents: read
 
-# Every main push tests the newest source; cancel stale intermediate commits,
-# so old Android builds cannot starve the production acceptance run.
+# Every main push still receives all test jobs. School data-only audits and
+# application/auth source changes use distinct cancellation groups, so a
+# school inventory commit cannot cancel a critical Android release gate.
 concurrency:
-  group: sales-ci-forms-v2-${{ github.workflow }}-${{ github.ref }}
+  group: sales-ci-forms-v3-${{ github.workflow }}-${{ github.ref }}-${{ startsWith(github.event.head_commit.message, 'data(schools):') && 'school-audit' || 'app-auth' }}
   cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
