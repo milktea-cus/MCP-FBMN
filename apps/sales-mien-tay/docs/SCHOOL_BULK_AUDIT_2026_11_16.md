@@ -8,42 +8,42 @@ Cảnh báo: số bản ghi hiện có không phải số trường thật hiệ
 ## 1. Baseline đang có trên production
 
 - **277** records; **13/13** tỉnh cũ có ít nhất một record.
-- **46/134** huyện cũ có ít nhất một record; **88** huyện cũ hoàn toàn trống.
+- **61/134** huyện cũ có ít nhất một record; **73** huyện cũ hoàn toàn trống.
 - **182** bản ghi preliminary có địa chỉ và link nhưng chưa được xác thực độc lập;
   **95** bản ghi audit nguồn 2026 (có thể chưa đầy đủ và còn alias cũ).
 - Số GPS được xác minh: **0**. Google Maps là link **tìm kiếm**, không phải tọa độ định tuyến chính xác.
 
 | Tỉnh cũ | Huyện trong danh mục | Có dữ liệu | Trống | Bản ghi |
 |---|---:|---:|---:|---:|
-| Long An | 15 | 5 | 10 | 6 |
+| Long An | 15 | 7 | 8 | 18 |
 | Tiền Giang | 11 | 4 | 7 | 14 |
-| Bến Tre | 9 | 5 | 4 | 14 |
+| Bến Tre | 9 | 6 | 3 | 15 |
 | Trà Vinh | 9 | 3 | 6 | 8 |
-| Vĩnh Long | 8 | 2 | 6 | 5 |
-| Đồng Tháp | 12 | 1 | 11 | 12 |
-| An Giang | 11 | 4 | 7 | 97 |
+| Vĩnh Long | 8 | 4 | 4 | 8 |
+| Đồng Tháp | 12 | 3 | 9 | 16 |
+| An Giang | 11 | 6 | 5 | 105 |
 | Kiên Giang | 15 | 5 | 10 | 10 |
-| Hậu Giang | 8 | 5 | 3 | 18 |
-| Sóc Trăng | 11 | 3 | 8 | 9 |
-| Bạc Liêu | 7 | 1 | 6 | 9 |
-| Cà Mau | 9 | 5 | 4 | 19 |
+| Hậu Giang | 8 | 7 | 1 | 24 |
+| Sóc Trăng | 11 | 4 | 7 | 10 |
+| Bạc Liêu | 7 | 3 | 4 | 12 |
+| Cà Mau | 9 | 6 | 3 | 24 |
 | Cần Thơ | 9 | 3 | 6 | 13 |
-| **Tổng** | **134** | **46** | **88** | **234** |
+| **Tổng** | **134** | **61** | **73** | **277** |
 
 ## 2. Danh sách địa bàn hiện trống
 
-- **Long An** (10/15 trống): Thành phố Tân An; Thị xã Kiến Tường; Huyện Tân Hưng; Huyện Vĩnh Hưng; Huyện Tân Thạnh; Huyện Thạnh Hóa; Huyện Đức Huệ; Huyện Đức Hòa; Huyện Cần Giuộc; Huyện Châu Thành
+- **Long An** (8/15 trống): Huyện Tân Hưng; Huyện Vĩnh Hưng; Huyện Tân Thạnh; Huyện Thạnh Hóa; Huyện Đức Huệ; Huyện Đức Hòa; Huyện Cần Giuộc; Huyện Châu Thành
 - **Tiền Giang** (7/11 trống): Thành phố Mỹ Tho; Thành phố Gò Công; Thị xã Cai Lậy; Huyện Tân Phước; Huyện Cai Lậy; Huyện Châu Thành; Huyện Gò Công Tây
-- **Bến Tre** (4/9 trống): Thành phố Bến Tre; Huyện Chợ Lách; Huyện Bình Đại; Huyện Ba Tri
+- **Bến Tre** (3/9 trống): Huyện Chợ Lách; Huyện Bình Đại; Huyện Ba Tri
 - **Trà Vinh** (6/9 trống): Thành phố Trà Vinh; Huyện Càng Long; Huyện Cầu Kè; Huyện Tiểu Cần; Huyện Duyên Hải; Thị xã Duyên Hải
-- **Vĩnh Long** (6/8 trống): Thành phố Vĩnh Long; Huyện Mang Thít; Huyện Vũng Liêm; Thị xã Bình Minh; Huyện Trà Ôn; Huyện Bình Tân
-- **Đồng Tháp** (11/12 trống): Thành phố Cao Lãnh; Thành phố Sa Đéc; Thành phố Hồng Ngự; Huyện Tân Hồng; Huyện Hồng Ngự; Huyện Tam Nông; Huyện Cao Lãnh; Huyện Thanh Bình; Huyện Lấp Vò; Huyện Lai Vung; Huyện Châu Thành
-- **An Giang** (7/11 trống): Thành phố Long Xuyên; Thành phố Châu Đốc; Thị xã Tân Châu; Huyện Phú Tân; Thị xã Tịnh Biên; Huyện Tri Tôn; Huyện Châu Thành
+- **Vĩnh Long** (4/8 trống): Huyện Mang Thít; Huyện Vũng Liêm; Huyện Trà Ôn; Huyện Bình Tân
+- **Đồng Tháp** (9/12 trống): Thành phố Hồng Ngự; Huyện Tân Hồng; Huyện Hồng Ngự; Huyện Tam Nông; Huyện Cao Lãnh; Huyện Thanh Bình; Huyện Lấp Vò; Huyện Lai Vung; Huyện Châu Thành
+- **An Giang** (5/11 trống): Thị xã Tân Châu; Huyện Phú Tân; Thị xã Tịnh Biên; Huyện Tri Tôn; Huyện Châu Thành
 - **Kiên Giang** (10/15 trống): Thành phố Rạch Giá; Thành phố Hà Tiên; Huyện Kiên Lương; Huyện Hòn Đất; Huyện An Minh; Huyện Vĩnh Thuận; Thành phố Phú Quốc; Huyện Kiên Hải; Huyện U Minh Thượng; Huyện Giang Thành
-- **Hậu Giang** (3/8 trống): Thành phố Vị Thanh; Thành phố Ngã Bảy; Thị xã Long Mỹ
-- **Sóc Trăng** (8/11 trống): Thành phố Sóc Trăng; Huyện Châu Thành; Huyện Kế Sách; Huyện Long Phú; Huyện Mỹ Xuyên; Thị xã Ngã Năm; Huyện Thạnh Trị; Thị xã Vĩnh Châu
-- **Bạc Liêu** (6/7 trống): Thành phố Bạc Liêu; Huyện Hồng Dân; Huyện Phước Long; Thị xã Giá Rai; Huyện Đông Hải; Huyện Hòa Bình
-- **Cà Mau** (4/9 trống): Thành phố Cà Mau; Huyện Năm Căn; Huyện Phú Tân; Huyện Ngọc Hiển
+- **Hậu Giang** (1/8 trống): Thị xã Long Mỹ
+- **Sóc Trăng** (7/11 trống): Thành phố Sóc Trăng; Huyện Châu Thành; Huyện Kế Sách; Huyện Long Phú; Huyện Mỹ Xuyên; Thị xã Ngã Năm; Huyện Thạnh Trị
+- **Bạc Liêu** (4/7 trống): Huyện Hồng Dân; Huyện Phước Long; Huyện Đông Hải; Huyện Hòa Bình
+- **Cà Mau** (3/9 trống): Huyện Năm Căn; Huyện Phú Tân; Huyện Ngọc Hiển
 - **Cần Thơ** (6/9 trống): Quận Ninh Kiều; Quận Ô Môn; Quận Bình Thủy; Quận Cái Răng; Quận Thốt Nốt; Huyện Thới Lai
 
 ## 3. Cấp học và trường liên cấp
@@ -92,3 +92,10 @@ python3 scripts/schools_bulk_ingest.py --input school_official_2026.csv --batch 
 
 **Tình trạng:** tạo cơ chế batch + bộ lọc cấp học; **chưa có nguồn danh sách trường đầy đủ 134 huyện**
 để nhập một lần và chưa nghiệm thu 100% trường/phân hiệu hiện hành.
+
+## 6. Chuẩn hóa địa bàn live — đã áp dụng 16/11/2026
+
+- Migration `071_schools_canonical_old_district_names.sql` đã chạy production sau CI xanh.
+- Sửa **43 record**, **15 bí danh huyện** (TP/TX thành Thành phố/Thị xã; TX Ngã Bảy thành Thành phố Ngã Bảy) đúng danh mục 134 huyện cũ.
+- Đối chiếu Neon sau sửa: **61 địa bàn có trường**, **0 địa bàn sai tên**, **73 địa bàn trống**, tổng trường giữ **277** và không đổi mã nguồn trường.
+- Trước sửa có 88 địa bàn không khớp chuẩn trong đó 15 là lỗi nhãn. Không được nhầm số 88 đó với số địa bàn thực sự chưa có trường.
