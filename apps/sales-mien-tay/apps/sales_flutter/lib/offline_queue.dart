@@ -156,6 +156,35 @@ class OfflineQueue extends ChangeNotifier {
   final t=d.transaction('outbox',idbModeReadWrite);
   await t.objectStore('outbox').delete(key);await t.completed;
  }
+ /// Atomically persist the server-confirmed flag to account-scoped cache and
+ /// remove its outbox row, for both Android SQLite and PWA IndexedDB.
+ Future<void> _ackSellingUpdate(Map<String,dynamic> operation,
+     Map<String,dynamic> server)async{
+   final d=await db;
+   final tx=d.transactionList(['cache','outbox'],idbModeReadWrite);
+   final store=tx.objectStore('cache');
+   final province=server['province']?.toString()??'';
+   for(final key in {'customers:','customers:$province'}){
+     final cacheKey='$namespace:$key';
+     final saved=await store.getObject(cacheKey);
+     if(saved is! Map||saved['items'] is! List)continue;
+     var changed=false;
+     final records=<Map<String,dynamic>>[];
+     for(final record in saved['items'] as List){
+       final prior=Map<String,dynamic>.from(record as Map);
+       if(prior['id']==server['id']){
+         records.add({...prior,...server});
+         changed=true;
+       }else{
+         records.add(prior);
+       }
+     }
+     if(changed)await store.put({'key':cacheKey,'items':records});
+   }
+   await tx.objectStore('outbox').delete(operation['key'] as String);
+   await tx.completed;
+ }
+
  Future<void> enqueue(String path,Map<String,dynamic> data,{Uint8List? photo,Uint8List? thumbnail,String? sha256,String? thumbnailSha256,String? mime,String method='POST',List<String> dependsOn=const []}) async{
   if(_closed)throw StateError('Phiên đã đóng');
   if(!['/api/v1/scoped-records','/api/v1/records','/api/v1/customers','/api/v1/monthly-plans','/api/v1/day-routes','/api/v1/trips','/api/v1/area-visits','/api/v1/route-templates'].contains(path)&&!RegExp(r'^/api/v1/area-visits/[a-f0-9-]{36}/photos$').hasMatch(path)&&!RegExp(r'^/api/v1/route-templates/[a-f0-9-]{36}$').hasMatch(path)&&!RegExp(r'^/api/v1/prospects/[a-f0-9-]{36}/convert$').hasMatch(path)&&!RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}(/stops(/[a-f0-9-]{36})?)?$').hasMatch(path)&&!isWorkVisitOfflineOperation(path)&&!RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}/customer-work$').hasMatch(path)&&!RegExp(r'^/api/v1/trips/[a-f0-9-]{36}/(extend|close)$').hasMatch(path)&&!RegExp(r'^/api/v1/scoped-records/[a-f0-9-]{36}$').hasMatch(path)&&!RegExp(r'^/api/v1/records/[a-f0-9-]{36}$').hasMatch(path)&&!RegExp(r'^/api/v1/notifications/[0-9]{1,19}/read$').hasMatch(path)&&!RegExp(r'^/api/v1/customers/[a-f0-9-]{36}(/visits|/photos|/products|/brands|/cover)?$').hasMatch(path))throw ArgumentError('Unsupported offline operation');
@@ -994,6 +1023,113 @@ class OfflineQueue extends ChangeNotifier {
       matchedDuplicate=true;
       lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;
       break;
+     }else if(row['method']=='PATCH'&&
+         RegExp(r'^/api/v1/customers/[a-f0-9-]{36}
+     lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;
+    }catch(e){
+     final path=row['path']?.toString()??'';
+     if(e is ApiFailure&&e.status==409&&row['method']=='PATCH'&&
+       RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}$',
+        caseSensitive:false).hasMatch(path)){
+      try{
+       if(await _ackAlreadyAppliedRoutePatch(row)){
+        matchedDuplicate=true;lastSuccessAt=DateTime.now();error=null;
+        break;
+       }
+      }catch(_){}
+     }
+     if(e is ApiFailure&&e.status==409&&row['method']=='POST'&&
+      (path=='/api/v1/day-routes'||
+       RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}/(stops|unplanned-stops)$',
+        caseSensitive:false).hasMatch(path))){
+      try{
+       if(await _resolveDuplicate(row)){
+        matchedDuplicate=true;
+        lastSuccessAt=DateTime.now();error=null;
+        break; // Re-read remapped dependencies before continuing.
+       }
+      }catch(_){}
+     }
+     if(e is ApiFailure&&e.status==409&&
+       (path=='/api/v1/monthly-plans'||path=='/api/v1/trips')){
+      try{
+       final matched=path=='/api/v1/monthly-plans'
+        ?await _resolveSavedPlan(row):await _resolveSavedTrip(row);
+       if(matched){
+        matchedDuplicate=true;lastSuccessAt=DateTime.now();error=null;break;
+       }
+      }catch(_){}
+     }
+     final blocked=e is ApiFailure&&[400,401,403,404,409,413,415,422].contains(e.status);
+     await _updateIfPresent({...row,
+      'status':blocked?'blocked':'pending',
+      'attempts':((row['attempts'] as num?)?.toInt()??0)+1,
+      'error':describeFailure(e),
+      'last_error_at':DateTime.now().toIso8601String(),
+     });
+     error='${describe(row)}: ${describeFailure(e)}';
+     if(!blocked){
+      transientFailures++;
+      nextRetryAt=DateTime.now().add(retryDelay);
+      break;
+     }
+    }
+   }
+   if(error==null&&waitingDependencies>0){
+    error='Đang chờ $waitingDependencies thao tác liên quan được hoàn tất.';
+   }
+  }catch(e){
+   error='Không kiểm tra/gửi được dữ liệu: ${describeFailure(e)}';
+   transientFailures++;
+   nextRetryAt=DateTime.now().add(retryDelay);
+  }
+  finally{
+   activePath=null;
+   try{await reload();}catch(e){error='Không đọc được hàng đợi lưu máy: $e';}
+   syncing=false;_notify();
+   if(matchedDuplicate&&!_closed&&readyCount>0)unawaited(sync(manual:true));
+  }
+ }
+ /// Manual retry first compares blocked routes without resending them.
+ Future<void> retryNow()async{
+  if(!_closed&&!syncing)await reconcileBlockedRoutes();
+  await sync(manual:true);
+ }
+ @override void dispose(){_closed=true;_timer?.cancel();super.dispose();}
+}
+class OfflineLease {
+ static const duration=Duration(hours:12);
+ static Future<void> remember(Map<String,dynamic> me,Map<String,List<String>> districts) async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);
+  if(await t.objectStore('cache').getObject('logout_pending')!=null){await t.completed;return;}
+  await t.objectStore('cache').put({'key':'active_lease','me':me,'districts':districts,'expires':DateTime.now().add(duration).millisecondsSinceEpoch});await t.completed;
+ }
+ static Future<Map<String,dynamic>?> read() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('active_lease');await t.completed;
+  if(row==null)return null;final v=Map<String,dynamic>.from(row as Map);
+  return (v['expires'] as int)>DateTime.now().millisecondsSinceEpoch?v:null;
+ }
+ static Future<void> markLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);final s=t.objectStore('cache');await s.delete('active_lease');await s.put({'key':'logout_pending'});await t.completed;
+ }
+ static Future<bool> logoutPending() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadOnly);final row=await t.objectStore('cache').getObject('logout_pending');await t.completed;return row!=null;
+ }
+ static Future<void> finishLogout() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('logout_pending');await t.completed;
+ }
+ static Future<void> clear() async{
+  final db=await openOfflineDatabase();final t=db.transaction('cache',idbModeReadWrite);await t.objectStore('cache').delete('active_lease');await t.completed;
+ }
+}
+).hasMatch(row['path'].toString())&&
+         payload['is_selling'] is bool){
+       final saved=result['item'];
+       if(saved is! Map||saved['id']!=row['path'].toString().split('/').last||
+          saved['is_selling']!=payload['is_selling']){
+         throw StateError('Máy chủ không xác nhận trạng thái đang bán');
+       }
+       await _ackSellingUpdate(row,Map<String,dynamic>.from(saved));
      }else if(row['session_id']!=null){
       await _ackSurvey(row,item);
      }else{
