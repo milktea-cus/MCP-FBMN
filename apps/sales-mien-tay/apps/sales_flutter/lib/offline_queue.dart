@@ -576,6 +576,152 @@ class OfflineQueue extends ChangeNotifier {
   await _remove(row['key'] as String);
   return true;
  }
+
+ bool isPlanDuplicateConflict(Map<String,dynamic> row)=>
+  row['status']=='blocked'&&row['method']=='POST'&&
+  row['path']=='/api/v1/monthly-plans'&&
+  (row['error']?.toString()??'').contains('409');
+ bool isTripDuplicateConflict(Map<String,dynamic> row)=>
+  row['status']=='blocked'&&row['method']=='POST'&&
+  row['path']=='/api/v1/trips'&&
+  (row['error']?.toString()??'').contains('409');
+
+ bool _samePlan(Map server,Map local){
+  final day=local['work_date']?.toString()??'';
+  return server['owner_sub']==identity&&
+   server['period_ym']==local['period_ym']&&
+   server['work_date']?.toString().startsWith(day)==true&&
+   server['scope_kind']==local['scope_kind']&&
+   server['scope_key']==local['scope_key']&&
+   (server['province']??null)==(local['province']??null)&&
+   (server['district']??null)==(local['district']??null)&&
+   server['purpose']==local['purpose']?.toString().trim()&&
+   (server['note']??'')==(local['note']??'')&&
+   server['status']==(local['status']??'planned')&&
+   (server['target_new_customers'] as num?)?.toInt()==
+     (local['target_new_customers'] as num?)?.toInt();
+ }
+ String _scopeFingerprint(Object? input){
+  if(input is! List)return '';
+  final keys=<String>[];
+  for(final scope in input){
+   if(scope is! Map)return '';
+   keys.add([scope['scope_kind'],scope['scope_key'],
+    scope['province']??'',scope['district']??''].join('|'));
+  }
+  keys.sort();
+  return keys.join(';;');
+ }
+ bool _sameTrip(Map server,Map local){
+  final priorities=(server['priority_customer_ids'] as List? ?? [])
+   .map((x)=>x.toString()).toList()..sort();
+  final localPriorities=(local['priorities'] as List? ?? [])
+   .map((x)=>x.toString()).toList()..sort();
+  return server['owner_sub']==identity&&
+   server['day_route_id']==local['day_route_id']&&
+   server['start_date']?.toString().startsWith(local['start_date']?.toString()??'INVALID')==true&&
+   server['end_date']?.toString().startsWith(local['end_date']?.toString()??'INVALID')==true&&
+   server['purpose']==local['purpose']?.toString().trim()&&
+   (server['note']??'')==(local['note']??'')&&
+   _scopeFingerprint(server['scopes'])==_scopeFingerprint(local['scopes'])&&
+   jsonEncode(priorities)==jsonEncode(localPriorities);
+ }
+ /// Parent ACK with a different canonical UUID must rewrite all descendants
+ /// in one transaction. The server response is read-only and checked first.
+ Future<bool> _ackParent(Map<String,dynamic> row,Map server,
+     {required String field})async{
+  final local=(row['payload'] as Map)['client_ref']?.toString()??'';
+  final canonical=server['id']?.toString()??'';
+  final uuid=RegExp(r'^[0-9a-f-]{36}$',caseSensitive:false);
+  if(!uuid.hasMatch(local)||!uuid.hasMatch(canonical))return false;
+  final d=await db,t=d.transaction('outbox',idbModeReadWrite),
+    out=t.objectStore('outbox');
+  final original=await out.getObject(row['key'] as String);
+  if(original is! Map||original['namespace']!=namespace||
+   original['path']!=row['path']||
+   (original['payload'] as Map)['client_ref']!=local){
+   await t.completed;return false;
+  }
+  if(canonical!=local){
+   final others=await out.index('account').getAll(identity);
+   for(final raw in others){
+    if(raw is! Map||raw['namespace']!=namespace||
+      raw['key']==row['key'])continue;
+    final op=Map<String,dynamic>.from(raw);
+    var changed=false;
+    final deps=(op['depends_on'] as List? ?? []);
+    if(deps.contains(local)){
+     op['depends_on']=deps.where((x)=>x!=local).toList();changed=true;
+    }
+    if(op['payload'] is Map){
+     final data=Map<String,dynamic>.from(op['payload'] as Map);
+     if(data[field]==local){data[field]=canonical;changed=true;}
+     if(changed)op['payload']=data;
+    }
+    final path=op['path']?.toString()??'';
+    if(field=='trip_id'&&path.contains('/trips/$local/')){
+     op['path']=path.replaceFirst('/trips/$local/','/trips/$canonical/');
+     changed=true;
+    }
+    if(changed)await out.put(op);
+   }
+  }
+  await out.delete(row['key'] as String);
+  await t.completed;return true;
+ }
+ Future<bool> _resolveSavedPlan(Map<String,dynamic> row)async{
+  if(row['namespace']!=namespace||row['path']!='/api/v1/monthly-plans'||
+    row['method']!='POST')return false;
+  final p=row['payload'] as Map,month=p['period_ym']?.toString()??'';
+  if(!RegExp(r'^[0-9]{4}-(0[1-9]|1[0-2])$').hasMatch(month))return false;
+  final remote=await _readRoute('/api/v1/monthly-plans?month=$month');
+  for(final raw in remote['items'] as List? ?? []){
+   if(raw is Map&&_samePlan(raw,p))
+    return _ackParent(row,raw,field:'monthly_plan_id');
+  }
+  return false;
+ }
+ Future<bool> _resolveSavedTrip(Map<String,dynamic> row)async{
+  if(row['namespace']!=namespace||row['path']!='/api/v1/trips'||
+    row['method']!='POST')return false;
+  final p=row['payload'] as Map,from=p['start_date']?.toString()??'',
+    to=p['end_date']?.toString()??'';
+  if(!RegExp(r'^[0-9]{4}-[0-9]{2}-[0-9]{2}$').hasMatch(from)||
+     !RegExp(r'^[0-9]{4}-[0-9]{2}-[0-9]{2}$').hasMatch(to))return false;
+  final remote=await _readRoute('/api/v1/trips?from=$from&to=$to');
+  for(final raw in remote['items'] as List? ?? []){
+   if(raw is Map&&_sameTrip(raw,p))
+    return _ackParent(row,raw,field:'trip_id');
+  }
+  return false;
+ }
+ /// Read-only verification for a stuck 409. Never blindly POST a conflicting
+ /// mutation a second time or declare a mismatch successfully synchronized.
+ Future<bool> reviewBlocked(String key)async{
+  if(_closed||syncing||_reconciling||!key.startsWith('$namespace:'))
+   throw StateError('Đang đồng bộ hoặc sai tài khoản');
+  await reload();
+  final row=pending.where((r)=>r['key']==key).firstOrNull;
+  if(row==null||row['status']!='blocked')return false;
+  bool matched=false;
+  try{
+   if(isRoutePatchConflict(row))matched=await _ackAlreadyAppliedRoutePatch(row);
+   else if(isRouteDuplicateConflict(row))matched=await _resolveDuplicate(row);
+   else if(isPlanDuplicateConflict(row))matched=await _resolveSavedPlan(row);
+   else if(isTripDuplicateConflict(row))matched=await _resolveSavedTrip(row);
+  }catch(e){
+   error='Không đối chiếu được thao tác: ${describeFailure(e)}';
+   _notify();return false;
+  }
+  if(matched){error=null;lastSuccessAt=DateTime.now();await reload();
+   if(readyCount>0)unawaited(sync(manual:true));
+   return true;
+  }
+  error='Chưa tìm được bản lưu khớp trên máy chủ. Thao tác còn trên máy; '
+    'nếu lỗi 409, không tự gửi lại để tránh trùng.';
+  _notify();return false;
+ }
+
  bool _reconciling=false;
  Future<void> reconcileBlockedRoutes()async{
   if(_closed||syncing||_reconciling)return;
@@ -584,11 +730,15 @@ class OfflineQueue extends ChangeNotifier {
    await reload();
    var fixed=false;
    for(final row in List<Map<String,dynamic>>.of(pending)){
-    if(!isRouteDuplicateConflict(row)&&!isRoutePatchConflict(row))continue;
+    if(!isRouteDuplicateConflict(row)&&!isRoutePatchConflict(row)&&
+       !isPlanDuplicateConflict(row)&&!isTripDuplicateConflict(row))continue;
     try{
-     if(isRoutePatchConflict(row)
-      ?await _ackAlreadyAppliedRoutePatch(row)
-      :await _resolveDuplicate(row))fixed=true;
+     final matched=isRoutePatchConflict(row)
+       ?await _ackAlreadyAppliedRoutePatch(row)
+       :isRouteDuplicateConflict(row)?await _resolveDuplicate(row)
+       :isPlanDuplicateConflict(row)?await _resolveSavedPlan(row)
+       :await _resolveSavedTrip(row);
+     if(matched)fixed=true;
     }
     catch(_){
      // A 401/403/timeout must never erase an unacknowledged local operation.
@@ -665,11 +815,14 @@ class OfflineQueue extends ChangeNotifier {
   if(rawRow is Map){
    final row=Map<String,dynamic>.from(rawRow);
    if(row['namespace']!=namespace)return;
-   if(isRouteDuplicateConflict(row)||isRoutePatchConflict(row)){
+   if(isRouteDuplicateConflict(row)||isRoutePatchConflict(row)||
+      isPlanDuplicateConflict(row)||isTripDuplicateConflict(row)){
     try{
      final matched=isRoutePatchConflict(row)
       ?await _ackAlreadyAppliedRoutePatch(row)
-      :await _resolveDuplicate(row);
+      :isRouteDuplicateConflict(row)?await _resolveDuplicate(row)
+      :isPlanDuplicateConflict(row)?await _resolveSavedPlan(row)
+      :await _resolveSavedTrip(row);
      await reload();
      if(matched){error=null;await retryNow();}
      else{
@@ -678,9 +831,15 @@ class OfflineQueue extends ChangeNotifier {
       _notify();
      }
     }catch(e){
-     error='Không đối chiếu được tuyến: '+describeFailure(e);_notify();
+     error='Không đối chiếu được thao tác: '+describeFailure(e);_notify();
     }
     return;
+   }
+   // An unresolved 409 is never replayed blindly. The user may keep it
+   // or move it to the recoverable shelf after checking dependencies.
+   if(row['status']=='blocked'&&(row['error']?.toString()??'').contains('409')){
+    error='Lỗi 409 chưa đối chiếu được; bản lưu vẫn nằm trên máy.';
+    _notify();return;
    }
   }
   final t=d.transaction('outbox',idbModeReadWrite),store=t.objectStore('outbox');
@@ -821,6 +980,16 @@ class OfflineQueue extends ChangeNotifier {
         matchedDuplicate=true;
         lastSuccessAt=DateTime.now();error=null;
         break; // Re-read remapped dependencies before continuing.
+       }
+      }catch(_){}
+     }
+     if(e is ApiFailure&&e.status==409&&
+       (path=='/api/v1/monthly-plans'||path=='/api/v1/trips')){
+      try{
+       final matched=path=='/api/v1/monthly-plans'
+        ?await _resolveSavedPlan(row):await _resolveSavedTrip(row);
+       if(matched){
+        matchedDuplicate=true;lastSuccessAt=DateTime.now();error=null;break;
        }
       }catch(_){}
      }
