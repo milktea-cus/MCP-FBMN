@@ -178,6 +178,35 @@ void main(){
       expect(tester.takeException(),isNull);
     });
   }
+  for(final width in [320.0,360.0,390.0,430.0]){
+    testWidgets('customer product tab renders after switching and scrolling at $width',(tester)async{
+      tester.view.devicePixelRatio=1;
+      tester.view.physicalSize=Size(width,844);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(MaterialApp(home:CustomerDetail(
+        service:FakeService(),customer:customer(),
+        regions:const RegionCatalog(<String,List<String>>{}))));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sản phẩm'));
+      await tester.pumpAndSettle();
+      expect(find.text('Sản phẩm của điểm bán'),findsOneWidget,
+        reason:'The inner Sản phẩm tab must never be an empty white panel');
+      expect(find.text('Nhãn hàng thị trường tại điểm bán'),findsOneWidget);
+      expect(find.text('Chưa có SKU phù hợp.'),findsOneWidget);
+      expect(tester.takeException(),isNull);
+      await tester.tap(find.text('Thông tin'));
+      await tester.pumpAndSettle();
+      await tester.drag(find.byKey(const PageStorageKey('customer-info')),
+        const Offset(0,-600));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sản phẩm'));
+      await tester.pumpAndSettle();
+      expect(find.text('Sản phẩm của điểm bán'),findsOneWidget,
+        reason:'Switching from a scrolled tab must not reuse its hidden offset');
+      expect(tester.takeException(),isNull);
+    });
+  }
   testWidgets('swiping up hides shop header while 3 tabs remain pinned',(tester)async{
     tester.view.devicePixelRatio=1;
     tester.view.physicalSize=const Size(390,700);
