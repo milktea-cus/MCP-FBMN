@@ -97,14 +97,33 @@ jobs:
           # The complete regression suite has already passed on exact main SHA;
           # rerun the A editor acceptance tests here instead of the full 8-shard CI.
           flutter test --reporter expanded test/scoped_record_editor_test.dart
-          flutter build web --release --dart-define=API_BASE_URL="$API_BASE_URL"
+          export FBMN_BUILD_SHA="${{ needs.authorize.outputs.sha }}"
+          flutter build web --release --pwa-strategy=none --no-web-resources-cdn \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
+            --dart-define=FBMN_BUILD_SHA="$FBMN_BUILD_SHA"
+          python3 scripts/build_offline_shell.py
+          python3 scripts/check_push_shell.py
       - name: Prepare static Vercel Build Output
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/sales-release/.vercel/output/static"
           cp -a apps/sales-mien-tay/apps/sales_flutter/build/web/. "$RUNNER_TEMP/sales-release/.vercel/output/static/"
           printf '{"orgId":"%s","projectId":"%s"}\n' "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID" > "$RUNNER_TEMP/sales-release/.vercel/project.json"
-          printf '%s\n' '{"version":3,"routes":[{"handle":"filesystem"},{"src":"/.*","dest":"/index.html"}]}' > "$RUNNER_TEMP/sales-release/.vercel/output/config.json"
+          # Build Output API does not automatically include the source vercel.json.
+          # Forward browser same-origin /api/* requests (cookies included) to the Worker.
+          # Cache bust all active executable / PWA update entrypoints.
+          cat > "$RUNNER_TEMP/sales-release/.vercel/output/config.json" <<'JSON'
+          {
+            "version": 3,
+            "routes": [
+              {"src": "^/api/(.*)$", "dest": "https://field-sales-api.milktea-cus.workers.dev/api/$1"},
+              {"src": "^/$", "headers": {"Cache-Control": "no-cache, no-store, must-revalidate"}, "continue": true},
+              {"src": "^/(index.html|flutter_bootstrap.js|main.dart.js|filed-sw.js|version.json)$", "headers": {"Cache-Control": "no-cache, no-store, must-revalidate"}, "continue": true},
+              {"handle": "filesystem"},
+              {"src": "/.*", "dest": "/index.html"}
+            ]
+          }
+          JSON
           npm install -g "vercel@$VERCEL_CLI_VERSION" --no-audit --no-fund
       - name: Check main has not advanced
         env:
