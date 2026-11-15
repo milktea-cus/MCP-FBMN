@@ -68,6 +68,9 @@ class NativeAppUpdateDriver implements AppUpdateDriver {
       if(canceled())throw const UpdateCanceled();
       final request=http.Request('GET',destination);
       request.headers.addAll(sessionHeaders(session.cookie));
+      // Descriptive native client identity avoids Cloudflare workers.dev
+      // Browser Integrity Check 1010 (never use Python/Dart default UA).
+      request.headers['User-Agent']='FieldWork-Android-Updater/1.0';
       if(offset>0)request.headers['Range']='bytes=$offset-';
       final stream=await client.send(request).timeout(const Duration(seconds:25));
       if(stream.statusCode==401||stream.statusCode==403)
