@@ -186,7 +186,19 @@ def publish(args):
         raise RuntimeError("R2 publication failed: HTTP " + str(exc.code)) from None
     if published.get("published") is not True:
         raise RuntimeError("Release manifest has not been published")
-    print("Verified signed APK published to private R2.")
+    # Verify the actual public first-install URL from the GitHub runner,
+    # not just the private R2 object or the Worker deployment metadata.
+    public_request = urllib.request.Request(PUBLIC, headers={
+        "User-Agent": "FieldWork-Release-Publisher/1.0 (+https://github.com/milktea-cus/MCP-FBMN)",
+        "Accept": "application/vnd.android.package-archive",
+    })
+    with urllib.request.urlopen(public_request, timeout=45) as response:
+        mime = response.headers.get("Content-Type", "").split(";")[0]
+        length = int(response.headers.get("Content-Length", "0"))
+        magic = response.read(4)
+        if response.status != 200 or mime != "application/vnd.android.package-archive" or length != size or magic != b"PK\x03\x04":
+            raise RuntimeError("First-install production URL does not serve verified APK")
+    print("Verified signed APK published to private R2 and first-install URL passed HTTP smoke.")
     print("Installer download: " + PUBLIC)
     print("VersionCode:", args.version_code, "SHA-256:", digest)
 
