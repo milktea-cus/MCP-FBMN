@@ -40,6 +40,23 @@ Map<String,dynamic> decodeApi(http.Response r) {
     throw const ApiFailure(502,'Máy chủ trả dữ liệu không hợp lệ. Hãy thử lại.');
   }
 }
+/// A transient 401 from a gateway must be confirmed by the authoritative
+/// /me endpoint before destroying the encrypted Android session. An actual
+/// revoked or expired session continues to fail on the second independent
+/// request, and is then handled by AuthGate as a security rejection.
+Future<Map<String,dynamic>> probeAuthenticatedSession(
+  Future<Map<String,dynamic>> Function() probe,{
+  Duration retryDelay=const Duration(milliseconds:450),
+}) async {
+  try {
+    return await probe();
+  } on ApiFailure catch (e) {
+    if(e.status!=401)rethrow;
+    if(retryDelay>Duration.zero)await Future<void>.delayed(retryDelay);
+    return await probe();
+  }
+}
+
 /// Authentication secrets only: never use SQLite, SharedPreferences or logs for
 /// the session cookie. A distinct encrypted Android store is used for new logins.
 abstract class SessionSecretStore {
