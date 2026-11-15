@@ -82,6 +82,8 @@ function dataError(data: ObjectBody) {
     return 'Loại điểm bán không hợp lệ';
   if (data.status !== undefined && !['active', 'inactive', 'potential'].includes(String(data.status)))
     return 'Trạng thái không hợp lệ';
+  if (data.is_selling !== undefined && typeof data.is_selling !== 'boolean')
+    return 'Trạng thái đang bán phải là true/false';
   if (data.location_source !== null && data.location_source !== undefined &&
     !['gps','manual','map_link'].includes(String(data.location_source)))return 'Nguồn tọa độ không hợp lệ';
   if ((data.latitude !== null && data.latitude !== undefined) || (data.longitude !== null && data.longitude !== undefined)) {
@@ -115,7 +117,7 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       const rows = await db`SELECT c.id,c.client_ref,c.owner_sub,c.name,c.code,c.field_code,c.category,
           c.contact_name,c.phone,c.address_line,c.province,c.district,c.latitude,c.longitude,
           c.location_accuracy_m,c.location_consent,c.location_source,c.location_recorded_by,c.location_recorded_at,
-           c.note,c.status,c.version,c.created_at,c.updated_at,
+           c.note,c.status,c.is_selling,c.version,c.created_at,c.updated_at,
            CASE WHEN public.sales_customer_allowed(${actor.sub},c.id,'media')
              THEN c.cover_photo_id ELSE NULL END AS cover_photo_id,
            public.sales_customer_plannable(${actor.sub},c.id) AS can_plan
@@ -127,6 +129,8 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
     if (req.method === 'POST') {
       let data: ObjectBody; try {data=await input(req);}catch{return fail('JSON không hợp lệ');}
       const error=dataError(data); if(error)return fail(error);
+      // Creating a customer does not itself confirm an existing selling relationship.
+      if(data.is_selling===true)return fail('Khách mới mặc định chưa bán. Xác nhận đang bán trong hồ sơ khách.');
       if (!uuid.test(String(data.client_ref??'')))return fail('client_ref UUID bắt buộc để chống đồng bộ trùng');
       const province=String(data.province),district=String(data.district);
       if(!await validArea(db,province,district))return fail('Tỉnh/huyện không hợp lệ');
@@ -196,7 +200,7 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
         location_source=${newSource??null},
         location_recorded_by=CASE WHEN ${locationChanged} THEN ${actor.sub} ELSE location_recorded_by END,
         location_recorded_at=CASE WHEN ${locationChanged} THEN now() ELSE location_recorded_at END,
-        note=${optional(merged.note,2000)},status=${merged.status},last_mutation_ref=${data.client_ref??null}::uuid,version=version+1,updated_at=now()
+        note=${optional(merged.note,2000)},status=${merged.status},is_selling=${merged.is_selling===true},last_mutation_ref=${data.client_ref??null}::uuid,version=version+1,updated_at=now()
       WHERE id=${id}::uuid AND version=${data.version as number} AND public.sales_customer_allowed(${actor.sub},id,'edit') RETURNING *`;
     if(!rows.length)return fail('Xung đột phiên bản',409);
     await db`INSERT INTO field_audit_events(actor_sub,action,entity_type,entity_id) VALUES (${actor.sub},'update','customer',${id}::uuid)`;
