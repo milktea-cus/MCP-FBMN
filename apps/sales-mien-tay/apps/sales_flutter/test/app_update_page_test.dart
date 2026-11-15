@@ -63,14 +63,17 @@ void main(){
       await tester.pumpAndSettle();
       expect(find.textContaining('1.0.0-rc.1'),findsOneWidget);
       expect(find.textContaining('1.0.0-rc.2'),findsOneWidget);
-      await tester.tap(find.text('Tải'));
+      await tester.tap(find.text('Cập nhật'));
       await tester.pumpAndSettle();
       expect(probe.downloads,1);
       expect(probe.inspections,1);
-      expect(find.text('Cài đặt'),findsOneWidget);
+      expect(probe.installs,1,
+        reason:'A single Cập nhật tap must open the OS installer after verification');
+      expect(find.text('Cài đặt'),findsOneWidget,
+        reason:'Manual retry is available when the user denies install permission');
       await tester.tap(find.text('Cài đặt'));
       await tester.pumpAndSettle();
-      expect(probe.installs,1);
+      expect(probe.installs,2);
       expect(tester.takeException(),isNull);
     });
   }
