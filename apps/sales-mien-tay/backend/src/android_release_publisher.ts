@@ -47,7 +47,13 @@ async function authorized(req:Request):Promise<boolean>{
    requiredClaims:['sub','exp','iat'],
    clockTolerance:5,
   });
-  return payload.sub==='repo:milktea-cus/MCP-FBMN:ref:refs/heads/main' &&
+  // GitHub repositories created after 2026-07-15 use immutable OIDC
+  // subject claims with Owner ID and Repository ID. Keep the legacy form
+  // for repositories that explicitly opted into backward compatibility;
+  // the independently signed repository_id is always checked below.
+  const acceptedSub=payload.sub==='repo:milktea-cus@301684921/MCP-FBMN@1452277750:ref:refs/heads/main' ||
+    payload.sub==='repo:milktea-cus/MCP-FBMN:ref:refs/heads/main';
+  return acceptedSub &&
    payload.repository==='milktea-cus/MCP-FBMN' &&
    String(payload.repository_id)==='1452277750' &&
    payload.actor==='milktea-cus' &&
