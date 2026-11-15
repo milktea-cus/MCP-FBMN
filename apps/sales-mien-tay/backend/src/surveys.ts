@@ -129,91 +129,109 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
  if(path==='/api/v1/survey-templates'){
   if(req.method==='GET'){
    const province=url.searchParams.get('province')??'';
+   const manage=url.searchParams.get('manage')==='1'||url.searchParams.get('history')==='1';
    if(province&&province!=='*'&&!areas[province])return bad('Tỉnh không hợp lệ');
-   const history=url.searchParams.get('history')==='1';
-   if(history){
-    if(!actor.admin||!province)return bad('Chỉ Admin được xem lịch sử mẫu',403);
-    const older=await db`SELECT t.id,t.province,t.title,t.version,t.questions,t.created_by,
-      t.created_at,coalesce(v.status,'active') AS status
-      FROM public.field_survey_templates t
-      LEFT JOIN public.field_survey_template_visibility v ON v.province=t.province
-      WHERE t.province=${province} ORDER BY t.version DESC LIMIT 100`;
-    return json({items:older});
+   if(manage&&!actor.admin)return bad('Chỉ Admin được quản lý mẫu',403);
+   if(manage){
+    const rows=await db`SELECT f.id AS form_id,f.name AS title,f.provinces,f.status,
+      f.revision,t.id,t.version,t.questions,t.created_by,t.created_at
+      FROM public.field_survey_forms f JOIN public.field_survey_templates t
+       ON t.id=f.current_template_id
+      ORDER BY f.updated_at DESC,f.id`;
+    return json({items:rows});
    }
-   const rows=await db`SELECT DISTINCT ON (t.province)
-    t.id,t.province,t.title,t.version,t.questions,t.created_by,t.created_at
-    FROM public.field_survey_templates t
-    LEFT JOIN public.field_survey_template_visibility v ON v.province=t.province
-    WHERE coalesce(v.status,'active')='active'
-    AND (${!province} OR t.province=${province} OR (${province!=='*'} AND t.province='*'))
-    AND (${actor.admin}
-      OR (t.province='*' AND EXISTS(
-       SELECT 1 FROM staff_scopes sc WHERE sc.user_sub=${actor.sub}))
-      OR EXISTS(SELECT 1 FROM staff_scopes sc WHERE sc.user_sub=${actor.sub}
-       AND sc.province=t.province))
-   ORDER BY t.province,t.version DESC`;
+   const rows=await db`SELECT f.id AS form_id,f.name AS title,f.provinces,f.status,
+      f.revision,t.id,t.version,t.questions,t.created_by,t.created_at
+      FROM public.field_survey_forms f JOIN public.field_survey_templates t
+       ON t.id=f.current_template_id
+      WHERE f.status='active'
+       AND (${!province||province==='*'} OR cardinality(f.provinces)=0 OR ${province}=ANY(f.provinces))
+       AND (${actor.admin} OR EXISTS(SELECT 1 FROM public.staff_scopes sc
+        WHERE sc.user_sub=${actor.sub} AND
+         (cardinality(f.provinces)=0 OR sc.province=ANY(f.provinces))))
+      ORDER BY f.updated_at DESC,f.id`;
    return json({items:rows});
   }
+  if(!actor.admin)return bad('Chỉ Admin được quản lý mẫu',403);
+  let v:Body;try{v=await body(req);}catch{return bad('JSON không hợp lệ');}
+  const formId=String(v.form_id??''),ref=String(v.client_ref??'');
+  if(!isUuid(formId)||!isUuid(ref)||formId===ref)return bad('Mã mẫu hoặc thao tác không hợp lệ');
   if(req.method==='PATCH'){
-   if(!actor.admin)return bad('Chỉ Admin được quản lý mẫu',403);
-   let v:Body;try{v=await body(req);}catch{return bad('JSON không hợp lệ');}
-   const province=String(v.province??''),status=String(v.status??'');
-   const expectedStatus=String(v.expected_status??'');
-   if(!province||province==='*'&&status!=='active'||
-     province!=='*'&&!areas[province]||
-     !['active','paused','archived'].includes(status)||
-     !['active','paused','archived'].includes(expectedStatus)||
-     !isUuid(v.client_ref)||!Number.isInteger(v.expected_version)||
-     Number(v.expected_version)<1)return bad('Phạm vi, trạng thái hoặc phiên bản không hợp lệ');
-   const latest=await db`SELECT coalesce(max(version),0)::integer AS version
-     FROM public.field_survey_templates WHERE province=${province}`;
-   if(Number(latest[0].version)!==Number(v.expected_version))
-    return bad('Mẫu đã được cập nhật; tải lại trước khi thay đổi trạng thái',409);
-   const current=await db`SELECT status,client_ref FROM public.field_survey_template_visibility
-     WHERE province=${province}`;
-   if(current.length&&current[0].client_ref===v.client_ref)
-    return json({item:{province,status:current[0].status},idempotent:true});
-   if((current[0]?.status??'active')!==expectedStatus)
-    return bad('Trạng thái mẫu đã đổi; tải lại trước khi thao tác',409);
-   if(current.length===0&&expectedStatus!=='active')
-    return bad('Trạng thái mẫu đã đổi; tải lại trước khi thao tác',409);
-   const changed=await db`INSERT INTO public.field_survey_template_visibility
-      (province,status,changed_by,client_ref)
-      VALUES (${province},${status},${actor.sub},${v.client_ref}::uuid)
-      ON CONFLICT(province) DO UPDATE SET
-       status=EXCLUDED.status,changed_by=EXCLUDED.changed_by,
-       changed_at=now(),client_ref=EXCLUDED.client_ref
-      WHERE public.field_survey_template_visibility.status=${expectedStatus}
-      RETURNING province,status,changed_at`;
-   if(!changed.length)return bad('Mẫu đã thay đổi; tải lại để tiếp tục',409);
-   await db`INSERT INTO public.field_survey_template_status_audit
-      (client_ref,province,status,version,changed_by)
-      VALUES (${v.client_ref}::uuid,${province},${status},
-       ${Number(v.expected_version)},${actor.sub})
-      ON CONFLICT(client_ref) DO NOTHING`;
-   return json({item:changed[0]});
+   const status=String(v.status??''),expected=Number(v.expected_revision);
+   if(!['active','paused','archived'].includes(status)||
+      !Number.isInteger(expected)||expected<1)return bad('Trạng thái mẫu không hợp lệ');
+   const prior=await db`SELECT id,name,provinces,status,revision,current_template_id,
+     last_mutation_ref FROM public.field_survey_forms WHERE id=${formId}::uuid`;
+   if(prior[0]?.last_mutation_ref===ref)return json({item:prior[0],idempotent:true});
+   const rows=await db`UPDATE public.field_survey_forms SET
+      status=${status},revision=revision+1,updated_by=${actor.sub},
+      updated_at=now(),last_mutation_ref=${ref}::uuid
+      WHERE id=${formId}::uuid AND revision=${expected}
+      AND status<>${status}
+      RETURNING id,name,provinces,status,revision,current_template_id`;
+   return rows.length?json({item:rows[0]}):bad('Mẫu đã thay đổi; tải lại trước khi thao tác',409);
   }
   if(req.method!=='POST')return bad('Method not allowed',405);
-  if(!actor.admin)return bad('Chỉ Admin thiết lập mẫu',403);
-  let v:Body;try{v=await body(req);}catch{return bad('JSON không hợp lệ');}
-  const province=String(v.province??''),qs=questions(v.questions);
-   const title=String(v.title??(province==='*'?'Mẫu chung · Gặp khách':'Mẫu gặp khách · '+province)).trim();
-  if((province!=='*'&&!areas[province])||!qs||title.length<2||title.length>80||/[\x00-\x1f\x7f]/.test(title)||!isUuid(v.client_ref)||!Number.isInteger(v.expected_version)||Number(v.expected_version)<0)return bad('Mẫu, tỉnh hoặc phiên bản không hợp lệ');
-  // A catalog-backed question snapshots official names in the published version;
-  // unchecked free text and expired aliases must never enter a canonical survey.
+  const name=String(v.title??'').trim(),qs=questions(v.questions),
+   expected=Number(v.expected_revision);
+  const provinces=Array.isArray(v.provinces)
+   ?[...new Set(v.provinces.map((x:unknown)=>String(x)))]:null;
+  if(!qs||name.length<2||name.length>80||/[\x00-\x1f\x7f]/.test(name)||
+     !provinces||provinces.length>64||provinces.some(p=>!areas[p])||
+     !Number.isInteger(expected)||expected<0)
+    return bad('Tên, nội dung hoặc phạm vi áp dụng không hợp lệ');
   if(qs.some(q=>q.catalog_source==='brands')){
-   const rows=await db`SELECT name FROM public.market_brands ORDER BY name`;
-   const accepted=new Set(rows.map(row=>String(row.name)));
-   if(qs.some(q=>q.catalog_source==='brands'&&q.options?.some(name=>!accepted.has(name))))
-     return bad('Lựa chọn nhãn hàng đã thay đổi; tải lại danh mục chuẩn',409);
+   const brands=await db`SELECT name FROM public.market_brands ORDER BY name`;
+   const accepted=new Set(brands.map(row=>String(row.name)));
+   if(qs.some(q=>q.catalog_source==='brands'&&q.options?.some(item=>!accepted.has(item))))
+    return bad('Lựa chọn nhãn hàng đã đổi; tải lại danh mục chuẩn',409);
   }
-  const prior=await db`SELECT * FROM field_survey_templates WHERE id=${v.client_ref}::uuid AND province=${province}`;
-  if(prior.length)return json({item:prior[0],idempotent:true});
-  const rows=await db`INSERT INTO field_survey_templates(id,province,title,version,questions,created_by)
-   SELECT ${v.client_ref}::uuid,${province},${title},${Number(v.expected_version)+1},${JSON.stringify(qs)}::jsonb,${actor.sub}
-   WHERE coalesce((SELECT max(version) FROM field_survey_templates WHERE province=${province}),0)=${Number(v.expected_version)}
-   ON CONFLICT DO NOTHING RETURNING *`;
-  return rows.length?json({item:rows[0]},201):bad('Mẫu đã thay đổi; tải lại trước khi lưu',409);
+  const prior=await db`SELECT t.id,t.form_id,t.title,t.questions,
+    f.name,f.provinces,f.revision FROM public.field_survey_templates t
+    JOIN public.field_survey_forms f ON f.id=t.form_id WHERE t.id=${ref}::uuid`;
+  if(prior.length){
+   const p=prior[0];
+   return p.form_id===formId&&p.title===name&&
+     JSON.stringify(p.questions)===JSON.stringify(qs)
+     ?json({item:p,idempotent:true})
+     :bad('Mã thao tác đã dùng cho nội dung khác',409);
+  }
+  // Publish and switch the active snapshot atomically. Historical answers
+  // retain their original template_id; a scope is a property of the form.
+  const rows=await db`WITH current_form AS (
+     SELECT id FROM public.field_survey_forms
+     WHERE id=${formId}::uuid AND revision=${expected} AND ${expected}>0
+     FOR UPDATE
+   ), fresh AS (
+     INSERT INTO public.field_survey_forms
+      (id,name,provinces,status,revision,created_by,updated_by)
+     SELECT ${formId}::uuid,${name},${provinces}::text[],'active',0,
+       ${actor.sub},${actor.sub}
+     WHERE ${expected}=0
+     ON CONFLICT(id) DO NOTHING RETURNING id
+   ), allowed AS (
+     SELECT id FROM current_form UNION ALL SELECT id FROM fresh
+   ), published AS (
+     INSERT INTO public.field_survey_templates
+      (id,province,title,version,questions,created_by,form_id)
+     SELECT ${ref}::uuid,'*',${name},
+       nextval('public.field_survey_template_version_seq'),
+       ${JSON.stringify(qs)}::jsonb,${actor.sub},allowed.id
+     FROM allowed
+     ON CONFLICT DO NOTHING RETURNING id,form_id
+   )
+   UPDATE public.field_survey_forms f SET
+      name=${name},provinces=${provinces}::text[],
+      current_template_id=published.id,revision=f.revision+1,
+      updated_by=${actor.sub},updated_at=now(),
+      last_mutation_ref=${ref}::uuid
+   FROM published WHERE f.id=published.form_id AND f.revision=${expected}
+   RETURNING f.id AS form_id,f.name AS title,f.provinces,f.status,
+     f.revision,f.current_template_id`;
+  if(!rows.length)return bad('Mẫu đã được người khác sửa; tải lại để tiếp tục',409);
+  const snapshots=await db`SELECT t.id,t.version,t.questions,t.created_at
+    FROM public.field_survey_templates t WHERE t.id=${ref}::uuid`;
+  return json({item:{...rows[0],...snapshots[0]}},expected===0?201:200);
  }
  if(path==='/api/v1/sessions'&&req.method==='GET'){
   const province=url.searchParams.get('province')??'',customer=url.searchParams.get('customer_id')??'';
@@ -267,7 +285,10 @@ export async function surveyRoutes(req:Request,env:Env,actor:Actor,url:URL):Prom
   if(!first&&(!c.location_consent||c.latitude===null||c.longitude===null))return bad('Tọa độ điểm bán chưa được phép sử dụng',409);
   const distance=first?0:meters(c.latitude,c.longitude,v.latitude as number,v.longitude as number);
   if(distance>200)return bad('GPS cách điểm bán '+Math.round(distance)+'m, vượt bán kính 200m. Kiểm tra địa chỉ hoặc tọa độ đã lưu.',422);
-  const template=await db`SELECT id FROM field_survey_templates WHERE id=${tid}::uuid AND province=${c.province}`;
+  const template=await db`SELECT t.id FROM public.field_survey_templates t
+    JOIN public.field_survey_forms f ON f.id=t.form_id
+    WHERE t.id=${tid}::uuid AND f.status='active'
+      AND (cardinality(f.provinces)=0 OR ${c.province}=ANY(f.provinces))`;
   if(!template.length)return bad('Mẫu không thuộc tỉnh điểm bán',409);
   if(rid){const stops=await db`SELECT id FROM sales_records WHERE id=${rid}::uuid AND kind='visit' AND owner_sub=${actor.sub} AND data->>'customerId'=${cid} AND data->>'plannedDate'=${vnDay(started)} AND public.sales_can_access(${actor.sub},owner_sub,province,district)`;if(!stops.length)return bad('Điểm ghé không thuộc tuyến/ngày thực tế',409);}
   if(drid){
