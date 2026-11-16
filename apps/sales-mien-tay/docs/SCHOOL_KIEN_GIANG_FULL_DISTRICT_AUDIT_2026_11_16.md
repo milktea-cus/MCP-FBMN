@@ -38,3 +38,10 @@
 - **Loại khỏi lô**: Trường Tiểu học Kiên Lương 2 vì Kiên Lương 1 tiếp nhận một phần trường cũ và phân hiệu Lò Bom (tư cách đầu mối trường 2 cần đối chiếu); Trường Tiểu học Tân Khánh Hòa và Trường THCS Tân Khánh Hòa vì chỉ có tài liệu giữ ổn định/dự kiến cũ, trong khi công trình 11/2026 đã ghi “Trường Tiểu học Tân Khánh Hòa cũ”. Nguồn: https://kienluong.angiang.gov.vn/chu-tich-ubnd-xa-kien-luong-tran-binh-trong-cung-doan-cong-tac-xa-lam-viec-voi-truong-tieu-hoc-kien-luong-1 ; https://giangthanh.angiang.gov.vn/pho-chu-tich-ubnd-xa-tran-ngoc-bich-di-kiem-tra-cac-cong-trinh-thuoc-tieu-du-an-1-cua-du-an-4.
 - Mục tiêu tiếp: đối chiếu tên trường đầu mối còn thiếu theo quyết định từng xã/phường; GPS cổng trường/phân hiệu và danh mục `school_sites`; xử lý tên trường cũ đã sáp nhập như alias.
 - CSV `data/schools_kien_giang_full_district_audit_2026_11_16.csv`, migration `backend/migrations/074_kien_giang_full_district_schools_2026.sql`; batch `2026-11-16-kien-giang-province-audit-01`.
+
+## Sửa hậu nhập link Maps
+
+- Phát hiện 57 bản ghi lô 074 ban đầu thiếu `maps_search_url` do migration được tạo thủ công, dù CSV nhập đúng 57 trường.
+- Sửa lại migration 074 để bản chạy mới có Maps ngay; thêm migration 075 **chỉ điền link Google Maps search khi NULL** cho đúng 57 mã của batch 2026-11-16.
+- GPS vẫn chưa xác minh. Link Maps không phải ghim cố định.
+- Kiểm tra DB sau chạy 075: toàn bộ 57/57 phải có URL tìm kiếm `https://www.google.com/maps/search/?api=1&query=...`.
