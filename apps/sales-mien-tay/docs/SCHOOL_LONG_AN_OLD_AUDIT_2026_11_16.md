@@ -43,3 +43,8 @@
 - Không tạo trường mầm non, không tự đặt lat/long hoặc gps_verified. Google Maps chỉ link tìm kiếm.
 - Cần lập bảng `school_sites` để Sales có thể đi từng điểm trường sau sáp nhập (không đồng nghĩa một đầu mối bằng một địa điểm).
 - CSV: `data/schools_long_an_old_full_district_audit_2026_11_16.csv`, migration `backend/migrations/078_long_an_old_full_district_schools_2026.sql`, batch `2026-11-16-long-an-old-province-audit-01`.
+
+## Đối chiếu bổ sung nguồn THPT Hùng Vương (16/11/2026)
+
+- Đã sửa URL nguồn đích danh THPT Hùng Vương ở phường Long An trong dòng `LA261116-003` sang tin kiểm tra điểm thi của Báo Tây Ninh ngày 09/06/2026: https://baotayninh.vn/lanh-dao-tinh-kiem-tra-cong-tac-chuan-bi-ky-thi-tot-nghiep-thpt-nam-2026-148929.html.
+- Tên và địa chỉ phường Long An có đối chiếu thêm với danh mục trường cập nhật thông tin đăng ký thuế 06/10/2026: https://dulieuphapluat.vn/cong-cu/truong-thpt/tay-ninh/long-an-27694.html. Không suy diễn xác minh GPS từ địa chỉ này.
