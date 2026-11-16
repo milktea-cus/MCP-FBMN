@@ -3,7 +3,9 @@
 
 This tool does NOT connect to production. It validates a CSV manifest against
 Field Work's frozen 13-province / 134-district geography, then emits one SQL
-migration for review and CI. Full-coverage gate is ON by default.
+migration for review and CI. Full-coverage gate is ON by default. With an explicit
+--province, all old districts of that province must have rows. This only shows
+presence, not a complete school census.
 
 Usage:
   python3 scripts/schools_bulk_ingest.py --input official_schools.csv --output backend/migrations/0NN_schools_bulk.sql --batch 2026-11-16-schools-official
@@ -57,7 +59,7 @@ def sql_literal(value: str | None) -> str:
 
 
 def read_rows(csv_path: Path, geography: dict[str, list[str]], *,
-              allow_partial: bool) -> tuple[list[dict[str, str]], dict[str, object]]:
+              allow_partial: bool, province_scope: str | None = None) -> tuple[list[dict[str, str]], dict[str, object]]:
     errors: list[str] = []
     rows: list[dict[str, str]] = []
     source_refs: set[str] = set()
@@ -77,6 +79,9 @@ def read_rows(csv_path: Path, geography: dict[str, list[str]], *,
                 errors.append(f"Dòng {line}: thiếu {', '.join(missing)}")
                 continue
             province, district = x["province_old"], x["district_old"]
+            if province_scope is not None and province != province_scope:
+                errors.append(f"Dòng {line}: tỉnh ngoài phạm vi --province: {province}")
+                continue
             if district not in geography.get(province, []):
                 errors.append(f"Dòng {line}: địa giới cũ không hợp lệ: {province} / {district}")
                 continue
@@ -119,7 +124,8 @@ def read_rows(csv_path: Path, geography: dict[str, list[str]], *,
             school_keys.add(school_key)
             used_districts.add((province, district))
             rows.append(x)
-    expected = {(p, d) for p, districts in geography.items() for d in districts}
+    expected = {(p, d) for p, districts in geography.items() for d in districts
+                if province_scope is None or p == province_scope}
     missing_districts = sorted(expected - used_districts)
     if errors:
         raise ValueError("Dữ liệu không đạt kiểm tra:\n" + "\n".join(errors[:40])
@@ -131,6 +137,7 @@ def read_rows(csv_path: Path, geography: dict[str, list[str]], *,
                          "Bổ sung dữ liệu hoặc dùng --allow-partial khi kiểm thử, "
                          "KHÔNG gọi lô chưa đủ là hoàn thiện.")
     report = {
+        "province_scope": province_scope or "13 tỉnh cũ",
         "schools_in_manifest": len(rows),
         "old_provinces_with_data": len({r["province_old"] for r in rows}),
         "old_districts_with_data": len(used_districts),
@@ -186,13 +193,17 @@ def main() -> int:
     parser.add_argument("--output", type=Path, help="Destination SQL migration (only after review)")
     parser.add_argument("--batch", default="2026-11-16-schools-official")
     parser.add_argument("--allow-partial", action="store_true", help="For interim audits only")
+    parser.add_argument("--province", help="One historical province; require every old district")
     parser.add_argument("--check-only", action="store_true", help="Validate without writing SQL")
     args = parser.parse_args()
     if not args.check_only and args.output is None:
         parser.error("--output is required unless --check-only")
     geography = json.loads(DISTRICTS.read_text(encoding="utf-8"))
     try:
-        rows, report = read_rows(args.input, geography, allow_partial=args.allow_partial)
+        if args.province is not None and args.province not in geography:
+            raise ValueError(f"Tỉnh không nằm trong danh mục cũ: {args.province}")
+        rows, report = read_rows(args.input, geography, allow_partial=args.allow_partial,
+                                 province_scope=args.province)
         # Validate batch even in check-only mode.
         sql = compile_sql(rows, args.batch)
     except (ValueError, OSError, csv.Error) as error:
