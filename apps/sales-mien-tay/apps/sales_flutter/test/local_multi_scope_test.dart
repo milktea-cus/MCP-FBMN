@@ -16,7 +16,7 @@ void main(){
   final result=localTemplateScopes({
    'province':'Cần Thơ','district':'Ninh Kiều',
   });
-  expect(result,singleItem);
+  expect(result,hasLength(1));
   expect(result.single['scope_key'],'Cần Thơ|Ninh Kiều');
   expect(localScopeSummary(result),contains('Ninh Kiều'));
  });
@@ -30,13 +30,20 @@ void main(){
  });
  testWidgets('multi-select keeps selections across category changes',(tester)async{
   List<Map<String,dynamic>> chosen=[];
-  await tester.pumpWidget(MaterialApp(home:Scaffold(
-   body:StatefulBuilder(builder:(ctx,update)=>Center(
-    child:TextButton(onPressed:()async{
-     final next=await pickLocalScopes(
-      context:ctx,options:[district,chain,customer],initial:chosen);
-     if(next!=null)update(()=>chosen=next);
-    },child:const Text('Chọn nhiều'))))));
+  await tester.pumpWidget(
+   MaterialApp(home:Scaffold(body:StatefulBuilder(
+    builder:(ctx,update){
+     return Center(child:TextButton(
+      onPressed:()async{
+       final next=await pickLocalScopes(
+        context:ctx,options:[district,chain,customer],initial:chosen);
+       if(next!=null)update(()=>chosen=next);
+      },
+      child:const Text('Chọn nhiều'),
+     ));
+    },
+   ))),
+  );
   await tester.tap(find.text('Chọn nhiều'));
   await tester.pumpAndSettle();
   await tester.tap(find.widgetWithText(CheckboxListTile,'Ninh Kiều · Cần Thơ'));
