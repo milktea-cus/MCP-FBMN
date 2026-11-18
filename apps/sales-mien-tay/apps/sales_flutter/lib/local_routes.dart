@@ -21,6 +21,66 @@ String localOccurrenceId(String ruleId,DateTime date,String type)=>
  const Uuid().v5(Uuid.NAMESPACE_URL,
   'fbmn:local:'+ruleId+':'+dayKey(date)+':'+type);
 
+/// A recurring day becomes a real work plan only after an explicit user action.
+/// This must not invent customer visits or alter an existing monthly plan.
+bool hasLocalRouteAlready(List<Map<String,dynamic>> routes,Map<String,dynamic> rule,DateTime date){
+ final wantedDate=dayKey(date),area='${rule['province']}|${rule['district']??''}';
+ return routes.any((r)=>r['route_date']?.toString().startsWith(wantedDate)==true&&
+  r['scope_kind']=='territory'&&r['scope_key']==area&&r['plan_status']!='cancelled');
+}
+enum LocalCreateResult{created,existing}
+Future<LocalCreateResult> createLocalOccurrence({
+ required OfflineQueue queue,required CustomerService service,
+ required Map<String,dynamic> rule,required DateTime date,
+})async{
+ final now=DateTime.now().toUtc().add(const Duration(hours:7));
+ if(dayKey(date).compareTo(dayKey(now))<0||!localRuleOccurs(rule,date))
+  throw StateError('Ngày không thuộc tuyến cố định đang hoạt động');
+ final dateText=dayKey(date),month=monthKey(date);
+ final province=rule['province'].toString(),district=rule['district']?.toString()??'';
+ final scopeKey='$province|$district';
+ var existing=await queue.cached('monthly-plans:$month');
+ try{
+  final uri=service.uri('/api/v1/monthly-plans',{'month':month});
+  final response=(service.client?.get(uri,headers:service.headers)??
+   http.get(uri,headers:service.headers)).timeout(const Duration(seconds:15));
+  final result=decodeApi(await response);
+  existing=(result['items'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
+  await queue.cache('monthly-plans:$month',existing);
+ }on ApiFailure catch(e){
+  if(e.status==401||e.status==403)rethrow;
+ }catch(_){
+  // Server uniqueness handles offline races with another device.
+ }
+ final inPlan=existing.any((p)=>p['status']=='planned'&&
+  p['work_date'].toString().startsWith(dateText)&&p['scope_kind']=='territory'&&
+  p['scope_key']==scopeKey);
+ final inQueue=queue.pending.any((p)=>p['path']=='/api/v1/monthly-plans'&&
+  (p['payload'] as Map?)?['status']=='planned'&&
+  (p['payload'] as Map?)?['work_date']==dateText&&
+  (p['payload'] as Map?)?['scope_key']==scopeKey);
+ if(inPlan||inQueue)return LocalCreateResult.existing;
+ final id=rule['id'].toString(),purpose=rule['name'].toString();
+ final planId=localOccurrenceId(id,date,'plan');
+ final routeId=localOccurrenceId(id,date,'route');
+ final tripId=localOccurrenceId(id,date,'trip');
+ final note='Từ tuyến cố định $id';
+ await queue.enqueueTripGraph(
+  plan:{'client_ref':planId,'period_ym':month,'work_date':dateText,
+   'scope_kind':'territory','scope_key':scopeKey,'province':province,
+   'district':district,'purpose':purpose,'target_new_customers':0,
+   'note':note,'status':'planned'},
+  route:{'client_ref':routeId,'monthly_plan_id':planId,'route_date':dateText,
+   'purpose':purpose,'note':note,'status':'ready'},
+  trip:{'client_ref':tripId,'mutation_ref':tripId,'day_route_id':routeId,
+   'start_date':dateText,'end_date':dateText,'purpose':purpose,'note':note,
+   'scopes':[{'scope_kind':'territory','scope_key':scopeKey,
+    'province':province,'district':district}],
+   'priorities':<String>[]},
+ );
+ return LocalCreateResult.created;
+}
+
 class FixedLocalRoutesPage extends StatefulWidget{
  final OfflineQueue queue;
  final CustomerService service;
@@ -29,7 +89,7 @@ class FixedLocalRoutesPage extends StatefulWidget{
 }
 class _FixedLocalRoutesPageState extends State<FixedLocalRoutesPage>{
  List<Map<String,dynamic>> rules=[],scopes=[];
- DateTime week=weekMonday(DateTime.now());
+ DateTime week=weekMonday(DateTime.now().toUtc().add(const Duration(hours:7)));
  bool busy=false,offline=false;
  String? error;
  String get cacheKey=>'local-routes:'+widget.queue.revision;
@@ -134,46 +194,15 @@ class _FixedLocalRoutesPageState extends State<FixedLocalRoutesPage>{
   }catch(e){_toast('Không thay đổi được: $e');}
  }
  Future<void> _schedule(Map<String,dynamic> rule,DateTime date)async{
-  final now=DateTime.now().toUtc().add(const Duration(hours:7));
-  if(dayKey(date).compareTo(dayKey(now))<0||!localRuleOccurs(rule,date))return;
-  final textDate=dayKey(date),month=monthKey(date);
-  final province=rule['province'].toString(),district=rule['district']?.toString()??'';
-  final scopeKey=province+'|'+district;
   try{
-   var existing=await widget.queue.cached('monthly-plans:'+month);
-   try{
-    final r=decodeApi(await _get(widget.service.uri('/api/v1/monthly-plans',{'month':month})));
-    existing=(r['items'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
-    await widget.queue.cache('monthly-plans:'+month,existing);
-   }on ApiFailure catch(e){if(e.status==401||e.status==403)rethrow;}
-   catch(_){/* Offline changes remain durable. Server will reject conflicting dates. */}
-   final inPlan=existing.any((p)=>p['status']=='planned'&&
-    p['work_date'].toString().startsWith(textDate)&&p['scope_key']==scopeKey);
-   final inQueue=widget.queue.pending.any((p)=>p['path']=='/api/v1/monthly-plans'&&
-    (p['payload'] as Map?)?['work_date']==textDate&&
-    (p['payload'] as Map?)?['scope_key']==scopeKey);
-   if(inPlan||inQueue){
-    _toast('Ngày/địa bàn này đã có kế hoạch. Dùng tuyến sẵn có, không tạo trùng.');return;
+   final outcome=await createLocalOccurrence(
+    queue:widget.queue,service:widget.service,rule:rule,date:date);
+   if(!mounted)return;
+   if(outcome==LocalCreateResult.existing){
+    _toast('Đã có kế hoạch cùng ngày và địa bàn. Mở Kế hoạch/Hôm nay để dùng tuyến sẵn có.');
+   }else{
+    Navigator.pop(context,date);
    }
-   final id=rule['id'].toString(),purpose=rule['name'].toString();
-   final planId=localOccurrenceId(id,date,'plan');
-   final routeId=localOccurrenceId(id,date,'route');
-   final tripId=localOccurrenceId(id,date,'trip');
-   final note='Từ tuyến cố định '+id;
-   await widget.queue.enqueueTripGraph(
-    plan:{'client_ref':planId,'period_ym':month,'work_date':textDate,
-     'scope_kind':'territory','scope_key':scopeKey,'province':province,
-     'district':district,'purpose':purpose,'target_new_customers':0,
-     'note':note,'status':'planned'},
-    route:{'client_ref':routeId,'monthly_plan_id':planId,'route_date':textDate,
-     'purpose':purpose,'note':note,'status':'ready'},
-    trip:{'client_ref':tripId,'mutation_ref':tripId,'day_route_id':routeId,
-     'start_date':textDate,'end_date':textDate,'purpose':purpose,'note':note,
-     'scopes':[{'scope_kind':'territory','scope_key':scopeKey,
-      'province':province,'district':district}],
-     'priorities':<String>[]},
-   );
-   if(mounted)Navigator.pop(context,date);
   }catch(e){_toast('Không tạo được tuyến ngày: $e');}
  }
  @override Widget build(BuildContext context){
@@ -238,7 +267,7 @@ class _FixedLocalRoutesPageState extends State<FixedLocalRoutesPage>{
       for(final r in matches)ListTile(dense:true,
        title:Text(r['name'].toString()),subtitle:Text(_place(r)),
        trailing:TextButton(
-        onPressed:dayKey(date).compareTo(dayKey(today))<0?null:
+        onPressed:_pending(r)||dayKey(date).compareTo(dayKey(today))<0?null:
          ()=>_schedule(r,date),
         child:const Text('Lập lịch ngày'))),
      ]));

@@ -168,13 +168,14 @@ class WorkHubPage extends StatefulWidget {
 class _WorkHubPageState extends State<WorkHubPage>{
  int tab=1;
  DateTime day=DateTime.now().toUtc().add(const Duration(hours:7));
- List<Map<String,dynamic>> routes=[],trips=[];
+ List<Map<String,dynamic>> routes=[],trips=[],localRules=[];
  bool busy=false,offline=false;
  String? error;
  int lastPending=0;
  String get key=>'day-routes:${dayKey(day)}';
  String get monthCache=>'day-routes:${monthKey(day)}';
  String get tripsCache=>'trips:all';
+ String get localRuleCache=>'local-routes:${widget.queue.revision}';
  @override void initState(){
   super.initState();
   lastPending=widget.queue.pending.length;
@@ -187,6 +188,49 @@ class _WorkHubPageState extends State<WorkHubPage>{
   final count=widget.queue.pending.length;
   if(count<lastPending&&!busy)unawaited(load());
   lastPending=count;
+ }
+ Future<void> loadLocalRules()async{
+  try{
+   final stored=await widget.queue.cached(localRuleCache)
+    .timeout(const Duration(seconds:4));
+   if(mounted)setState(()=>localRules=stored);
+  }catch(_){}
+  try{
+   final uri=widget.service.uri('/api/v1/local-routes');
+   final response=await (widget.service.client?.get(
+    uri,headers:widget.service.headers)??
+    http.get(uri,headers:widget.service.headers))
+    .timeout(const Duration(seconds:15));
+   final fresh=(decodeApi(response)['items'] as List)
+    .map((e)=>Map<String,dynamic>.from(e as Map)).toList();
+   await widget.queue.cache(localRuleCache,fresh);
+   if(mounted)setState(()=>localRules=fresh);
+  }catch(e){
+   if(e is ApiFailure&&(e.status==401||e.status==403)&&mounted){
+    setState(()=>localRules=[]);
+   }
+  }
+ }
+ /// Materialize one dated occurrence only on the Sales tap.
+ /// Never fabricate visit evidence or change a saved monthly plan.
+ Future<void> launchLocalRoute(Map<String,dynamic> rule)async{
+  if(busy)return;
+  try{
+   final outcome=await createLocalOccurrence(
+    queue:widget.queue,service:widget.service,rule:rule,date:day);
+   if(!mounted)return;
+   if(outcome==LocalCreateResult.existing){
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+     content:Text('Ngày này đã có kế hoạch cùng địa bàn. Mở Kế hoạch để dùng tuyến hiện có.')));
+    return;
+   }
+   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+    content:Text('Đã lưu tuyến ngày trên máy · chờ đồng bộ. Mở tuyến để xem khách.')));
+   await load();
+  }catch(e){
+   if(mounted)ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content:Text('Không lập được tuyến cố định: $e')));
+  }
  }
  Future<void> loadTrips()async{
   try{
@@ -250,7 +294,7 @@ class _WorkHubPageState extends State<WorkHubPage>{
     ?'Máy chủ phản hồi chậm. Dữ liệu đã lưu trên máy vẫn còn; nhấn Làm mới hoặc kiểm tra hàng đợi đồng bộ.'
     :e.toString());
   }finally{
-   await loadTrips();
+   await Future.wait([loadTrips(),loadLocalRules()]);
    if(mounted)setState(()=>busy=false);
   }
  }
@@ -559,6 +603,15 @@ class _WorkHubPageState extends State<WorkHubPage>{
     :(progress!=RouteProgress.completed&&!closing);
   }).toList();
   final totals=WorkCounts.fromRoutes(activeRoutes);
+  final recurring=tab==1?localRules.where((r)=>
+   r['owner_sub']==widget.queue.identity&&localRuleOccurs(r,day)&&
+   !hasLocalRouteAlready(dayRoutes,r,day)&&
+   !widget.queue.pending.any((op)=>
+    (op['path']=='/api/v1/local-routes'&&
+     (op['payload'] as Map?)?['client_ref']==r['id'])||
+    op['path']=='/api/v1/local-routes/${r['id']}'))
+    .toList():<Map<String,dynamic>>[];
+
   return Column(children:[
    Padding(padding:const EdgeInsets.fromLTRB(12,12,12,6),child:Column(
     crossAxisAlignment:CrossAxisAlignment.stretch,children:[
@@ -596,7 +649,23 @@ class _WorkHubPageState extends State<WorkHubPage>{
       if(offline)Text('Dữ liệu đã lưu trên máy · chờ đồng bộ.',
        style:Theme.of(context).textTheme.bodySmall),
       if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
-      if(activeRoutes.isEmpty&&overdue.isEmpty&&!busy)...[
+           if(tab==1&&recurring.isNotEmpty)...[
+      const SizedBox(height:10),
+      Text('Tuyến cố định theo lịch (${recurring.length})',
+       style:Theme.of(context).textTheme.titleMedium),
+      const Padding(padding:EdgeInsets.symmetric(vertical:4),
+       child:Text('Lịch lặp đã tới ngày. Lập tuyến để tạo công việc thực tế, '
+        'không tự ghi lượt ghé hay khảo sát.')),
+      for(final rule in recurring)Card(child:ListTile(
+       leading:const Icon(Icons.repeat),
+       title:Text(rule['name']?.toString()??'Tuyến cố định'),
+       subtitle:Text("${rule['district']==''?'Toàn tỉnh':rule['district']} · ${rule['province']}"),
+       trailing:FilledButton(
+        onPressed:busy?null:()=>launchLocalRoute(rule),
+        child:const Text('Lập tuyến')),
+      )),
+     ],
+     if(activeRoutes.isEmpty&&overdue.isEmpty&&!busy)...[
        Padding(padding:const EdgeInsets.all(12),child:Text(
         error!=null||offline
           ?'Chưa xác nhận được tuyến ngày từ máy chủ. Không có nghĩa là lịch bị mất. '

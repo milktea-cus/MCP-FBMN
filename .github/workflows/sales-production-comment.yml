@@ -18,7 +18,7 @@ jobs:
       github.event.issue.number == 2 &&
       github.event.issue.pull_request == null &&
       github.event.comment.user.login == github.repository_owner &&
-      (github.event.comment.body == '/deploy production' || github.event.comment.body == '/deploy production A')
+      (github.event.comment.body == '/deploy production' || github.event.comment.body == '/deploy production A' || github.event.comment.body == '/deploy production local')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -63,10 +63,11 @@ jobs:
         env:
           RELEASE_READY: ${{ vars.SALES_PRODUCTION_READY }}
           OWNER_APPROVED_A: ${{ github.event.comment.body == '/deploy production A' && github.event.comment.user.login == github.repository_owner }}
+          OWNER_APPROVED_LOCAL: ${{ github.event.comment.body == '/deploy production local' && github.event.comment.user.login == github.repository_owner }}
         run: |
-          # Global product acceptance remains gated. Feature-A test release needs
+          # Global product acceptance remains gated. A scoped Sales Local or Feature-A test release needs
           # an explicit Owner-only command, green CI for exact main, and live API checks.
-          if [ "$RELEASE_READY" != 'true' ] && [ "$OWNER_APPROVED_A" != 'true' ]; then
+          if [ "$RELEASE_READY" != 'true' ] && [ "$OWNER_APPROVED_A" != 'true' ] && [ "$OWNER_APPROVED_LOCAL" != 'true' ]; then
             echo 'Production gate closed: require accepted product or Owner-approved A test release.'
             exit 1
           fi

@@ -14,3 +14,8 @@ Nguồn `binhnxwjfjxm/mcp-mobi` main hiện chỉ chứa README và một ảnh 
 
 ## UAT còn phải xác minh
 DB migration 081; Cloudflare Worker/Vercel deployment; 1 thứ và nhiều thứ, liên tháng; lịch tháng đã có; 409 hai thiết bị; tạm dừng, đổi quyền/403; offline/reconnect; Android/GPS thực tế.
+
+## Hoàn thiện tab Hôm nay
+- Sales Local nhìn thấy tuyến cố định đúng thứ/ngày ngay trong **Công tác → Hôm nay**; bấm **Lập tuyến** sẽ ghi một lần vào outbox và hiện tuyến thực tế cùng mọi khách trong phạm vi.
+- Không tự tạo lịch/phiên khi chỉ mở app; mọi evidence, GPS, khảo sát vẫn cần thao tác thực tế.
+- Kiểm thử: thiết lập T2 một huyện, kiểm Hôm nay đúng T2; sang T3 không hiện, tuần sau T2 hiện; kế hoạch cùng huyện/ngày không tạo trùng; tạm dừng và bật lại; offline rồi đồng bộ.

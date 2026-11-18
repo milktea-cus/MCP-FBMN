@@ -25,4 +25,15 @@ void main(){
   expect(localOccurrenceId(id,day,'trip'),isNot(plan));
   expect(localOccurrenceId(id,DateTime(2026,11,30),'plan'),isNot(plan));
  });
+ test('existing route in same area/day prevents duplicate fixed work',(){
+  final rule={...one,'province':'Cần Thơ','district':'Ninh Kiều'};
+  final date=DateTime(2026,11,23);
+  final day={'route_date':'2026-11-23','scope_kind':'territory',
+   'scope_key':'Cần Thơ|Ninh Kiều','plan_status':'planned'};
+  expect(hasLocalRouteAlready([day],rule,date),isTrue);
+  expect(hasLocalRouteAlready([{...day,'route_date':'2026-11-24'}],rule,date),isFalse);
+  expect(hasLocalRouteAlready([{...day,'scope_key':'Cần Thơ|Bình Thủy'}],rule,date),isFalse);
+  expect(hasLocalRouteAlready([{...day,'plan_status':'cancelled'}],rule,date),isFalse);
+ });
+
 }
