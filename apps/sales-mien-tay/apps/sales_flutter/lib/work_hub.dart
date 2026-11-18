@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import 'customers.dart';
 import 'offline_queue.dart';
 import 'monthly_plan.dart';
+import 'local_routes.dart';
 import 'day_route.dart';
 import 'work_session_identity.dart';
 import 'route_status.dart';
@@ -537,6 +538,11 @@ class _WorkHubPageState extends State<WorkHubPage>{
    SnackBar(content:Text('Không khôi phục được chuyến: $e')));}
  }
 
+ Future<void> openFixedLocalRoutes()async{
+  final selected=await Navigator.push<DateTime>(context,MaterialPageRoute(
+   builder:(_)=>FixedLocalRoutesPage(queue:widget.queue,service:widget.service)));
+  if(selected!=null&&mounted){setState((){tab=1;day=selected;});await load();}
+ }
  List<Map<String,dynamic>> get dayRoutes=>mergeTripRoutes(
   routes,trips,widget.queue.pending,widget.queue.identity,dayKey(day));
  @override Widget build(BuildContext context){
@@ -556,7 +562,12 @@ class _WorkHubPageState extends State<WorkHubPage>{
   return Column(children:[
    Padding(padding:const EdgeInsets.fromLTRB(12,12,12,6),child:Column(
     crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-     Text('Công tác',style:Theme.of(context).textTheme.titleLarge),
+     Row(children:[
+      Expanded(child:Text('Công tác',style:Theme.of(context).textTheme.titleLarge)),
+      TextButton.icon(key:const ValueKey('open-fixed-local-routes'),
+       onPressed:openFixedLocalRoutes,icon:const Icon(Icons.repeat),
+       label:const Text('Tuyến cố định')),
+     ]),
      const SizedBox(height:8),
      SegmentedButton<int>(
       segments:const [
