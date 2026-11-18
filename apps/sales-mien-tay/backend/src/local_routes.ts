@@ -1,5 +1,6 @@
 import {neon} from '@neondatabase/serverless';
 import type {AuthEnv} from './auth';
+import {normalizeLocalScopes,legacyWeeklyScope} from './local_multi_scopes';
 type Actor={sub:string;admin:boolean;manager:boolean};
 const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{
  status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}});
@@ -10,12 +11,11 @@ function validDay(v:unknown):v is string{
   !Number.isNaN(Date.parse(v))&&new Date(v).toISOString().slice(0,10)===v;
 }
 export function validLocalRule(v:Record<string,unknown>,edit:boolean):string|null{
+ const scopes=v.scopes===undefined?legacyWeeklyScope(v):normalizeLocalScopes(v.scopes);
  if(!uuid.test(String(v.client_ref??''))||
   typeof v.name!=='string'||v.name.trim().length<2||v.name.length>120||
   !['day','week'].includes(String(v.mode))||
-  typeof v.province!=='string'||!v.province.trim()||v.province.length>120||
-  typeof v.district!=='string'||v.district.length>120||
-  v.province.includes('|')||v.district.includes('|')||
+  scopes===null||
   !validDay(v.start_on)||typeof v.active!=='boolean'||
   !Array.isArray(v.weekdays)||v.weekdays.length<1||v.weekdays.length>7||
   v.weekdays.some(n=>!Number.isInteger(n)||n<1||n>7)||
@@ -34,8 +34,7 @@ export async function localRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:U
  const db=neon(env.DATABASE_URL);
  if(req.method==='GET'&&!match){
   const items=await db`SELECT t.* FROM public.field_local_route_rules t
-   WHERE t.owner_sub=${actor.sub} AND public.sales_monthly_plan_scope_allowed(
-    ${actor.sub},'territory',t.province||'|'||t.district,t.province,t.district)
+   WHERE t.owner_sub=${actor.sub} AND public.sales_local_scopes_allowed(${actor.sub},t.scopes)
    ORDER BY t.active DESC,t.updated_at DESC,t.id LIMIT 300`;
   return json({items});
  }
@@ -53,12 +52,19 @@ export async function localRouteRoutes(req:Request,env:AuthEnv,actor:Actor,url:U
  const id=editing?match![1]:String(body.client_ref);
  if(!uuid.test(id)||(editing&&body.id!==undefined&&body.id!==id))
   return fail('ID tuyến cố định không hợp lệ');
+ const scopes=body.scopes===undefined?legacyWeeklyScope(body):normalizeLocalScopes(body.scopes);
+ if(!scopes)return fail('Phạm vi tuyến không hợp lệ');
+ if(editing&&body.scopes===undefined){
+  const existing=await db`SELECT 1 FROM public.field_local_route_rules
+   WHERE id=${id}::uuid AND owner_sub=${actor.sub} AND jsonb_array_length(scopes)>1`;
+  if(existing.length)return fail('Vui lòng cập nhật ứng dụng để sửa tuyến có nhiều phạm vi',409);
+ }
  try{
-  const rows=await db`SELECT public.sales_save_local_route_rule(
+  const rows=await db`SELECT public.sales_save_local_route_rule_v2(
    ${actor.sub},${id}::uuid,${body.client_ref as string}::uuid,
    ${editing?Number(body.version):0},${body.name as string},${body.mode as string},
-   ${JSON.stringify(body.weekdays)}::jsonb,${body.province as string},
-   ${body.district as string},${body.start_on as string}::date,${body.active as boolean}) AS item`;
+   ${JSON.stringify(body.weekdays)}::jsonb,${JSON.stringify(scopes)}::jsonb,
+   ${body.start_on as string}::date,${body.active as boolean}) AS item`;
   return json({item:rows[0].item},editing?200:201);
  }catch(e){
   const m=(e as {message?:string;code?:string}).message??'';

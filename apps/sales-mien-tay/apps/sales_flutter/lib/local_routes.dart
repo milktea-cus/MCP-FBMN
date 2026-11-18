@@ -6,6 +6,7 @@ import 'customers.dart';
 import 'offline_queue.dart';
 import 'planning_periods.dart';
 import 'local_monthly_page.dart';
+import 'local_scope_picker.dart';
 import 'session.dart';
 
 const localWeekdayNames=['T2','T3','T4','T5','T6','T7','CN'];
@@ -24,11 +25,16 @@ String localOccurrenceId(String ruleId,DateTime date,String type)=>
 
 /// A recurring day becomes a real work plan only after an explicit user action.
 /// This must not invent customer visits or alter an existing monthly plan.
-bool hasLocalRouteAlready(List<Map<String,dynamic>> routes,Map<String,dynamic> rule,DateTime date,{String? owner}){
- final wantedDate=dayKey(date),area='${rule['province']}|${rule['district']??''}';
+bool hasLocalRouteAlready(List<Map<String,dynamic>> routes,
+ Map<String,dynamic> rule,DateTime date,{String? owner}){
+ final scopes=localTemplateScopes(rule);
+ if(scopes.isEmpty)return false;
+ final first=scopes.first,wantedDate=dayKey(date);
  return routes.any((r)=>(owner==null||r['owner_sub']==owner)&&
   r['route_date']?.toString().startsWith(wantedDate)==true&&
-  r['scope_kind']=='territory'&&r['scope_key']==area&&r['plan_status']!='cancelled');
+  r['scope_kind']==first['scope_kind']&&
+  r['scope_key']==first['scope_key']&&
+  r['plan_status']!='cancelled');
 }
 enum LocalCreateResult{created,existing}
 Future<LocalCreateResult> createLocalOccurrence({
@@ -38,48 +44,49 @@ Future<LocalCreateResult> createLocalOccurrence({
  final now=DateTime.now().toUtc().add(const Duration(hours:7));
  if(dayKey(date).compareTo(dayKey(now))<0||!localRuleOccurs(rule,date))
   throw StateError('Ngày không thuộc tuyến cố định đang hoạt động');
- final dateText=dayKey(date),month=monthKey(date);
- final province=rule['province'].toString(),district=rule['district']?.toString()??'';
- final scopeKey='$province|$district';
- var existing=await queue.cached('monthly-plans:$month');
+ final selections=localTemplateScopes(rule);
+ if(selections.isEmpty||selections.length>50)
+  throw StateError('Tuyến chưa có phạm vi hợp lệ');
+ final first=selections.first,dateText=dayKey(date),month=monthKey(date),
+  kind=first['scope_kind'].toString(),key=first['scope_key'].toString();
+ var existing=await queue.cached('monthly-plans:'+month);
  try{
   final uri=service.uri('/api/v1/monthly-plans',{'month':month});
   final response=(service.client?.get(uri,headers:service.headers)??
    http.get(uri,headers:service.headers)).timeout(const Duration(seconds:15));
   final result=decodeApi(await response);
   existing=(result['items'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
-  await queue.cache('monthly-plans:$month',existing);
- }on ApiFailure catch(e){
-  if(e.status==401||e.status==403)rethrow;
- }catch(_){
-  // Server uniqueness handles offline races with another device.
- }
+  await queue.cache('monthly-plans:'+month,existing);
+ }on ApiFailure catch(e){if(e.status==401||e.status==403)rethrow;}
+ catch(_){/* Replay verifies scopes; no fake success while offline. */}
  final inPlan=existing.any((p)=>p['owner_sub']==queue.identity&&
-  p['status']=='planned'&&
-  p['work_date'].toString().startsWith(dateText)&&p['scope_kind']=='territory'&&
-  p['scope_key']==scopeKey);
+  p['status']=='planned'&&p['work_date'].toString().startsWith(dateText)&&
+  p['scope_kind']==kind&&p['scope_key']==key);
  final inQueue=queue.pending.any((p)=>p['path']=='/api/v1/monthly-plans'&&
   (p['payload'] as Map?)?['status']=='planned'&&
   (p['payload'] as Map?)?['work_date']==dateText&&
-  (p['payload'] as Map?)?['scope_key']==scopeKey);
+  (p['payload'] as Map?)?['scope_kind']==kind&&
+  (p['payload'] as Map?)?['scope_key']==key);
  if(inPlan||inQueue)return LocalCreateResult.existing;
  final id=rule['id'].toString(),purpose=rule['name'].toString();
  final planId=localOccurrenceId(id,date,'plan');
  final routeId=localOccurrenceId(id,date,'route');
  final tripId=localOccurrenceId(id,date,'trip');
- final note='Từ tuyến cố định $id';
+ final note='Từ tuyến cố định '+id;
+ final tripScopes=selections.map((s)=><String,dynamic>{
+  'scope_kind':s['scope_kind'],'scope_key':s['scope_key'],
+  'province':s['province'],'district':s['district'],
+ }).toList();
  await queue.enqueueTripGraph(
   plan:{'client_ref':planId,'period_ym':month,'work_date':dateText,
-   'scope_kind':'territory','scope_key':scopeKey,'province':province,
-   'district':district,'purpose':purpose,'target_new_customers':0,
-   'note':note,'status':'planned'},
+   'scope_kind':kind,'scope_key':key,
+   'province':first['province'],'district':first['district'],
+   'purpose':purpose,'target_new_customers':0,'note':note,'status':'planned'},
   route:{'client_ref':routeId,'monthly_plan_id':planId,'route_date':dateText,
    'purpose':purpose,'note':note,'status':'ready'},
   trip:{'client_ref':tripId,'mutation_ref':tripId,'day_route_id':routeId,
    'start_date':dateText,'end_date':dateText,'purpose':purpose,'note':note,
-   'scopes':[{'scope_kind':'territory','scope_key':scopeKey,
-    'province':province,'district':district}],
-   'priorities':<String>[]},
+   'scopes':tripScopes,'priorities':<String>[]},
  );
  return LocalCreateResult.created;
 }
@@ -110,7 +117,7 @@ class _FixedLocalRoutesPageState extends State<FixedLocalRoutesPage>{
    final savedScopes=await widget.queue.cached('monthly-plan-scopes');
    if(mounted)setState((){
     rules=snapshot;
-    scopes=savedScopes.where((s)=>s['scope_kind']=='territory').toList();
+    scopes=savedScopes;
     offline=true;
    });
   }catch(_){}
@@ -128,7 +135,7 @@ class _FixedLocalRoutesPageState extends State<FixedLocalRoutesPage>{
    final result=decodeApi(await _get(widget.service.uri('/api/v1/monthly-plans/options')));
    final list=(result['scopes'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
    await widget.queue.cache('monthly-plan-scopes',list);
-   if(mounted)setState(()=>scopes=list.where((s)=>s['scope_kind']=='territory').toList());
+   if(mounted)setState(()=>scopes=list);
   }catch(e){
    if(e is ApiFailure&&(e.status==401||e.status==403)&&mounted)setState(()=>scopes=[]);
   }
@@ -159,10 +166,8 @@ class _FixedLocalRoutesPageState extends State<FixedLocalRoutesPage>{
    op['path']=='/api/v1/local-routes/'+id||
    (op['path']=='/api/v1/local-routes'&&(op['payload'] as Map?)?['client_ref']==id));
  }
- String _place(Map<String,dynamic> rule){
-  final district=rule['district']?.toString()??'';
-  return (district.isEmpty?'Toàn tỉnh':district)+' · '+rule['province'].toString();
- }
+ String _place(Map<String,dynamic> rule)=>
+  localScopeSummary(localTemplateScopes(rule));
  String _days(Map<String,dynamic> rule)=>localRuleDays(rule)
    .where((d)=>d>=1&&d<=7).map((d)=>localWeekdayNames[d-1]).join(', ');
  Future<void> _edit([Map<String,dynamic>? original])async{
@@ -189,6 +194,7 @@ class _FixedLocalRoutesPageState extends State<FixedLocalRoutesPage>{
    await widget.queue.enqueue('/api/v1/local-routes/'+r['id'].toString(),{
     'client_ref':const Uuid().v4(),'name':r['name'],'mode':r['mode'],
     'weekdays':localRuleDays(r),'province':r['province'],'district':r['district'],
+    'scopes':localTemplateScopes(r),
     'start_on':r['start_on'].toString().substring(0,10),
     'active':r['active']!=true,'version':r['version'],
    },method:'PATCH');
@@ -210,7 +216,7 @@ class _FixedLocalRoutesPageState extends State<FixedLocalRoutesPage>{
     onPressed:scopes.isEmpty?null:()=>_edit(),
     icon:const Icon(Icons.add),label:const Text('Thêm tuyến')),
    body:ListView(padding:const EdgeInsets.fromLTRB(12,12,12,95),children:[
-    const Text('Lặp theo thứ hàng tuần. Mỗi địa bàn có thể có tuyến riêng. '
+    const Text('Lặp theo thứ hàng tuần. Mỗi tuyến được chọn nhiều địa bàn, khách hoặc chuỗi. '
      'Kế hoạch tháng và kết quả đã ghi không bị thay đổi.'),
     if(busy)const LinearProgressIndicator(minHeight:2),
     if(offline)const Text('Đang xem dữ liệu lưu trên máy; thay đổi chờ đồng bộ.'),
@@ -268,7 +274,7 @@ class _LocalRuleEditor extends StatefulWidget{
 }
 class _LocalRuleEditorState extends State<_LocalRuleEditor>{
  late final TextEditingController name;
- Map<String,dynamic>? scope;
+ List<Map<String,dynamic>> selectedScopes=[];
  late Set<int> days;
  late bool active;
  @override void initState(){
@@ -278,44 +284,24 @@ class _LocalRuleEditorState extends State<_LocalRuleEditor>{
   days=r==null?{DateTime.now().weekday}:localRuleDays(r).toSet();
   if(days.isEmpty)days={DateTime.now().weekday};
   active=r?['active']!=false;
-  for(final s in widget.scopes){
-   if(r!=null&&s['province']==r['province']&&s['district']==r['district']){
-    scope=s;break;
-   }
-  }
+  if(r!=null)selectedScopes=localTemplateScopes(r);
  }
  @override void dispose(){name.dispose();super.dispose();}
  Future<void> _chooseScope()async{
-  String query='';
-  final selected=await showModalBottomSheet<Map<String,dynamic>>(
-   context:context,isScrollControlled:true,builder:(sheet)=>SafeArea(
-    child:StatefulBuilder(builder:(ctx,refresh)=>SizedBox(
-     height:MediaQuery.sizeOf(sheet).height*0.70,child:Column(children:[
-      const Padding(padding:EdgeInsets.all(12),child:Text('Chọn địa bàn được giao')),
-      Padding(padding:const EdgeInsets.symmetric(horizontal:12),
-       child:TextField(autofocus:true,decoration:const InputDecoration(
-        prefixIcon:Icon(Icons.search),hintText:'Tìm tỉnh/huyện'),
-        onChanged:(s)=>refresh(()=>query=s.toLowerCase()))),
-      Expanded(child:Builder(builder:(context){
-       final found=widget.scopes.where((s)=>
-        (s['label']?.toString()??'').toLowerCase().contains(query)).toList();
-       return ListView.builder(itemCount:found.length,
-        itemBuilder:(ctx,i)=>ListTile(title:Text(found[i]['label'].toString()),
-         onTap:()=>Navigator.pop(sheet,found[i])));
-      })),
-     ]),
-    ))));
-  if(selected!=null&&mounted)setState(()=>scope=selected);
+  final picked=await pickLocalScopes(
+   context:context,options:widget.scopes,initial:selectedScopes);
+  if(picked!=null&&mounted)setState(()=>selectedScopes=picked);
  }
  void _save(){
-  if(name.text.trim().length<2||name.text.length>120||scope==null||days.isEmpty){
+  if(name.text.trim().length<2||name.text.length>120||selectedScopes.isEmpty||days.isEmpty){
    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-    content:Text('Nhập tên, địa bàn và ít nhất một thứ trong tuần.')));return;
+    content:Text('Nhập tên, chọn phạm vi và ít nhất một thứ trong tuần.')));return;
   }
   Navigator.pop(context,<String,dynamic>{
    'name':name.text.trim(),'mode':days.length==1?'day':'week',
    'weekdays':days.toList()..sort(),
-   'province':scope!['province'],'district':scope!['district']??'',
+   'scopes':selectedScopes,'province':selectedScopes.first['province'],
+   'district':selectedScopes.first['district']??'',
    'start_on':widget.original?['start_on']?.toString().substring(0,10)??'2020-01-01',
    'active':active,
   });
@@ -331,7 +317,16 @@ class _LocalRuleEditorState extends State<_LocalRuleEditor>{
      hintText:'Ví dụ: Thứ Hai · Ninh Kiều')),
    OutlinedButton.icon(onPressed:_chooseScope,
     icon:const Icon(Icons.location_on_outlined),
-    label:Text(scope?['label']?.toString()??'Chọn tỉnh/huyện')),
+    label:Text(localScopeSummary(selectedScopes))),
+   if(selectedScopes.isNotEmpty)Padding(
+    padding:const EdgeInsets.only(top:8),
+    child:Wrap(spacing:5,runSpacing:4,children:[
+     for(final scope in selectedScopes)Chip(
+      label:Text(localScopeLabel(scope)),
+      onDeleted:()=>setState(()=>selectedScopes.removeWhere((s)=>
+       localScopeFingerprint(s)==localScopeFingerprint(scope))),
+     ),
+    ])),
    const SizedBox(height:16),
    Text('Chọn các thứ lặp hằng tuần',
     style:Theme.of(context).textTheme.titleMedium),

@@ -6,6 +6,7 @@ import 'customers.dart';
 import 'offline_queue.dart';
 import 'monthly_plan.dart';
 import 'local_routes.dart';
+import 'local_scope_picker.dart';
 import 'day_route.dart';
 import 'work_session_identity.dart';
 import 'route_status.dart';
@@ -659,7 +660,7 @@ class _WorkHubPageState extends State<WorkHubPage>{
       for(final rule in recurring)Card(child:ListTile(
        leading:const Icon(Icons.repeat),
        title:Text(rule['name']?.toString()??'Tuyến cố định'),
-       subtitle:Text("${rule['district']==''?'Toàn tỉnh':rule['district']} · ${rule['province']}"),
+       subtitle:Text(localScopeSummary(localTemplateScopes(rule))),
        trailing:FilledButton(
         onPressed:busy?null:()=>launchLocalRoute(rule),
         child:const Text('Lập tuyến')),

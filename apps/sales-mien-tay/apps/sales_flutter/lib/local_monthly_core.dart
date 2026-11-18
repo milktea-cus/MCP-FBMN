@@ -4,6 +4,7 @@ import 'customers.dart';
 import 'offline_queue.dart';
 import 'planning_periods.dart';
 import 'session.dart';
+import 'local_scope_picker.dart';
 
 List<DateTime> fixedMonthDays(DateTime month,int week)=>
  week>=1&&week<=5?periodDays(month,week):[];
@@ -20,8 +21,11 @@ Future<FixedMonthResult> materializeFixedMonth({
  final now=DateTime.now().toUtc().add(const Duration(hours:7));
  if(dayKey(date).compareTo(dayKey(now))<0||!fixedMonthMatches(rule,date))
   throw StateError('Ngày không thuộc tuần tháng được giao');
- final ym=monthKey(date),d=dayKey(date),kind=rule['scope_kind'].toString(),
-  key=rule['scope_key'].toString();
+ final selections=localTemplateScopes(rule);
+ if(selections.isEmpty||selections.length>50)
+  throw StateError('Tuyến tháng chưa có phạm vi hợp lệ');
+ final first=selections.first,ym=monthKey(date),d=dayKey(date),
+  kind=first['scope_kind'].toString(),key=first['scope_key'].toString();
  var plans=await queue.cached('monthly-plans:'+ym);
  try{
   final uri=service.uri('/api/v1/monthly-plans',{'month':ym});
@@ -40,8 +44,11 @@ Future<FixedMonthResult> materializeFixedMonth({
  final id=rule['id'].toString(),name=rule['name'].toString();
  final p=fixedMonthId(id,date,'plan'),r=fixedMonthId(id,date,'route'),
   t=fixedMonthId(id,date,'trip');
- final province=kind=='territory'?rule['province']:null;
- final district=kind=='territory'?rule['district']:null;
+ final province=first['province'],district=first['district'];
+ final tripScopes=selections.map((scope)=><String,dynamic>{
+  'scope_kind':scope['scope_kind'],'scope_key':scope['scope_key'],
+  'province':scope['province'],'district':scope['district'],
+ }).toList();
  final note='Từ tuyến cố định tháng '+id;
  await queue.enqueueTripGraph(
   plan:{'client_ref':p,'period_ym':ym,'work_date':d,
@@ -51,8 +58,7 @@ Future<FixedMonthResult> materializeFixedMonth({
    'purpose':name,'status':'ready','note':note},
   trip:{'client_ref':t,'mutation_ref':t,'day_route_id':r,
    'start_date':d,'end_date':d,'purpose':name,'note':note,
-   'scopes':[{'scope_kind':kind,'scope_key':key,
-    'province':province,'district':district}],
+   'scopes':tripScopes,
    'priorities':<String>[]},
  );
  return FixedMonthResult.created;

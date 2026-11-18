@@ -7,6 +7,7 @@ import 'offline_queue.dart';
 import 'planning_periods.dart';
 import 'session.dart';
 import 'local_monthly_core.dart';
+import 'local_scope_picker.dart';
 
 class FixedMonthPage extends StatefulWidget{
  final OfflineQueue queue;
@@ -112,6 +113,7 @@ class _FixedMonthPageState extends State<FixedMonthPage>{
     'name':r['name'],'week_no':r['week_no'],'scope_kind':r['scope_kind'],
     'scope_key':r['scope_key'],'scope_label':r['scope_label'],
     'province':r['province'],'district':r['district'],
+    'scopes':localTemplateScopes(r),
     'active':r['active']!=true,
    },method:'PATCH');
    notify('Đã lưu trạng thái · chờ đồng bộ');
@@ -192,7 +194,7 @@ class _FixedMonthPageState extends State<FixedMonthPage>{
         ListTile(
          leading:const Icon(Icons.event_repeat_outlined),
          title:Text(r['name']?.toString()??''),
-         subtitle:Text((r['scope_label']??r['scope_key']).toString()+
+         subtitle:Text(localScopeSummary(localTemplateScopes(r))+
           '\n'+progress(r)+(pending(r)?'\nChờ đồng bộ':'')),
          isThreeLine:true),
         Wrap(alignment:WrapAlignment.end,spacing:6,children:[
@@ -220,7 +222,7 @@ class _FixedMonthEditor extends StatefulWidget{
 }
 class _FixedMonthEditorState extends State<_FixedMonthEditor>{
  late final TextEditingController name;
- Map<String,dynamic>? selected;
+ List<Map<String,dynamic>> selectedScopes=[];
  late int week;
  late bool active;
  @override void initState(){
@@ -229,54 +231,25 @@ class _FixedMonthEditorState extends State<_FixedMonthEditor>{
   name=TextEditingController(text:r?['name']?.toString()??'');
   week=(r?['week_no'] as num?)?.toInt()??1;
   active=r?['active']!=false;
-  for(final s in widget.scopes){
-   if(r!=null&&s['scope_kind']==r['scope_kind']&&s['scope_key']==r['scope_key']){
-    selected=s;break;
-   }
-  }
+  if(r!=null)selectedScopes=localTemplateScopes(r);
  }
  @override void dispose(){name.dispose();super.dispose();}
  Future<void> chooseScope()async{
-  String query='',kind='all';
-  final result=await showModalBottomSheet<Map<String,dynamic>>(
-   context:context,isScrollControlled:true,builder:(sheet)=>SafeArea(
-    child:StatefulBuilder(builder:(ctx,rebuild)=>SizedBox(
-     height:MediaQuery.sizeOf(sheet).height*0.72,child:Column(children:[
-      const Padding(padding:EdgeInsets.all(12),
-       child:Text('Chọn tỉnh/huyện, khách hoặc chuỗi được giao')),
-      Wrap(spacing:6,children:[
-       for(final option in const ['all','territory','customer','chain'])
-        ChoiceChip(label:Text({'all':'Tất cả','territory':'Địa bàn',
-         'customer':'Khách','chain':'Chuỗi'}[option]!),
-         selected:kind==option,onSelected:(_)=>rebuild(()=>kind=option)),
-      ]),
-      Padding(padding:const EdgeInsets.symmetric(horizontal:12),
-       child:TextField(autofocus:true,decoration:const InputDecoration(
-        prefixIcon:Icon(Icons.search),hintText:'Tìm phạm vi được giao'),
-        onChanged:(s)=>rebuild(()=>query=s.toLowerCase()))),
-      Expanded(child:Builder(builder:(_){
-       final options=widget.scopes.where((s)=>
-        (kind=='all'||s['scope_kind']==kind)&&
-        (s['label']?.toString()??'').toLowerCase().contains(query)).toList();
-       return ListView.builder(itemCount:options.length,itemBuilder:(context,i)=>
-        ListTile(title:Text(options[i]['label'].toString()),
-         onTap:()=>Navigator.pop(sheet,options[i])));
-      })),
-     ]),
-    ))));
-  if(result!=null&&mounted)setState(()=>selected=result);
+  final picked=await pickLocalScopes(context:context,
+   options:widget.scopes,initial:selectedScopes);
+  if(picked!=null&&mounted)setState(()=>selectedScopes=picked);
  }
  void save(){
-  if(name.text.trim().length<2||name.text.length>120||selected==null){
+  if(name.text.trim().length<2||name.text.length>120||selectedScopes.isEmpty){
    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
     content:Text('Nhập tên tuyến và chọn phạm vi.')));return;
   }
-  final area=selected!['scope_kind']=='territory';
+  final first=selectedScopes.first;
   Navigator.pop(context,<String,dynamic>{
-   'name':name.text.trim(),'week_no':week,'scope_kind':selected!['scope_kind'],
-   'scope_key':selected!['scope_key'],'scope_label':selected!['label'],
-   'province':area?selected!['province']:null,
-   'district':area?selected!['district']:null,'active':active,
+   'name':name.text.trim(),'week_no':week,'scope_kind':first['scope_kind'],
+   'scope_key':first['scope_key'],'scope_label':first['label'],
+   'province':first['province'],'district':first['district'],
+   'scopes':selectedScopes,'active':active,
   });
  }
  @override Widget build(BuildContext context)=>Scaffold(
@@ -296,10 +269,18 @@ class _FixedMonthEditorState extends State<_FixedMonthEditor>{
    const SizedBox(height:12),
    OutlinedButton.icon(onPressed:chooseScope,
     icon:const Icon(Icons.location_on_outlined),
-    label:Text(selected?['label']?.toString()??'Chọn tỉnh/huyện, khách hoặc chuỗi')),
+    label:Text(localScopeSummary(selectedScopes))),
+   const SizedBox(height:8),
+   if(selectedScopes.isNotEmpty)Wrap(spacing:5,runSpacing:4,children:[
+    for(final scope in selectedScopes)Chip(
+     label:Text(localScopeLabel(scope)),
+     onDeleted:()=>setState(()=>selectedScopes.removeWhere((s)=>
+      localScopeFingerprint(s)==localScopeFingerprint(scope))),
+    ),
+   ]),
    const SizedBox(height:10),
-   const Text('Không cần chọn ngày. Thêm nhiều phân công nếu cùng tuần '
-    'cần phụ trách nhiều địa bàn, khách hoặc chuỗi.'),
+   const Text('Không cần chọn ngày. Tích nhiều tỉnh/huyện, khách và chuỗi '
+    'trong cùng một phân công. Có thể tạo thêm tuyến khác cho tuần này.'),
    SwitchListTile(contentPadding:EdgeInsets.zero,title:const Text('Đang hoạt động'),
     value:active,onChanged:(v)=>setState(()=>active=v)),
    const Text('Thay đổi tuyến cố định không sửa lịch, GPS, lượt ghé '
