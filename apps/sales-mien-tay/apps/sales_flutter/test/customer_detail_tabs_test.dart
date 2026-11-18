@@ -119,6 +119,73 @@ FieldCustomer customer({String? phone='0912345678'})=>FieldCustomer.fromJson({
   'phone':phone,'contact_name':'Nguyễn Văn A','version':1,
 });
 void main(){
+
+  test('API ACL edits across employee owners but denies read-only users',(){
+    final admin=FieldCustomer.fromJson({
+      ...customer().toJson(),'owner_sub':'some-other-sales',
+      'can_edit':true,'can_media':true,
+    });
+    expect(customerEditable(admin,'sales-1'),isTrue);
+    expect(customerMediaEditable(admin,'sales-1'),isTrue);
+    final viewer=FieldCustomer.fromJson({
+      ...admin.toJson(),'can_edit':false,'can_media':false,
+    });
+    expect(customerEditable(viewer,'sales-1'),isFalse);
+    expect(customerMediaEditable(viewer,'sales-1'),isFalse);
+    expect(validateVatTaxCode('0123456789'),isNull);
+    expect(validateVatTaxCode('0123456789-001'),isNull);
+    expect(validateVatTaxCode('12xx'),isNotNull);
+  });
+  testWidgets('VAT modal validates tax ID before persisting',(tester)async{
+    Map<String,dynamic>? saved;
+    await tester.pumpWidget(MaterialApp(home:Scaffold(body:Builder(
+      builder:(context)=>FilledButton(
+        onPressed:()=>showDialog<void>(context:context,builder:(_)=>
+          CustomerVatDialog(customer:customer(),onSave:(data)async{saved=data;})),
+        child:const Text('Mở VAT')),
+    ))));
+    await tester.tap(find.text('Mở VAT'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('customer-vat-tax')),'12XX');
+    await tester.tap(find.text('Lưu VAT'));
+    await tester.pumpAndSettle();
+    expect(find.text('Mã số thuế gồm 10 hoặc 13 chữ số'),findsOneWidget);
+    expect(saved,isNull);
+    await tester.enterText(find.byKey(const Key('customer-vat-tax')),'0123456789');
+    await tester.tap(find.text('Lưu VAT'));
+    await tester.pumpAndSettle();
+    expect(saved?['vat_tax_code'],'0123456789');
+  });
+  testWidgets('non-owner Admin can open VAT in customer tab and enqueue PATCH',(tester)async{
+    tester.view.devicePixelRatio=1;
+    tester.view.physicalSize=const Size(390,1000);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final queue=CoverSelectionProbe();
+    final other=FieldCustomer.fromJson({
+      ...customer().toJson(),'owner_sub':'other-employee',
+      'can_edit':true,'can_media':true,
+    });
+    await tester.pumpWidget(MaterialApp(home:CustomerDetail(
+      service:FakeService(),customer:other,
+      regions:const RegionCatalog(<String,List<String>>{}),queue:queue)));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byTooltip('Sửa thông tin'),findsOneWidget);
+    await tester.ensureVisible(find.byKey(const Key('customer-vat-edit')));
+    await tester.tap(find.byKey(const Key('customer-vat-edit')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('customer-vat-tax')),'0123456789');
+    await tester.tap(find.text('Lưu VAT'));
+    await tester.pump();
+    expect(queue.lastPath,'/api/v1/customers/$customerId');
+    expect(queue.lastMethod,'PATCH');
+    expect(queue.lastPayload?['vat_tax_code'],'0123456789');
+    expect(queue.lastPayload?['version'],1);
+    await tester.pumpWidget(const SizedBox.shrink());
+    queue.dispose();
+  });
+
   test('phone sanitizer generates tel: URI and rejects invalid values',(){
     expect(customerCallUri('0912 345 678').toString(),'tel:0912345678');
     expect(customerCallUri('+84 (912) 345-678').toString(),'tel:+84912345678');
