@@ -112,11 +112,11 @@ class _FixedLocalRoutesPageState extends State<FixedLocalRoutesPage>{
    builder:(_)=>_LocalRuleEditor(scopes:scopes,original:original)));
   if(draft==null||!mounted)return;
   final editing=original!=null;
-  final id=editing?original!['id'].toString():const Uuid().v4();
+  final id=editing?original['id'].toString():const Uuid().v4();
   try{
    await widget.queue.enqueue(editing?'/api/v1/local-routes/'+id:'/api/v1/local-routes',{
     ...draft,'client_ref':editing?const Uuid().v4():id,
-    if(editing)'version':original!['version'],
+    if(editing)'version':original['version'],
    },method:editing?'PATCH':'POST');
    _toast('Đã lưu tuyến cố định trên máy · chờ đồng bộ');
   }catch(e){_toast('Không lưu được: $e');}
