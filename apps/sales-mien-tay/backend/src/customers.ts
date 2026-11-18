@@ -67,7 +67,9 @@ async function inScope(db: Db, actor: Actor, province: string, district: string)
   return rows[0]?.allowed === true;
 }
 async function fetchCustomer(db: Db, actor: Actor, id: string) {
-  const rows = await db`SELECT c.* FROM customers c WHERE c.id=${id}::uuid AND
+  const rows = await db`SELECT c.*,public.sales_customer_allowed(${actor.sub},c.id,'edit') AS can_edit,
+    public.sales_customer_allowed(${actor.sub},c.id,'media') AS can_media
+    FROM customers c WHERE c.id=${id}::uuid AND
     public.sales_customer_allowed(${actor.sub},c.id,'view') LIMIT 1`;
   return rows[0] ?? null;
 }
@@ -95,6 +97,15 @@ function dataError(data: ObjectBody) {
   } else if(data.location_source!==null&&data.location_source!==undefined) {
     return 'Nguồn vị trí cần có đủ vĩ độ và kinh độ';
   }
+  for(const [key,max] of [['vat_company_name',240],['vat_address',500],['vat_email',254]] as const){
+    if(data[key]!==null&&data[key]!==undefined&&data[key]!==''&&!optional(data[key],max))
+      return 'Thông tin VAT quá dài hoặc không hợp lệ';
+  }
+  const tax=optional(data.vat_tax_code,20);
+  if(data.vat_tax_code!==null&&data.vat_tax_code!==undefined&&data.vat_tax_code!==''&&
+     (!tax||!/^\d{10}(?:-?\d{3})?$/.test(tax)))return 'Mã số thuế phải có 10 hoặc 13 chữ số';
+  const email=optional(data.vat_email,254);
+  if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return 'Email nhận hóa đơn không hợp lệ';
   return null;
 }
 function distanceMeters(a: number, b: number, c: number, d: number) {
@@ -117,7 +128,10 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       const rows = await db`SELECT c.id,c.client_ref,c.owner_sub,c.name,c.code,c.field_code,c.category,
           c.contact_name,c.phone,c.address_line,c.province,c.district,c.latitude,c.longitude,
           c.location_accuracy_m,c.location_consent,c.location_source,c.location_recorded_by,c.location_recorded_at,
-           c.note,c.status,c.is_selling,c.version,c.created_at,c.updated_at,
+           c.note,c.status,c.is_selling,c.vat_tax_code,c.vat_company_name,c.vat_address,c.vat_email,
+            c.version,c.created_at,c.updated_at,
+            public.sales_customer_allowed(${actor.sub},c.id,'edit') AS can_edit,
+            public.sales_customer_allowed(${actor.sub},c.id,'media') AS can_media,
            CASE WHEN public.sales_customer_allowed(${actor.sub},c.id,'media')
              THEN c.cover_photo_id ELSE NULL END AS cover_photo_id,
            public.sales_customer_plannable(${actor.sub},c.id) AS can_plan
@@ -200,11 +214,13 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
         location_source=${newSource??null},
         location_recorded_by=CASE WHEN ${locationChanged} THEN ${actor.sub} ELSE location_recorded_by END,
         location_recorded_at=CASE WHEN ${locationChanged} THEN now() ELSE location_recorded_at END,
-        note=${optional(merged.note,2000)},status=${merged.status},is_selling=${merged.is_selling===true},last_mutation_ref=${data.client_ref??null}::uuid,version=version+1,updated_at=now()
+        note=${optional(merged.note,2000)},status=${merged.status},is_selling=${merged.is_selling===true},
+         vat_tax_code=${optional(merged.vat_tax_code,20)},vat_company_name=${optional(merged.vat_company_name,240)},
+         vat_address=${optional(merged.vat_address,500)},vat_email=${optional(merged.vat_email,254)},last_mutation_ref=${data.client_ref??null}::uuid,version=version+1,updated_at=now()
       WHERE id=${id}::uuid AND version=${data.version as number} AND public.sales_customer_allowed(${actor.sub},id,'edit') RETURNING *`;
     if(!rows.length)return fail('Xung đột phiên bản',409);
     await db`INSERT INTO field_audit_events(actor_sub,action,entity_type,entity_id) VALUES (${actor.sub},'update','customer',${id}::uuid)`;
-    return response({item:rows[0]});
+    return response({item:{...rows[0],can_edit:true,can_media:current.can_media}});
   }
   if(match[2]==='cover') {
     if(req.method!=='PATCH'||match[3])return fail('Method not allowed',405);
