@@ -605,7 +605,7 @@ class _WorkHubPageState extends State<WorkHubPage>{
   final totals=WorkCounts.fromRoutes(activeRoutes);
   final recurring=tab==1?localRules.where((r)=>
    r['owner_sub']==widget.queue.identity&&localRuleOccurs(r,day)&&
-   !hasLocalRouteAlready(dayRoutes,r,day)&&
+   !hasLocalRouteAlready(dayRoutes,r,day,owner:widget.queue.identity)&&
    !widget.queue.pending.any((op)=>
     (op['path']=='/api/v1/local-routes'&&
      (op['payload'] as Map?)?['client_ref']==r['id'])||

@@ -31,6 +31,8 @@ void main(){
   final day={'route_date':'2026-11-23','scope_kind':'territory',
    'scope_key':'Cần Thơ|Ninh Kiều','plan_status':'planned'};
   expect(hasLocalRouteAlready([day],rule,date),isTrue);
+  expect(hasLocalRouteAlready([{...day,'owner_sub':'sales-b'}],rule,date,owner:'sales-a'),isFalse);
+  expect(hasLocalRouteAlready([{...day,'owner_sub':'sales-a'}],rule,date,owner:'sales-a'),isTrue);
   expect(hasLocalRouteAlready([{...day,'route_date':'2026-11-24'}],rule,date),isFalse);
   expect(hasLocalRouteAlready([{...day,'scope_key':'Cần Thơ|Bình Thủy'}],rule,date),isFalse);
   expect(hasLocalRouteAlready([{...day,'plan_status':'cancelled'}],rule,date),isFalse);
