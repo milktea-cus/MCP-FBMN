@@ -23,9 +23,10 @@ String localOccurrenceId(String ruleId,DateTime date,String type)=>
 
 /// A recurring day becomes a real work plan only after an explicit user action.
 /// This must not invent customer visits or alter an existing monthly plan.
-bool hasLocalRouteAlready(List<Map<String,dynamic>> routes,Map<String,dynamic> rule,DateTime date){
+bool hasLocalRouteAlready(List<Map<String,dynamic>> routes,Map<String,dynamic> rule,DateTime date,{String? owner}){
  final wantedDate=dayKey(date),area='${rule['province']}|${rule['district']??''}';
- return routes.any((r)=>r['route_date']?.toString().startsWith(wantedDate)==true&&
+ return routes.any((r)=>(owner==null||r['owner_sub']==owner)&&
+  r['route_date']?.toString().startsWith(wantedDate)==true&&
   r['scope_kind']=='territory'&&r['scope_key']==area&&r['plan_status']!='cancelled');
 }
 enum LocalCreateResult{created,existing}
@@ -52,7 +53,8 @@ Future<LocalCreateResult> createLocalOccurrence({
  }catch(_){
   // Server uniqueness handles offline races with another device.
  }
- final inPlan=existing.any((p)=>p['status']=='planned'&&
+ final inPlan=existing.any((p)=>p['owner_sub']==queue.identity&&
+  p['status']=='planned'&&
   p['work_date'].toString().startsWith(dateText)&&p['scope_kind']=='territory'&&
   p['scope_key']==scopeKey);
  final inQueue=queue.pending.any((p)=>p['path']=='/api/v1/monthly-plans'&&
