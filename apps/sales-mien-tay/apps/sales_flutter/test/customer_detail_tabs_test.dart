@@ -172,7 +172,10 @@ void main(){
     await tester.pump();
     await tester.pump();
     expect(find.byTooltip('Sửa thông tin'),findsOneWidget);
-    await tester.ensureVisible(find.byKey(const Key('customer-vat-edit')));
+    await tester.drag(find.byKey(const PageStorageKey('customer-info')),
+      const Offset(0,-650));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('customer-vat-edit')),findsOneWidget);
     await tester.tap(find.byKey(const Key('customer-vat-edit')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('customer-vat-tax')),'0123456789');

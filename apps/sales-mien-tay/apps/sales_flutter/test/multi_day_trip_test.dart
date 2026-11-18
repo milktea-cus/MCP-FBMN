@@ -29,7 +29,9 @@ void main(){
    expect((routes.single['scopes'] as List).length,2);
   }
   expect(mergeTripRoutes([], [trip()], [],'sales-1','2026-11-13'),isEmpty);
-  expect(mergeTripRoutes([], [trip()], [],'sales-1','2026-11-18'),isEmpty);
+  // On the actual current day a missed trip remains visible as overdue;
+  // a far future date is unambiguously outside the trip and not today.
+  expect(mergeTripRoutes([], [trip()], [],'sales-1','2099-01-01'),isEmpty);
  });
  test('trip crosses calendar months even with no day route in that month',(){
   final rows=mergeTripRoutes([], [trip(from:'2026-11-30',to:'2026-12-03')],
