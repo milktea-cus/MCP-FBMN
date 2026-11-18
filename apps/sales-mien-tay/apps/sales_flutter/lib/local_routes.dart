@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import 'customers.dart';
 import 'offline_queue.dart';
 import 'planning_periods.dart';
+import 'local_monthly_page.dart';
 import 'session.dart';
 
 const localWeekdayNames=['T2','T3','T4','T5','T6','T7','CN'];
@@ -91,7 +92,6 @@ class FixedLocalRoutesPage extends StatefulWidget{
 }
 class _FixedLocalRoutesPageState extends State<FixedLocalRoutesPage>{
  List<Map<String,dynamic>> rules=[],scopes=[];
- DateTime week=weekMonday(DateTime.now().toUtc().add(const Duration(hours:7)));
  bool busy=false,offline=false;
  String? error;
  String get cacheKey=>'local-routes:'+widget.queue.revision;
@@ -195,21 +195,13 @@ class _FixedLocalRoutesPageState extends State<FixedLocalRoutesPage>{
    _toast('Đã lưu thay đổi · chờ đồng bộ');
   }catch(e){_toast('Không thay đổi được: $e');}
  }
- Future<void> _schedule(Map<String,dynamic> rule,DateTime date)async{
-  try{
-   final outcome=await createLocalOccurrence(
-    queue:widget.queue,service:widget.service,rule:rule,date:date);
-   if(!mounted)return;
-   if(outcome==LocalCreateResult.existing){
-    _toast('Đã có kế hoạch cùng ngày và địa bàn. Mở Kế hoạch/Hôm nay để dùng tuyến sẵn có.');
-   }else{
-    Navigator.pop(context,date);
-   }
-  }catch(e){_toast('Không tạo được tuyến ngày: $e');}
+ Future<void> _monthly()async{
+  final selected=await Navigator.push<DateTime>(context,MaterialPageRoute(
+   builder:(_)=>FixedMonthPage(queue:widget.queue,service:widget.service)));
+  if(selected!=null&&mounted)Navigator.pop(context,selected);
  }
  @override Widget build(BuildContext context){
   final records=shown;
-  final today=DateTime.now().toUtc().add(const Duration(hours:7));
   return Scaffold(
    appBar:AppBar(title:const Text('Tuyến cố định · Sales Local'),
     actions:[IconButton(icon:const Icon(Icons.refresh),tooltip:'Tải lại',
@@ -223,6 +215,10 @@ class _FixedLocalRoutesPageState extends State<FixedLocalRoutesPage>{
     if(busy)const LinearProgressIndicator(minHeight:2),
     if(offline)const Text('Đang xem dữ liệu lưu trên máy; thay đổi chờ đồng bộ.'),
     if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
+    OutlinedButton.icon(
+     onPressed:_monthly,icon:const Icon(Icons.calendar_month_outlined),
+     label:const Text('Tuyến theo tuần 1–5 của tháng')),
+    const SizedBox(height:10),
     const SizedBox(height:14),
     Text('Tuyến đã thiết lập',style:Theme.of(context).textTheme.titleMedium),
     if(records.isEmpty)const Padding(padding:EdgeInsets.all(10),
@@ -231,8 +227,7 @@ class _FixedLocalRoutesPageState extends State<FixedLocalRoutesPage>{
      ListTile(
       leading:Icon(r['active']==true?Icons.repeat:Icons.pause_circle_outline),
       title:Text(r['name']?.toString()??''),
-      subtitle:Text(_place(r)+'\n'+_days(r)+' · từ '+
-       (r['start_on']?.toString().substring(0,10)??'')+
+      subtitle:Text(_place(r)+'\nLặp: '+_days(r)+
        (r['active']==true?'':' · Đã tạm dừng')+
        (_pending(r)?' · Chờ đồng bộ':'')),
       isThreeLine:true),
@@ -245,35 +240,21 @@ class _FixedLocalRoutesPageState extends State<FixedLocalRoutesPage>{
      ]),
     ])),
     const SizedBox(height:16),
-    Row(children:[
-     Expanded(child:Text('Lịch tuyến theo tuần',
-      style:Theme.of(context).textTheme.titleMedium)),
-     IconButton(onPressed:()=>setState(()=>
-      week=week.subtract(const Duration(days:7))),
-      icon:const Icon(Icons.chevron_left),tooltip:'Tuần trước'),
-     IconButton(onPressed:()=>setState(()=>
-      week=week.add(const Duration(days:7))),
-      icon:const Icon(Icons.chevron_right),tooltip:'Tuần sau'),
-    ]),
-    Text(dayKey(week)+' – '+dayKey(week.add(const Duration(days:6)))),
-    for(var i=0;i<7;i++)Builder(builder:(context){
-     final date=week.add(Duration(days:i));
-     final matches=records.where((r)=>localRuleOccurs(r,date)).toList();
-     return Card(child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+    Text('Tuyến lặp theo thứ hằng tuần',
+     style:Theme.of(context).textTheme.titleMedium),
+    const Text('Thiết lập một lần, tự lặp mỗi tuần. Ngày đi thực tế nằm ở Công tác → Hôm nay.'),
+    for(var i=0;i<7;i++)Card(child:Column(
+     crossAxisAlignment:CrossAxisAlignment.stretch,children:[
       Padding(padding:const EdgeInsets.fromLTRB(12,10,12,6),
-       child:Text(localWeekdayNames[i]+' · '+dayKey(date)+
-        (dayKey(date)==dayKey(today)?' · Hôm nay':''),
+       child:Text(localWeekdayNames[i],
         style:Theme.of(context).textTheme.titleSmall)),
-      if(matches.isEmpty)const Padding(padding:EdgeInsets.fromLTRB(12,0,12,10),
-       child:Text('Không có tuyến cố định')),
-      for(final r in matches)ListTile(dense:true,
-       title:Text(r['name'].toString()),subtitle:Text(_place(r)),
-       trailing:TextButton(
-        onPressed:_pending(r)||dayKey(date).compareTo(dayKey(today))<0?null:
-         ()=>_schedule(r,date),
-        child:const Text('Lập lịch ngày'))),
-     ]));
-    }),
+      if(!records.any((r)=>r['active']==true&&localRuleDays(r).contains(i+1)))
+       const Padding(padding:EdgeInsets.fromLTRB(12,0,12,10),
+        child:Text('Chưa có tuyến cố định')),
+      for(final r in records.where((r)=>
+       r['active']==true&&localRuleDays(r).contains(i+1)))
+       ListTile(dense:true,title:Text(r['name'].toString()),subtitle:Text(_place(r))),
+     ])),
    ]),
   );
  }
@@ -289,17 +270,13 @@ class _LocalRuleEditorState extends State<_LocalRuleEditor>{
  late final TextEditingController name;
  Map<String,dynamic>? scope;
  late Set<int> days;
- late String mode;
- late DateTime start;
  late bool active;
  @override void initState(){
   super.initState();
   final r=widget.original;
   name=TextEditingController(text:r?['name']?.toString()??'');
-  mode=r?['mode']?.toString()??'day';
   days=r==null?{DateTime.now().weekday}:localRuleDays(r).toSet();
   if(days.isEmpty)days={DateTime.now().weekday};
-  start=DateTime.tryParse(r?['start_on']?.toString()??'')??DateTime.now();
   active=r?['active']!=false;
   for(final s in widget.scopes){
    if(r!=null&&s['province']==r['province']&&s['district']==r['district']){
@@ -336,9 +313,11 @@ class _LocalRuleEditorState extends State<_LocalRuleEditor>{
     content:Text('Nhập tên, địa bàn và ít nhất một thứ trong tuần.')));return;
   }
   Navigator.pop(context,<String,dynamic>{
-   'name':name.text.trim(),'mode':mode,'weekdays':days.toList()..sort(),
+   'name':name.text.trim(),'mode':days.length==1?'day':'week',
+   'weekdays':days.toList()..sort(),
    'province':scope!['province'],'district':scope!['district']??'',
-   'start_on':dayKey(start),'active':active,
+   'start_on':widget.original?['start_on']?.toString().substring(0,10)??'2020-01-01',
+   'active':active,
   });
  }
  @override Widget build(BuildContext context)=>Scaffold(
@@ -354,33 +333,18 @@ class _LocalRuleEditorState extends State<_LocalRuleEditor>{
     icon:const Icon(Icons.location_on_outlined),
     label:Text(scope?['label']?.toString()??'Chọn tỉnh/huyện')),
    const SizedBox(height:16),
-   Text('Kiểu lặp',style:Theme.of(context).textTheme.titleMedium),
-   Wrap(spacing:8,children:[
-    ChoiceChip(label:const Text('Theo ngày'),selected:mode=='day',
-     onSelected:(_)=>setState((){mode='day';days={days.first};})),
-    ChoiceChip(label:const Text('Theo tuần'),selected:mode=='week',
-     onSelected:(_)=>setState(()=>mode='week')),
-   ]),
-   const Text('Theo ngày: chọn một thứ, tự lặp hàng tuần. '
-    'Theo tuần: chọn nhiều thứ cùng một địa bàn. '
-    'Địa bàn khác thì tạo tuyến khác.'),
+   Text('Chọn các thứ lặp hằng tuần',
+    style:Theme.of(context).textTheme.titleMedium),
+   const Text('Chọn một hoặc nhiều thứ. Không cần thiết lập ngày, lịch tự lặp hàng tuần.'),
    const SizedBox(height:10),
    Wrap(spacing:6,runSpacing:6,children:[
     for(var d=1;d<=7;d++)FilterChip(
      label:Text(localWeekdayNames[d-1]),selected:days.contains(d),
      onSelected:(chosen)=>setState((){
-      if(mode=='day')days={d};
-      else if(chosen)days.add(d);
+      if(chosen)days.add(d);
       else if(days.length>1)days.remove(d);
      })),
    ]),
-   const SizedBox(height:16),
-   OutlinedButton.icon(onPressed:()async{
-    final date=await showDatePicker(context:context,initialDate:start,
-     firstDate:DateTime(2020),lastDate:DateTime(2099));
-    if(date!=null&&mounted)setState(()=>start=date);
-   },icon:const Icon(Icons.event_outlined),
-    label:Text('Áp dụng từ: '+dayKey(start))),
    SwitchListTile(contentPadding:EdgeInsets.zero,value:active,
     title:const Text('Đang hoạt động'),
     onChanged:(v)=>setState(()=>active=v)),

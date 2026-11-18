@@ -10,6 +10,7 @@ import {assortmentRoutes} from './assortment';
 import {surveyRoutes} from './surveys';
 import {monthlyPlanRoutes} from './monthly_plans';
 import {localRouteRoutes} from './local_routes';
+import {localMonthlyRoutes} from './local_monthly_routes';
 import {dayRouteRoutes} from './day_routes';
 import {customerWorkRoutes} from './customer_work';
 import {workSessionRoutes} from './work_sessions';
@@ -201,6 +202,8 @@ export default {
       if(catalogImportResponse)return catalogImportResponse;
       const catalogResponse=await catalogRoutes(req,env,user,url);
       if(catalogResponse)return catalogResponse;
+      const localMonthResponse=await localMonthlyRoutes(req,env,user,url);
+      if(localMonthResponse)return localMonthResponse;
       const monthlyResponse=await monthlyPlanRoutes(req,env,user,url);
       if(monthlyResponse)return monthlyResponse;
       const templateResponse=await routeTemplateRoutes(req,env,user,url);
