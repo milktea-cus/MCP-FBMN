@@ -1186,6 +1186,32 @@ class _CustomerDetailState extends State<CustomerDetail> {
     }catch(e){if(mounted)setState(()=>message='$e');}
     finally{if(mounted)setState(()=>busy=false);}
   }
+
+  Future<void> _editVat()async{
+    final customer=_sellingCurrent??widget.customer;
+    if(_accessDenied||!customerEditable(customer,widget.service.identity)||
+       busy||hasCustomerPatchPending(widget.queue,customer.id))return;
+    await showDialog<void>(context:context,builder:(_)=>CustomerVatDialog(
+      customer:customer,onSave:(data)async{
+        if(widget.queue!=null){
+          if(!_scopeMatches)throw StateError('Tài khoản hoặc phạm vi quyền đã thay đổi');
+          await widget.queue!.enqueue('/api/v1/customers/${customer.id}',{
+            ...data,'version':customer.version,'client_ref':const Uuid().v4(),
+          },method:'PATCH');
+          if(mounted)setState((){
+            _sellingCurrent=FieldCustomer.fromJson({...customer.toJson(),...data});
+            message='Thông tin VAT lưu trên máy · chờ đồng bộ';
+          });
+        }else{
+          final updated=await widget.service.update(customer,data);
+          if(mounted)setState((){
+            _sellingCurrent=updated;
+            message='Đã lưu thông tin VAT';
+          });
+        }
+      },
+    ));
+  }
   Future<void> _call()=>openCustomerCall(context,widget.customer);
   Future<void> _map()async{
     final c=widget.customer;
@@ -1410,6 +1436,17 @@ class _CustomerDetailState extends State<CustomerDetail> {
                       style:Theme.of(context).textTheme.bodySmall),
                 ],
               )),
+              _section('Thông tin VAT',Icons.receipt_long_outlined,Column(
+                crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+                  _line(Icons.numbers_outlined,'Mã số thuế',c.vatTaxCode??''),
+                  _line(Icons.business_outlined,'Tên đơn vị xuất hóa đơn',c.vatCompanyName??''),
+                  _line(Icons.receipt_outlined,'Địa chỉ xuất hóa đơn',c.vatAddress??''),
+                  _line(Icons.email_outlined,'Email nhận hóa đơn',c.vatEmail??''),
+                  if(own)OutlinedButton.icon(
+                    key:const Key('customer-vat-edit'),
+                    onPressed:busy||hasCustomerPatchPending(widget.queue,c.id)?null:_editVat,
+                    icon:const Icon(Icons.edit_note_outlined),label:const Text('Cập nhật thông tin VAT')),
+                ])),
               if(!own)const Padding(padding:EdgeInsets.all(8),
                 child:Text('Chế độ xem theo phân quyền.')),
               _section('Lịch sử ghé thăm',Icons.history_outlined,
@@ -1437,4 +1474,86 @@ class _CustomerDetailState extends State<CustomerDetail> {
       ),
     ));
   }
+}
+
+
+/// Editable VAT invoice details, separate from the customer location/profile.
+/// The parent performs a version-checked API PATCH or durable offline enqueue.
+class CustomerVatDialog extends StatefulWidget{
+  final FieldCustomer customer;
+  final Future<void> Function(Map<String,dynamic> data) onSave;
+  const CustomerVatDialog({super.key,required this.customer,required this.onSave});
+  @override State<CustomerVatDialog> createState()=>_CustomerVatDialogState();
+}
+class _CustomerVatDialogState extends State<CustomerVatDialog>{
+  final key=GlobalKey<FormState>();
+  late final TextEditingController tax,company,address,email;
+  bool busy=false;
+  String? error;
+  @override void initState(){
+    super.initState();
+    tax=TextEditingController(text:widget.customer.vatTaxCode??'');
+    company=TextEditingController(text:widget.customer.vatCompanyName??'');
+    address=TextEditingController(text:widget.customer.vatAddress??'');
+    email=TextEditingController(text:widget.customer.vatEmail??'');
+  }
+  @override void dispose(){
+    tax.dispose();company.dispose();address.dispose();email.dispose();
+    super.dispose();
+  }
+  Future<void> save()async{
+    if(busy||!key.currentState!.validate())return;
+    setState((){busy=true;error=null;});
+    String? textOrNull(TextEditingController c){
+      final s=c.text.trim();return s.isEmpty?null:s;
+    }
+    try{
+      await widget.onSave({
+        'vat_tax_code':textOrNull(tax),
+        'vat_company_name':textOrNull(company),
+        'vat_address':textOrNull(address),
+        'vat_email':textOrNull(email),
+      });
+      if(mounted)Navigator.pop(context);
+    }catch(e){
+      if(mounted)setState(()=>error='Chưa lưu được thông tin VAT: $e');
+    }finally{
+      if(mounted)setState(()=>busy=false);
+    }
+  }
+  @override Widget build(BuildContext context)=>AlertDialog(
+    title:const Text('Thông tin xuất hóa đơn VAT'),
+    content:SizedBox(width:440,child:SingleChildScrollView(child:Form(
+      key:key,child:Column(mainAxisSize:MainAxisSize.min,children:[
+        TextFormField(key:const Key('customer-vat-tax'),controller:tax,
+          keyboardType:TextInputType.number,
+          decoration:const InputDecoration(labelText:'Mã số thuế'),
+          validator:validateVatTaxCode),
+        const SizedBox(height:10),
+        TextFormField(controller:company,
+          decoration:const InputDecoration(labelText:'Tên đơn vị xuất hóa đơn'),
+          validator:(v)=>(v??'').trim().length>240?'Tối đa 240 ký tự':null),
+        const SizedBox(height:10),
+        TextFormField(controller:address,maxLines:2,
+          decoration:const InputDecoration(labelText:'Địa chỉ xuất hóa đơn'),
+          validator:(v)=>(v??'').trim().length>500?'Tối đa 500 ký tự':null),
+        const SizedBox(height:10),
+        TextFormField(controller:email,keyboardType:TextInputType.emailAddress,
+          decoration:const InputDecoration(labelText:'Email nhận hóa đơn'),
+          validator:(v){
+            final s=(v??'').trim();
+            if(s.isEmpty)return null;
+            if(s.length>254||!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(s))
+              return 'Email không hợp lệ';
+            return null;
+          }),
+        if(error!=null)Padding(padding:const EdgeInsets.only(top:12),
+          child:Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error))),
+      ]),
+    ))),
+    actions:[
+      TextButton(onPressed:busy?null:()=>Navigator.pop(context),child:const Text('Hủy')),
+      FilledButton(onPressed:busy?null:save,child:Text(busy?'Đang lưu...':'Lưu VAT')),
+    ],
+  );
 }
