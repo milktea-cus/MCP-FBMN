@@ -9,6 +9,7 @@ import {schoolRoutes} from './schools';
 import {assortmentRoutes} from './assortment';
 import {surveyRoutes} from './surveys';
 import {monthlyPlanRoutes} from './monthly_plans';
+import {localRouteRoutes} from './local_routes';
 import {dayRouteRoutes} from './day_routes';
 import {customerWorkRoutes} from './customer_work';
 import {workSessionRoutes} from './work_sessions';
