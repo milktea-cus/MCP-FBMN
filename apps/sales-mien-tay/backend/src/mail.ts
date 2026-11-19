@@ -22,7 +22,7 @@ const mimeByExt:Record<string,string>={
  pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation'
 };
 type AttachmentInput={filename:string;content:string;content_type:string};
-function validateAttachments(value:unknown):AttachmentInput[]|null{
+export function validateAttachments(value:unknown):AttachmentInput[]|null{
  if(value===undefined||value===null)return [];
  if(!Array.isArray(value)||value.length>MAX_ATTACHMENTS)return null;
  let total=0;
@@ -47,9 +47,9 @@ function validateAttachments(value:unknown):AttachmentInput[]|null{
  }
  return files;
 }
-const withSignature=(body:string,signature:string)=>
+export const withSignature=(body:string,signature:string)=>
  signature.trim()?body.trimEnd()+'\n\n'+signature.trim():body;
-const validSignature=(v:unknown):v is string=>
+export const validSignature=(v:unknown):v is string=>
  typeof v==='string'&&v.length<=3000&&!/[\0]/.test(v);
 
 type ResendResult={status:number;data:Record<string,unknown>|null};
