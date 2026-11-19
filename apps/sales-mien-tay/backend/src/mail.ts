@@ -167,7 +167,7 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
  }
  // No globally scoped Resend attachment lookup is allowed until a message
  // and the attachment's ID have been resolved inside this employee's inbox.
- const download=/^\/api\/v1\/mail\/threads\/([0-9a-f-]{36})\/emails\/([0-9a-f-]{36})\/attachments\/([0-9a-f-]{36})$/i.exec(url.pathname);
+ const download=/^\/api\/v1\/mail\/threads\/([0-9a-f-]{36})\/emails\/([0-9a-f-]{36})\/attachments\/([0-9a-f-]{36})(\/download)?$/i.exec(url.pathname);
  if(download&&req.method==='GET'){
   if(download.slice(1).some(id=>!uuid.test(id)))return fail('Mã tệp không hợp lệ');
   const item=await provider(env,`/inboxes/${box}/threads/${download[1]}/emails/${download[2]}`);
@@ -186,6 +186,14 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
   try{safe=new URL(file.data.download_url);}catch{return fail('Liên kết tệp không hợp lệ',503);}
   if(safe.protocol!=='https:'||safe.username||safe.password)
    return fail('Liên kết tệp không an toàn',503);
+  if(download[4]==='/download'){
+   // Same-origin browser navigation keeps the HttpOnly session cookie intact,
+   // while the redirect points only to the short-lived Resend signed URL.
+   return new Response(null,{status:302,headers:{
+    Location:safe.toString(),'Cache-Control':'private, no-store',
+    'Referrer-Policy':'no-referrer'
+   }});
+  }
   return json({url:safe.toString(),filename:file.data.filename??null,expires_at:file.data.expires_at??null});
  }
  const mark=/^\/api\/v1\/mail\/threads\/([0-9a-f-]{36})\/read$/i.exec(url.pathname);
