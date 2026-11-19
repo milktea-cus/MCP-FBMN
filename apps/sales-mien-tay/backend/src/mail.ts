@@ -14,7 +14,7 @@ type ResendResult={status:number;data:Record<string,unknown>|null};
 async function provider(env:MailEnv,path:string,method:'GET'|'POST'='GET',body?:unknown,idempotency?:string):Promise<ResendResult>{
  const key=env.RESEND_API_KEY;
  if(!key||!/^re_[a-z0-9_-]{16,}$/i.test(key))return {status:503,data:null};
- if(!/^\/inboxes\/[0-9a-f-]{36}(?:\/(?:threads(?:\/[0-9a-f-]{36}(?:\/emails(?:\/[0-9a-f-]{36})?)?)?|emails))?(?:\?[a-z0-9=&-]+)?$/i.test(path))
+ if(!/^\/inboxes\/[a-z0-9._+-]+@fbmn[.]vn(?:\/threads(?:\/[0-9a-f-]{36}(?:\/emails\/[0-9a-f-]{36})?)?|\/emails)?(?:\?[a-z0-9=&-]+)?$/i.test(path))
   return {status:400,data:null};
  try{
   const resp=await fetch('https://api.resend.com'+path,{
@@ -57,13 +57,13 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
  // Inbox resolution and all Resend calls happen server-side using a fixed
  // address derived only from the signed-in identity, never a client inbox ID.
  // Resend accepts addresses as inbox identifiers.
- const box=encodeURIComponent(assigned);
+ const box=assigned;
  if(url.pathname==='/api/v1/mail/threads'&&req.method==='GET'){
   const folder=url.searchParams.get('folder')??'inbox';
   const after=url.searchParams.get('after');
   if(!allowedFolders.has(folder)||url.searchParams.has('inboxId')||
     (after!==null&&!uuid.test(after)))return fail('Bộ lọc email không hợp lệ');
-  const q=new URLSearchParams({folder,limit:'30'});
+  const q=new URLSearchParams({folders:folder,limit:'30'});
   if(after)q.set('after',after);
   const result=await provider(env,`/inboxes/${box}/threads?${q}`);
   if(!result.data)return fail('Cổng email chưa sẵn sàng',result.status);
