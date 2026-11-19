@@ -148,15 +148,6 @@ class SalesSession {
       throw const ApiFailure(504,'Chưa xác nhận gửi thư thành công; không soạn lại trước khi kiểm tra thư nháp.');
     }
   }
-  Future<Map<String,dynamic>> putMail(String path,Map<String,dynamic> data) async {
-    if(path!='/api/v1/mail/signature')throw ArgumentError('Invalid mail setting');
-    try{
-      return decodeApi(await http.put(uri(path),headers:sessionHeaders(cookie),
-        body:jsonEncode(data)).timeout(const Duration(seconds:15)));
-    } on TimeoutException{
-      throw const ApiFailure(504,'Không lưu được chữ ký. Kiểm tra kết nối.');
-    }
-  }
   Future<void> requestOtp(String email) async { await post('/api/auth/otp/request',{'email':email}); }
   Future<void> login(String email,String password,{bool otp=false}) async {
     late final http.Response r;
