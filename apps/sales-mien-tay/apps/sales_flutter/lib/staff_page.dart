@@ -72,7 +72,7 @@ class StaffEditor extends StatefulWidget {
 }
 
 class _StaffEditorState extends State<StaffEditor> {
- late final TextEditingController subject,code,name,phone,email,jobTitle;
+ late final TextEditingController subject,code,name,phone,email,mailBox,jobTitle;
  late final Set<String> reports;
  late String role;
  late bool active;
@@ -89,6 +89,7 @@ class _StaffEditorState extends State<StaffEditor> {
   name=TextEditingController(text:s['full_name']?.toString()??'');
   phone=TextEditingController(text:s['phone']?.toString()??'');
   email=TextEditingController(text:s['email']?.toString()??'');
+  mailBox=TextEditingController(text:s['mail_box']?.toString()??'');
   jobTitle=TextEditingController(text:s['job_title']?.toString()??'');
   role=s['role']?.toString()??'sales';
   active=s['active']!=false;
@@ -104,7 +105,7 @@ class _StaffEditorState extends State<StaffEditor> {
  }
  @override void dispose(){
   subject.dispose();code.dispose();name.dispose();phone.dispose();
-  email.dispose();jobTitle.dispose();super.dispose();
+  email.dispose();mailBox.dispose();jobTitle.dispose();super.dispose();
  }
 
  Map<String,dynamic>? findStaff(String id){
@@ -220,6 +221,204 @@ class _StaffEditorState extends State<StaffEditor> {
   }
   if(!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email.text.trim())){
    setState(()=>error='Email không hợp lệ.');return;
+  }
+  if(mailBox.text.trim().isNotEmpty&&!RegExp(r'^[a-zA-Z0-9.!#$%&\x27*+/=?^_`{|}~-]+@fbmn[.]vn
+   setState(()=>error='Chức danh tối đa 120 ký tự.');return;
+  }
+  if(role!='manager'&&reports.isNotEmpty){
+   setState(()=>error='Muốn đổi vai trò, anh cần chuyển hết cấp dưới khi vẫn ở vai trò Manager trước.');return;
+  }
+  if(role=='manager'&&!active&&reports.isNotEmpty){
+   setState(()=>error='Muốn khóa Manager, anh cần chuyển cấp dưới sang người khác trước.');return;
+  }
+  setState((){busy=true;error=null;});
+  try{
+   if(subject.text.trim().isEmpty){
+    final created=await widget.session.post('/api/v1/admin/identity',{
+      'email':email.text.trim(),'name':name.text.trim()});
+    final id=created['user_sub']?.toString();
+    if(id==null||id.isEmpty)throw const ApiFailure(502,'Không nhận được tài khoản xác thực.');
+    subject.text=id;
+   }
+   await widget.session.post('/api/v1/admin/staff',{
+    'user_sub':subject.text.trim(),
+    'email':email.text.trim(),
+    'mail_box':mailBox.text.trim().toLowerCase(),
+    'employee_code':code.text.trim(),
+    'full_name':name.text.trim(),
+    'phone':phone.text.trim(),
+    'job_title':jobTitle.text.trim(),
+    'role':role,'active':active,
+    'manager_sub':role=='admin'?null:manager,
+    'scope_revision':widget.staff?['scope_revision']?.toString()??'0',
+    'scopes':[for(final e in scopes.entries)for(final d in e.value)
+      {'province':e.key,'district':d}],
+    'report_changes':reportChanges
+   });
+   if(mounted)Navigator.pop(context,true);
+  }catch(e){
+   if(mounted)setState(()=>error=e.toString());
+  }finally{
+   if(mounted)setState(()=>busy=false);
+  }
+ }
+
+ Widget field(TextEditingController controller,String label,{
+   TextInputType? keyboardType,bool readOnly=false,TextCapitalization capitalization=TextCapitalization.none
+ })=>Padding(padding:const EdgeInsets.only(bottom:12),
+  child:TextField(controller:controller,enabled:!busy,readOnly:readOnly,
+    keyboardType:keyboardType,textCapitalization:capitalization,
+    decoration:InputDecoration(labelText:label)));
+
+ Widget heading(String title,String subtitle,IconData icon)=>Padding(
+  padding:const EdgeInsets.only(top:16,bottom:10),
+  child:Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
+   Icon(icon,color:Theme.of(context).colorScheme.primary,size:20),
+   const SizedBox(width:10),
+   Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+    Text(title,style:Theme.of(context).textTheme.titleMedium),
+    Text(subtitle,style:Theme.of(context).textTheme.bodySmall)
+   ])),
+  ]));
+
+ Widget get form=>ListView(padding:const EdgeInsets.fromLTRB(16,4,16,28),
+  keyboardDismissBehavior:ScrollViewKeyboardDismissBehavior.onDrag,children:[
+  heading('Thông tin nhân viên','Tài khoản đăng nhập bằng email / mã OTP.',Icons.badge_outlined),
+  field(name,'Họ tên',capitalization:TextCapitalization.words),
+  field(email,'Email đăng nhập',keyboardType:TextInputType.emailAddress,
+    readOnly:widget.staff==null&&subject.text.isNotEmpty),
+  heading('Email công việc','Admin gán hộp thư Resend riêng; không đổi email đăng nhập.',Icons.mail_outline),
+  field(mailBox,'Hộp thư @fbmn.vn (bỏ trống để thu hồi)',keyboardType:TextInputType.emailAddress),
+  Row(children:[
+    Expanded(child:field(code,'Mã nhân viên')),
+    const SizedBox(width:10),
+    Expanded(child:field(phone,'Điện thoại',keyboardType:TextInputType.phone)),
+  ]),
+  field(jobTitle,'Chức danh (tự đặt, ví dụ: Mekong-Supervisor)'),
+  DropdownButtonFormField<String>(
+    key:ValueKey('role:'+role),initialValue:role,
+    decoration:const InputDecoration(labelText:'Vai trò hệ thống'),
+    items:const [
+     DropdownMenuItem(value:'admin',child:Text('Admin')),
+     DropdownMenuItem(value:'manager',child:Text('Manager')),
+     DropdownMenuItem(value:'sales',child:Text('Sales'))
+    ],onChanged:busy?null:(v)=>setState(()=>role=v??'sales')),
+  const SizedBox(height:8),
+  SwitchListTile(contentPadding:EdgeInsets.zero,
+    title:const Text('Tài khoản hoạt động'),
+    value:active,onChanged:busy?null:(v)=>setState(()=>active=v)),
+  const Divider(),
+  heading('Quan hệ nhân sự','Cấp trên và cấp dưới, không phải phạm vi địa bàn.',Icons.account_tree_outlined),
+  if(role!='admin')...[
+   DropdownButtonFormField<String>(
+    key:ValueKey('supervisor:'+manager.toString()),
+    initialValue:availableSupervisors.any((m)=>m['user_sub']==manager)?manager:'',
+    isExpanded:true,
+    decoration:const InputDecoration(labelText:'Cấp trên trực tiếp',
+      helperText:'Người trực tiếp quản lý nhân viên này'),
+    items:[
+     const DropdownMenuItem(value:'',child:Text('Chưa có cấp trên')),
+     for(final m in availableSupervisors)
+       DropdownMenuItem(value:m['user_sub'].toString(),
+         child:Text(m['full_name'].toString(),overflow:TextOverflow.ellipsis)),
+    ],
+    onChanged:busy?null:(v)=>setState(()=>manager=v==''?null:v)),
+   const SizedBox(height:16),
+  ],
+  if(role=='manager')...[
+   OutlinedButton.icon(onPressed:busy?null:chooseReports,
+     icon:const Icon(Icons.group_add_outlined),
+     label:Text('Chọn nhân viên cấp dưới ('+reports.length.toString()+')')),
+   if(reports.isNotEmpty)Padding(padding:const EdgeInsets.only(top:8),
+    child:Wrap(spacing:6,runSpacing:4,children:[
+      for(final id in reports)
+       InputChip(label:Text(staffName(id)),onDeleted:busy?null:()=>setState(()=>reports.remove(id)))
+    ])),
+   const SizedBox(height:8),
+   Text('Có thể chọn nhiều người cùng lúc. Nhân viên chuyển sang cấp trên mới vẫn giữ địa bàn/chuỗi riêng.',
+     style:Theme.of(context).textTheme.bodySmall),
+  ]else if(widget.staff!=null&&widget.allStaff.any((m)=>m['manager_sub']==subject.text))...[
+   const Text('Nhân viên này đang có cấp dưới. Chuyển cấp dưới sang người khác trước khi hạ vai trò.'),
+  ],
+  const Divider(height:32),
+  ExpansionTile(
+   tilePadding:EdgeInsets.zero,childrenPadding:EdgeInsets.zero,
+   leading:const Icon(Icons.map_outlined),
+   title:const Text('Địa bàn phụ trách riêng'),
+   subtitle:Text(assignedAreas==0?'Chưa giao địa bàn · Không bắt buộc':
+       'Đang phụ trách '+assignedAreas.toString()+' tỉnh / khu vực'),
+   children:[
+    Padding(padding:const EdgeInsets.only(bottom:12),
+     child:TextField(decoration:const InputDecoration(prefixIcon:Icon(Icons.search),
+       labelText:'Tìm tỉnh / thành phố'),
+       onChanged:(v)=>setState(()=>provinceFilter=v))),
+    for(final p in widget.catalog.provinces.where(
+      (p)=>p.toLowerCase().contains(provinceFilter.trim().toLowerCase())))
+     ExpansionTile(key:PageStorageKey('province:'+p),
+      title:Text(p),
+      subtitle:Text(scopes[p]?.contains('')==true?'Toàn tỉnh':
+        ((scopes[p]?.where((d)=>d.isNotEmpty).length??0).toString()+' huyện')),
+      children:[
+       CheckboxListTile(dense:true,title:const Text('Toàn tỉnh'),
+         value:scopes[p]?.contains('')??false,
+         onChanged:busy?null:(v)=>setState(()=>scopes[p]=v==true?{''}:<String>{})),
+       for(final d in widget.catalog.districts[p]!)
+        CheckboxListTile(dense:true,title:Text(d),
+          value:scopes[p]?.contains('')==true||scopes[p]?.contains(d)==true,
+          onChanged:busy||scopes[p]?.contains('')==true?null:(v)=>setState((){
+           final chosen=scopes.putIfAbsent(p,()=>{});
+           if(v==true){chosen.add(d);}else{chosen.remove(d);}
+          })),
+      ]),
+    const SizedBox(height:8),
+    Text('Địa bàn này chỉ giao trực tiếp cho nhân viên, không tự chuyển sang cấp trên.',
+      style:Theme.of(context).textTheme.bodySmall),
+   ],
+  ),
+  Padding(padding:const EdgeInsets.only(top:12),
+   child:Text('Chuỗi / hệ thống và khách hàng riêng được giao ở mục Cơ cấu & phân công sau khi lưu hồ sơ.',
+    style:Theme.of(context).textTheme.bodySmall)),
+ ]);
+
+ Widget get footer=>SafeArea(top:false,child:Padding(
+  padding:const EdgeInsets.fromLTRB(12,8,12,12),
+  child:Column(mainAxisSize:MainAxisSize.min,children:[
+   if(error!=null)Padding(padding:const EdgeInsets.only(bottom:8),
+    child:Semantics(liveRegion:true,child:Text(error!,
+     style:TextStyle(color:Theme.of(context).colorScheme.error)))),
+   Row(children:[
+    Expanded(child:OutlinedButton(onPressed:busy?null:()=>Navigator.pop(context),
+      child:const Text('Hủy'))),
+    const SizedBox(width:12),
+    Expanded(child:FilledButton(onPressed:busy?null:save,
+      child:Text(busy?'Đang lưu...':'Lưu nhân viên'))),
+   ]),
+  ])));
+
+ @override Widget build(BuildContext context){
+  final narrow=MediaQuery.sizeOf(context).width<600;
+  final title=widget.staff==null?'Thêm nhân viên':'Sửa nhân viên';
+  if(narrow){
+   return Dialog.fullscreen(child:Scaffold(
+    appBar:AppBar(title:Text(title),leading:IconButton(
+     tooltip:'Đóng',icon:const Icon(Icons.close),
+     onPressed:busy?null:()=>Navigator.pop(context))),
+    body:form,bottomNavigationBar:footer,
+   ));
+  }
+  return Dialog(child:ConstrainedBox(
+   constraints:BoxConstraints(maxWidth:660,maxHeight:MediaQuery.sizeOf(context).height*0.87),
+   child:Column(children:[
+    Padding(padding:const EdgeInsets.fromLTRB(20,16,20,8),
+      child:Align(alignment:Alignment.centerLeft,
+        child:Text(title,style:Theme.of(context).textTheme.headlineSmall))),
+    Expanded(child:form),
+    footer,
+   ])));
+ }
+}
+).hasMatch(mailBox.text.trim())){
+   setState(()=>error='Hộp thư phải thuộc fbmn.vn hoặc bỏ trống.');return;
   }
   if(jobTitle.text.trim().length>120){
    setState(()=>error='Chức danh tối đa 120 ký tự.');return;
