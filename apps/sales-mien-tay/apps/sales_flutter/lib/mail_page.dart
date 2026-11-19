@@ -76,21 +76,9 @@ class _StaffMailPageState extends State<StaffMailPage>{
  }
  Future<void> editSignature()async{
   if(mailbox==null)return;
-  final controller=TextEditingController(text:signature);
-  final updated=await showDialog<String>(context:context,builder:(ctx)=>AlertDialog(
-   title:const Text('Chữ ký hộp thư'),
-   content:SizedBox(width:480,child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
-    Text('Áp dụng riêng cho $mailbox. Tự thêm cuối mỗi thư gửi hoặc trả lời.'),
-    const SizedBox(height:12),
-    TextField(controller:controller,minLines:4,maxLines:8,maxLength:3000,
-      decoration:const InputDecoration(border:OutlineInputBorder(),
-       hintText:'Họ tên · Chức danh\\nCông ty FBMN\\nĐiện thoại / website')),
-   ])),
-   actions:[
-    TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Hủy')),
-    FilledButton(onPressed:()=>Navigator.pop(ctx,controller.text),child:const Text('Lưu chữ ký'))
-   ]));
-  controller.dispose();
+  final updated=await showDialog<String>(context:context,
+    builder:(_)=>_MailSignatureEditor(mailbox:mailbox!,signature:signature));
+
   if(updated==null||!mounted)return;
   try{
    final result=await widget.session.putMail('/api/v1/mail/signature',{'signature':updated});
@@ -153,10 +141,9 @@ class _StaffMailPageState extends State<StaffMailPage>{
     if(busy)const LinearProgressIndicator(),
     Expanded(child:selectedMail!=null?
       ListView(padding:const EdgeInsets.all(16),children:[
-       Row(children:[
+       Wrap(spacing:8,runSpacing:4,alignment:WrapAlignment.spaceBetween,children:[
         TextButton.icon(onPressed:busy?null:backWithinMail,
          icon:const Icon(Icons.arrow_back),label:const Text('Về hội thoại')),
-        const Spacer(),
         FilledButton.tonalIcon(onPressed:busy?null:reply,
           icon:const Icon(Icons.reply_outlined),label:const Text('Trả lời')),
        ]),
@@ -302,5 +289,30 @@ class _MailComposerState extends State<_MailComposer>{
    TextButton(onPressed:busy?null:()=>Navigator.pop(context,false),child:const Text('Hủy')),
    FilledButton.icon(onPressed:busy?null:send,icon:const Icon(Icons.send_outlined),
     label:Text(busy?'Đang gửi...':'Gửi email')),
+  ]);
+}
+
+class _MailSignatureEditor extends StatefulWidget{
+ final String mailbox,signature;
+ const _MailSignatureEditor({required this.mailbox,required this.signature});
+ @override State<_MailSignatureEditor> createState()=>_MailSignatureEditorState();
+}
+class _MailSignatureEditorState extends State<_MailSignatureEditor>{
+ late final TextEditingController controller=TextEditingController(text:widget.signature);
+ @override void dispose(){controller.dispose();super.dispose();}
+ @override Widget build(BuildContext context)=>AlertDialog(
+  title:const Text('Chữ ký hộp thư'),
+  content:SizedBox(width:480,height:240,child:SingleChildScrollView(child:Column(
+   crossAxisAlignment:CrossAxisAlignment.start,children:[
+    Text('Chữ ký của ${widget.mailbox}, tự thêm cuối mỗi email gửi hoặc trả lời.'),
+    const SizedBox(height:12),
+    TextField(controller:controller,minLines:3,maxLines:5,maxLength:3000,
+     decoration:const InputDecoration(border:OutlineInputBorder(),
+      hintText:'Họ tên · Chức danh\\nCông ty FBMN\\nĐiện thoại / website')),
+   ]))),
+  actions:[
+   TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Hủy')),
+   FilledButton(onPressed:()=>Navigator.pop(context,controller.text),
+    child:const Text('Lưu chữ ký')),
   ]);
 }
