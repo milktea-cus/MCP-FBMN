@@ -16,7 +16,6 @@ class StaffMailPage extends StatefulWidget {
 class _StaffMailPageState extends State<StaffMailPage>{
  bool busy=true;
  String? error,mailbox,selectedFolder,selectedThread;
- String signature='';
  List<Map<String,dynamic>> threads=[],messages=[];
  Map<String,dynamic>? selectedMail;
  @override void initState(){super.initState();load();}
@@ -28,7 +27,6 @@ class _StaffMailPageState extends State<StaffMailPage>{
    final result=await widget.session.get('/api/v1/mail/threads?folder=$folder');
    if(mounted)setState((){
     mailbox=me['mailbox']?.toString();
-    signature=me['signature']?.toString()??'';
     threads=(result['items'] as List? ?? []).whereType<Map>()
       .map((v)=>Map<String,dynamic>.from(v)).toList();
    });
@@ -57,7 +55,7 @@ class _StaffMailPageState extends State<StaffMailPage>{
  Future<void> reply()async{
   if(selectedThread==null||selectedMail?['id']==null)return;
   final sent=await showDialog<bool>(context:context,builder:(context)=>
-   _MailComposer(session:widget.session,mailbox:mailbox??'',signature:signature,
+   _MailComposer(session:widget.session,mailbox:mailbox??'',
     threadId:selectedThread,emailId:selectedMail?['id']?.toString(),
     replyTo:selectedMail?['from']?.toString()));
   if(sent==true&&mounted){
@@ -74,20 +72,6 @@ class _StaffMailPageState extends State<StaffMailPage>{
   }else{
    Navigator.of(context).maybePop();
   }
- }
- Future<void> editSignature()async{
-  if(mailbox==null)return;
-  final updated=await showDialog<String>(context:context,
-    builder:(_)=>_MailSignatureEditor(mailbox:mailbox!,signature:signature));
-
-  if(updated==null||!mounted)return;
-  try{
-   final result=await widget.session.putMail('/api/v1/mail/signature',{'signature':updated});
-   if(mounted){
-    setState(()=>signature=result['signature']?.toString()??updated);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Đã lưu chữ ký cho hộp thư này')));
-   }
-  }catch(e){if(mounted)setState(()=>error=e.toString());}
  }
  Future<void> downloadAttachment(Map<String,dynamic> item)async{
   if(selectedThread==null||selectedMail?['id']==null||item['id']==null)return;
@@ -110,7 +94,7 @@ class _StaffMailPageState extends State<StaffMailPage>{
  }
  Future<void> compose()async{
   final sent=await showDialog<bool>(context:context,builder:(context)=>
-   _MailComposer(session:widget.session,mailbox:mailbox??'',signature:signature));
+   _MailComposer(session:widget.session,mailbox:mailbox??''));
   if(sent==true&&mounted)await load(folder:'sent');
  }
  @override Widget build(BuildContext context){
@@ -124,8 +108,6 @@ class _StaffMailPageState extends State<StaffMailPage>{
     if(selectedMail!=null)
      IconButton(tooltip:'Trả lời thư này',onPressed:busy?null:reply,
       icon:const Icon(Icons.reply_outlined)),
-    IconButton(tooltip:'Thiết lập chữ ký',onPressed:busy||mailbox==null?null:editSignature,
-     icon:const Icon(Icons.draw_outlined)),
     IconButton(tooltip:'Làm mới',onPressed:busy?null:()=>
        load(folder:selectedFolder??'inbox'),icon:const Icon(Icons.refresh))
    ]),
@@ -207,9 +189,9 @@ class _StaffMailPageState extends State<StaffMailPage>{
 
 class _MailComposer extends StatefulWidget{
  final SalesSession session;
- final String mailbox,signature;
+ final String mailbox;
  final String? threadId,emailId,replyTo;
- const _MailComposer({required this.session,required this.mailbox,required this.signature,
+ const _MailComposer({required this.session,required this.mailbox,
    this.threadId,this.emailId,this.replyTo});
  @override State<_MailComposer> createState()=>_MailComposerState();
 }
@@ -285,13 +267,6 @@ class _MailComposerState extends State<_MailComposer>{
       subtitle:Text('${((attachments[i]['size'] as int)/1024).toStringAsFixed(0)} KB'),
       trailing:IconButton(tooltip:'Bỏ tệp',icon:const Icon(Icons.close),
        onPressed:busy?null:()=>setState(()=>attachments.removeAt(i)))),
-    if(widget.signature.trim().isNotEmpty)...[
-      const Divider(),
-      Align(alignment:Alignment.centerLeft,child:Text('Chữ ký tự động',
-        style:Theme.of(context).textTheme.labelLarge)),
-      Align(alignment:Alignment.centerLeft,child:Text(widget.signature,
-        maxLines:4,overflow:TextOverflow.ellipsis)),
-    ],
     if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error))
    ]))),
   actions:[
@@ -301,27 +276,3 @@ class _MailComposerState extends State<_MailComposer>{
   ]);
 }
 
-class _MailSignatureEditor extends StatefulWidget{
- final String mailbox,signature;
- const _MailSignatureEditor({required this.mailbox,required this.signature});
- @override State<_MailSignatureEditor> createState()=>_MailSignatureEditorState();
-}
-class _MailSignatureEditorState extends State<_MailSignatureEditor>{
- late final TextEditingController controller=TextEditingController(text:widget.signature);
- @override void dispose(){controller.dispose();super.dispose();}
- @override Widget build(BuildContext context)=>AlertDialog(
-  title:const Text('Chữ ký hộp thư'),
-  content:SizedBox(width:480,height:240,child:SingleChildScrollView(child:Column(
-   crossAxisAlignment:CrossAxisAlignment.start,children:[
-    Text('Chữ ký của ${widget.mailbox}, tự thêm cuối mỗi email gửi hoặc trả lời.'),
-    const SizedBox(height:12),
-    TextField(controller:controller,minLines:3,maxLines:5,maxLength:3000,
-     decoration:const InputDecoration(border:OutlineInputBorder(),
-      hintText:'Họ tên · Chức danh\\nCông ty FBMN\\nĐiện thoại / website')),
-   ]))),
-  actions:[
-   TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Hủy')),
-   FilledButton(onPressed:()=>Navigator.pop(context,controller.text),
-    child:const Text('Lưu chữ ký')),
-  ]);
-}
