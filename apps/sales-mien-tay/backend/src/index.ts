@@ -1,6 +1,7 @@
 import { neon } from '@neondatabase/serverless';
 import {AuthError, authRoutes, userFromRequest, provisionIdentity} from './auth';
 import {staffRoutes} from './staff';
+import {mailRoutes} from './mail';
 import {orgRoutes} from './org';
 import districts from './districts_old.json';
 import {customerRoutes} from './customers';
@@ -32,6 +33,7 @@ import {githubAndroidPublisher} from './android_release_publisher';
 
 interface Env {
   DATABASE_URL: string;
+  RESEND_API_KEY?: string;
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_JWK?: string;
   VAPID_SUBJECT?: string;
@@ -139,6 +141,8 @@ export default {
       if(notifications)return notifications;
       const staffResponse = await staffRoutes(req, env, user, url);
       if (staffResponse) return staffResponse;
+      const mailResponse = await mailRoutes(req,env,user,url);
+      if(mailResponse)return mailResponse;
        const orgResponse=await orgRoutes(req,env,user,url);
        if(orgResponse)return orgResponse;
       if (url.pathname === '/api/v1/meta' && req.method === 'GET') {
