@@ -24,6 +24,14 @@ class OfflineSalesSession extends SalesSession{
     {'identity':'sales-1','scope_revision':'rev-1'};
 }
 
+class SellingRecoverySession extends OfflineSalesSession{
+  Map<String,dynamic> current=record(selling:false,version:2);
+  @override Future<Map<String,dynamic>> get(String path)async{
+    if(path=='/api/v1/customers/$customerId')return {'item':current};
+    return super.get(path);
+  }
+}
+
 class SellingService extends CustomerService{
   SellingService():super('https://example.test','token',identity:'sales-1');
   bool? lastValue;
@@ -90,6 +98,75 @@ void main(){
     expect(control.onChanged,isNull);
     expect(service.lastValue,isNull);
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  test('blocked selling-only 409 is safely rebased and acknowledged',()async{
+    final session=SellingRecoverySession();
+    final factory=newIdbFactoryMemory();
+    var writes=0;
+    final client=MockClient((request)async{
+      writes++;
+      expect(request.method,'PATCH');
+      expect(request.url.path,'/api/v1/customers/$customerId');
+      final body=jsonDecode(request.body) as Map<String,dynamic>;
+      expect(body.keys.toSet(),containsAll(['is_selling','version','client_ref']));
+      expect(body['is_selling'],true);
+      if(body['version']==1)return http.Response(
+        jsonEncode({'error':'Dữ liệu đã thay đổi'}),409);
+      expect(body['version'],2);
+      final saved=record(selling:true,version:3);
+      session.current=saved;
+      return http.Response(jsonEncode({'item':saved}),200);
+    });
+    final queue=OfflineQueue(session,'sales-1','rev-1',
+      factory:factory,networkClient:client);
+    await queue.cache('customers:',[record()]);
+    await queue.cache('customers:Bến Tre',[record()]);
+    await queue.enqueue('/api/v1/customers/$customerId',{
+      'client_ref':'55555555-5555-4555-8555-555555555555',
+      'is_selling':true,'version':1,
+    },method:'PATCH');
+    await queue.sync(manual:true);
+    expect(queue.pending.single['status'],'blocked');
+    expect(queue.pending.single['payload']['version'],1);
+    await queue.retryBlocked(queue.pending.single['key'] as String);
+    expect(queue.pending,isEmpty);
+    expect(writes,2);
+    final stored=(await queue.cached('customers:Bến Tre')).single;
+    expect(stored['is_selling'],true);
+    expect(stored['version'],3);
+    expect(stored['name'],'VPP Hồng Phấn');
+    expect(stored['status'],'active');
+    queue.dispose();
+    client.close();
+  });
+
+  testWidgets('blocked customer update explains why selling switch cannot toggle',(tester)async{
+    final session=OfflineSalesSession();
+    final client=MockClient((request)async=>http.Response(
+      jsonEncode({'error':'Dữ liệu đã thay đổi'}),409));
+    final queue=OfflineQueue(session,'sales-1','rev-1',
+      factory:newIdbFactoryMemory(),networkClient:client);
+    await queue.enqueue('/api/v1/customers/$customerId',{
+      'client_ref':'55555555-5555-4555-8555-555555555555',
+      'is_selling':true,'version':1,
+    },method:'PATCH');
+    await queue.sync(manual:true);
+    expect(queue.pending.single['status'],'blocked');
+    await tester.pumpWidget(MaterialApp(home:CustomerDetail(
+      service:SellingService(),
+      customer:FieldCustomer.fromJson(record()),
+      regions:const RegionCatalog({}),queue:queue)));
+    await tester.pump();
+    final control=tester.widget<Switch>(
+      find.byKey(const Key('customer-selling-switch')));
+    expect(control.onChanged,isNull);
+    expect(find.textContaining('Không đồng bộ được cập nhật khách hàng'),
+      findsOneWidget);
+    expect(find.text('Thử đồng bộ lại'),findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    queue.dispose();
+    client.close();
   });
 
   test('offline selling patch persists, acknowledges, and reopens customer cache',()async{
