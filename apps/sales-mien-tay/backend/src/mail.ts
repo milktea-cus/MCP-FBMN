@@ -47,11 +47,28 @@ export function validateAttachments(value:unknown):AttachmentInput[]|null{
  }
  return files;
 }
-export const withSignature=(body:string,signature:string)=>
- signature.trim()?body.trimEnd()+'\n\n'+signature.trim():body;
-export const validSignature=(v:unknown):v is string=>
- typeof v==='string'&&v.length<=3000&&!/[\0]/.test(v);
-
+// This branded footer is owned by the published template in Resend, never by
+// a staff setting. Client input is escaped before embedding into email HTML.
+export const SIGNATURE_TEMPLATE='fbmn-fieldwork-signature';
+const begin='<!-- FBMN_SIGNATURE_START -->';
+const finish='<!-- FBMN_SIGNATURE_END -->';
+const escapeHtml=(v:string)=>v.replace(/&/g,'&amp;').replace(/</g,'&lt;')
+ .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+export function renderBrandedMail(body:string,template:Record<string,unknown>):{html:string;text:string}|null{
+ const raw=template.html,plain=template.text;
+ if(template.status!=='published'||typeof raw!=='string'||raw.length>50000||
+    typeof plain!=='string'||plain.length>12000)return null;
+ const i=raw.indexOf(begin),j=raw.indexOf(finish);
+ if(i<0||j<=i+begin.length||raw.indexOf(begin,i+begin.length)>=0||
+   raw.indexOf(finish,j+finish.length)>=0)return null;
+ const footer=raw.slice(i+begin.length,j).trim();
+ if(footer.length<100||/<script\\b|<iframe\\b|<form\\b/i.test(footer))return null;
+ const safeBody=escapeHtml(body.trim()).replace(/\\r?\\n/g,'<br>');
+ const html='<!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"></head>'+
+  '<body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#26213a;">'+
+  '<p style="white-space:normal;margin-bottom:16px;">'+safeBody+'</p>'+footer+'</body></html>';
+ return {html,text:body.trimEnd()+'\\n\\n'+plain.trim()};
+}
 type ResendResult={status:number;data:Record<string,unknown>|null};
 async function provider(env:MailEnv,path:string,method:'GET'|'POST'|'PATCH'='GET',body?:unknown,idempotency?:string):Promise<ResendResult>{
  const key=env.RESEND_API_KEY;
@@ -59,6 +76,7 @@ async function provider(env:MailEnv,path:string,method:'GET'|'POST'|'PATCH'='GET
  if(!(
  /^\/inboxes\/[a-z0-9._+-]+@fbmn[.]vn(?:\/threads(?:\/[0-9a-f-]{36}(?:\/emails(?:\/[0-9a-f-]{36}(?:\/reply)?)?)?)?|\/drafts(?:\/[0-9a-f-]{36}(?:\/send)?)?)?(?:\?[a-z0-9=&-]+)?$/i.test(path)
  || /^\/emails\/(?:receiving\/)?[0-9a-f-]{36}\/attachments\/[0-9a-f-]{36}$/i.test(path)
+  || path==='/templates/'+SIGNATURE_TEMPLATE
  ))
   return {status:400,data:null};
  try{
@@ -101,39 +119,20 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
  if(!grant.length)return fail('Tài khoản chưa được gán hộp thư',403);
  const assigned=String(grant[0].mailbox);
  if(!mailbox.test(assigned))return fail('Hộp thư không hợp lệ',403);
- const signatures=await db`SELECT signature_text FROM public.staff_mailbox_signatures
-  WHERE mailbox=${assigned} LIMIT 1`;
- const signature=String(signatures[0]?.signature_text??'');
  if(url.pathname==='/api/v1/mail/me'&&req.method==='GET')
-  return json({mailbox:assigned,enabled:Boolean(env.RESEND_API_KEY),signature});
- if(url.pathname==='/api/v1/mail/signature'&&req.method==='PUT'){
-  if(!req.headers.get('content-type')?.startsWith('application/json'))return fail('Chỉ hỗ trợ JSON',415);
-  let data:Record<string,unknown>;
-  try{
-   const raw=await req.text();
-   if(raw.length>5000)throw Error('too long');
-   data=JSON.parse(raw);
-   if(!data||typeof data!=='object'||Array.isArray(data))throw Error('invalid');
-  }catch{return fail('Chữ ký không hợp lệ');}
-  if(Object.keys(data).length!==1||!('signature' in data)||!validSignature(data.signature))
-   return fail('Chữ ký tối đa 3.000 ký tự',400);
-  // Mailbox is derived only from the signed-in actor; check assignment again
-  // inside the INSERT so a revoked employee cannot edit another inbox.
-  const changed=await db`INSERT INTO public.staff_mailbox_signatures
-   (mailbox,signature_text,updated_by)
-   SELECT mb.mailbox,${data.signature},${actor.sub}
-   FROM public.staff_mailboxes mb JOIN public.staff_members s ON s.user_sub=mb.user_sub
-   WHERE mb.user_sub=${actor.sub} AND mb.mailbox=${assigned} AND s.active
-   ON CONFLICT(mailbox) DO UPDATE SET signature_text=excluded.signature_text,
-   updated_by=excluded.updated_by,updated_at=now() RETURNING mailbox`;
-  if(!changed.length)return fail('Đã thu hồi quyền hộp thư',403);
-  return json({signature:data.signature});
- }
+  return json({mailbox:assigned,enabled:Boolean(env.RESEND_API_KEY)});
  if(!env.RESEND_API_KEY)return fail('Chưa cấu hình cổng email trong Worker',503);
  // Inbox resolution and all Resend calls happen server-side using a fixed
  // address derived only from the signed-in identity, never a client inbox ID.
  // Resend accepts addresses as inbox identifiers.
  const box=assigned;
+ // Load the published company footer from Resend only on send/reply.
+ // Never silently send a message without it if the provider is unavailable.
+ async function signedMessage(text:string){
+  const result=await provider(env,'/templates/'+SIGNATURE_TEMPLATE);
+  return result.data?renderBrandedMail(text,result.data):null;
+ }
+
  if(url.pathname==='/api/v1/mail/threads'&&req.method==='GET'){
   const folder=url.searchParams.get('folder')??'inbox';
   const after=url.searchParams.get('after');
@@ -219,8 +218,10 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
     return fail('Nội dung trả lời không hợp lệ');
   const attachments=validateAttachments(data.attachments);
   if(!attachments)return fail('Tệp không hợp lệ; tối đa 4 tệp, tổng 5 MB',400);
+  const signed=await signedMessage(data.text.trim());
+  if(!signed)return fail('Chữ ký công ty trên Resend chưa sẵn sàng, chưa gửi thư.',503);
   const result=await provider(env,`/inboxes/${box}/threads/${reply[1]}/emails/${reply[2]}/reply`,
-   'POST',{text:withSignature(data.text.trim(),signature),...(attachments.length?{attachments}:{})},
+   'POST',{text:signed.text,html:signed.html,...(attachments.length?{attachments}:{})},
    'field-mail-reply/'+data.request_id);
   if(!result.data||typeof result.data.id!=='string')return fail('Không trả lời được email',result.status);
   return json({id:result.data.id,status:'sent'},201);
@@ -246,9 +247,11 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
   // A new inbox message must first be a draft. Generic /emails does not
   // record the sent message in the assigned inbox, so never use it here.
   const requestId=String(payload.request_id);
+  const signed=await signedMessage(payload.text.trim());
+  if(!signed)return fail('Chữ ký công ty trên Resend chưa sẵn sàng, chưa gửi thư.',503);
   const draft=await provider(env,`/inboxes/${box}/drafts`,'POST',{
    to:[payload.to.trim().toLowerCase()],subject:payload.subject.trim(),
-   text:withSignature(payload.text.trim(),signature),...(attachments.length?{attachments}:{})
+   text:signed.text,html:signed.html,...(attachments.length?{attachments}:{})
   },'field-mail-draft/'+requestId);
   if(!draft.data||typeof draft.data.id!=='string'||!uuid.test(draft.data.id))
    return fail('Chưa tạo được thư nháp để gửi',draft.status);
