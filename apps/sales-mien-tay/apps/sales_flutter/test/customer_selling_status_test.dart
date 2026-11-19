@@ -123,11 +123,13 @@ void main(){
       expect(body.keys.toSet(),containsAll(['is_selling','version','client_ref']));
       expect(body['is_selling'],true);
       if(body['version']==1)return http.Response(
-        jsonEncode({'error':'Dữ liệu đã thay đổi'}),409);
+        jsonEncode({'error':'Dữ liệu đã thay đổi'}),409,
+        headers:{'content-type':'application/json; charset=utf-8'});
       expect(body['version'],2);
       final saved=record(selling:true,version:3);
       session.current=saved;
-      return http.Response(jsonEncode({'item':saved}),200);
+      return http.Response(jsonEncode({'item':saved}),200,
+        headers:{'content-type':'application/json; charset=utf-8'});
     });
     final queue=OfflineQueue(session,'sales-1','rev-1',
       factory:factory,networkClient:client);
