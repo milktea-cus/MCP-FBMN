@@ -11,10 +11,10 @@ const email=/^[^\s@<>\r\n]{1,64}@[a-z0-9.-]+[.][a-z]{2,}$/i;
 const mailbox=/^[a-z0-9._+-]+@fbmn[.]vn$/;
 const allowedFolders=new Set(['inbox','sent','archive']);
 type ResendResult={status:number;data:Record<string,unknown>|null};
-async function provider(env:MailEnv,path:string,method:'GET'|'POST'='GET',body?:unknown,idempotency?:string):Promise<ResendResult>{
+async function provider(env:MailEnv,path:string,method:'GET'|'POST'|'PATCH'='GET',body?:unknown,idempotency?:string):Promise<ResendResult>{
  const key=env.RESEND_API_KEY;
  if(!key||!/^re_[a-z0-9_-]{16,}$/i.test(key))return {status:503,data:null};
- if(!/^\/inboxes\/[a-z0-9._+-]+@fbmn[.]vn(?:\/threads(?:\/[0-9a-f-]{36}(?:\/emails\/[0-9a-f-]{36})?)?|\/emails)?(?:\?[a-z0-9=&-]+)?$/i.test(path))
+ if(!/^\/inboxes\/[a-z0-9._+-]+@fbmn[.]vn(?:\/threads(?:\/[0-9a-f-]{36}(?:\/emails(?:\/[0-9a-f-]{36}(?:\/reply)?)?|\/read)?)?|\/drafts(?:\/[0-9a-f-]{36}(?:\/send)?)?)?(?:\?[a-z0-9=&-]+)?$/i.test(path))
   return {status:400,data:null};
  try{
   const resp=await fetch('https://api.resend.com'+path,{
@@ -28,7 +28,7 @@ async function provider(env:MailEnv,path:string,method:'GET'|'POST'='GET',body?:
   if(!resp.ok||!resp.headers.get('content-type')?.includes('application/json'))
    return {status:resp.status===429?429:503,data:null};
   const text=await resp.text();
-  if(text.length>450000)return {status:503,data:null};
+  if(text.length>1000000)return {status:503,data:null};
   const data=JSON.parse(text);
   return data&&typeof data==='object'&&!Array.isArray(data)?{status:200,data}: {status:503,data:null};
  }catch{return {status:503,data:null};}
@@ -77,9 +77,10 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
   if(!uuid.test(thread[1]))return fail('Mã thư không hợp lệ');
   const result=await provider(env,`/inboxes/${box}/threads/${thread[1]}`);
   if(!result.data)return fail('Không mở được hội thoại',result.status);
-  const raw=result.data;
-  const emails=Array.isArray(raw.emails)?raw.emails:[];
-  return json({thread:view(raw),emails:emails.map(v=>view(v as Record<string,unknown>))});
+  const page=await provider(env,`/inboxes/${box}/threads/${thread[1]}/emails?limit=100`);
+  if(!page.data||!Array.isArray(page.data.data))return fail('Không tải được danh sách thư trong hội thoại',page.status);
+  return json({thread:view(result.data),emails:page.data.data.map(v=>view(v as Record<string,unknown>)),
+   has_more:page.data.has_more===true});
  }
  const letter=/^\/api\/v1\/mail\/threads\/([0-9a-f-]{36})\/emails\/([0-9a-f-]{36})$/i.exec(url.pathname);
  if(letter&&req.method==='GET'){
@@ -87,6 +88,32 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
   const result=await provider(env,`/inboxes/${box}/threads/${letter[1]}/emails/${letter[2]}`);
   if(!result.data)return fail('Không mở được email',result.status);
   return json({item:view(result.data)});
+ }
+ const mark=/^\/api\/v1\/mail\/threads\/([0-9a-f-]{36})\/read$/i.exec(url.pathname);
+ if(mark&&req.method==='POST'){
+  if(!uuid.test(mark[1]))return fail('Mã hội thoại không hợp lệ');
+  const done=await provider(env,`/inboxes/${box}/threads/${mark[1]}`,'PATCH',{read:true});
+  if(!done.data)return fail('Không đánh dấu đã đọc được',done.status);
+  return json({ok:true});
+ }
+ const reply=/^\/api\/v1\/mail\/threads\/([0-9a-f-]{36})\/emails\/([0-9a-f-]{36})\/reply$/i.exec(url.pathname);
+ if(reply&&req.method==='POST'){
+  if(!uuid.test(reply[1])||!uuid.test(reply[2]))return fail('Mã thư không hợp lệ');
+  let data:Record<string,unknown>;
+  try{
+   const raw=await req.text();
+   if(raw.length>60000)throw Error('limit');
+   data=JSON.parse(raw);
+  }catch{return fail('Nội dung trả lời không hợp lệ');}
+  if(!data||typeof data!=='object'||Array.isArray(data)||
+   Object.keys(data).some(k=>!['text','request_id'].includes(k))||
+   typeof data.text!=='string'||!data.text.trim()||data.text.length>12000||
+   typeof data.request_id!=='string'||!uuid.test(data.request_id))
+    return fail('Nội dung trả lời không hợp lệ');
+  const result=await provider(env,`/inboxes/${box}/threads/${reply[1]}/emails/${reply[2]}/reply`,
+   'POST',{text:data.text.trim()},'field-mail-reply/'+data.request_id);
+  if(!result.data||typeof result.data.id!=='string')return fail('Không trả lời được email',result.status);
+  return json({id:result.data.id,status:'sent'},201);
  }
  if(url.pathname==='/api/v1/mail/send'&&req.method==='POST'){
   if(!req.headers.get('content-type')?.startsWith('application/json'))return fail('Chỉ hỗ trợ JSON',415);
@@ -104,12 +131,21 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
    typeof payload.text!=='string'||!payload.text.trim()||payload.text.length>12000||
    typeof payload.request_id!=='string'||!uuid.test(payload.request_id))
     return fail('Nội dung hoặc người nhận không hợp lệ');
-  // Resend inbox send endpoint retains sent history in the same assigned inbox.
-  const result=await provider(env,`/inboxes/${box}/emails`,'POST',{
-   to:[payload.to.trim().toLowerCase()],subject:payload.subject.trim(),text:payload.text.trim()
-  },'field-mail/'+payload.request_id);
-  if(!result.data)return fail('Không gửi được email',result.status);
-  return json({id:result.data.id,status:'queued'},201);
+  // A new inbox message must first be a draft. Generic /emails does not
+  // record the sent message in the assigned inbox, so never use it here.
+  const requestId=String(payload.request_id);
+  const draft=await provider(env,`/inboxes/${box}/drafts`,'POST',{
+   to:[payload.to.trim().toLowerCase()],subject:payload.subject.trim(),
+   text:payload.text.trim()
+  },'field-mail-draft/'+requestId);
+  if(!draft.data||typeof draft.data.id!=='string'||!uuid.test(draft.data.id))
+   return fail('Chưa tạo được thư nháp để gửi',draft.status);
+  const sent=await provider(env,`/inboxes/${box}/drafts/${draft.data.id}/send`,'POST',
+   undefined,'field-mail-send/'+requestId);
+  if(!sent.data||typeof sent.data.id!=='string')
+   return json({error:'Chưa xác nhận gửi thành công; thư nháp vẫn được giữ',
+     draft_id:draft.data.id},503);
+  return json({id:sent.data.id,status:'sent'},201);
  }
  return fail('Không hỗ trợ thao tác email này',405);
 }
