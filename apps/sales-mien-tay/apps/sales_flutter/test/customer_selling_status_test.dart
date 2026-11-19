@@ -33,7 +33,8 @@ class SellingRecoverySession extends OfflineSalesSession{
 }
 
 class SellingService extends CustomerService{
-  SellingService():super('https://example.test','token',identity:'sales-1');
+  SellingService({String? revision}):super('https://example.test','token',
+    identity:'sales-1',revision:revision);
   bool? lastValue;
   @override Future<List<Map<String,dynamic>>> media(String id)async=>[];
   @override Future<List<Map<String,dynamic>>> visits(String id)async=>[];
@@ -169,7 +170,8 @@ void main(){
     });
     expect(queue.pending.single['status'],'blocked');
     await tester.pumpWidget(MaterialApp(home:CustomerDetail(
-      service:SellingService(),
+      // Isolate the switch rendering from profile media cache transactions.
+      service:SellingService(revision:'ui-test-different-cache-scope'),
       customer:FieldCustomer.fromJson(record()),
       regions:const RegionCatalog({}),queue:queue)));
     await tester.pump();
