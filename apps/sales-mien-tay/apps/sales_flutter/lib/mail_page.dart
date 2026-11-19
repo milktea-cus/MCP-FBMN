@@ -44,8 +44,20 @@ class _StaffMailPageState extends State<StaffMailPage>{
   try{
    final result=await widget.session.get('/api/v1/mail/threads/$selectedThread/emails/$id');
    if(mounted)setState(()=>selectedMail=Map<String,dynamic>.from(result['item'] as Map));
+   try{await widget.session.post('/api/v1/mail/threads/$selectedThread/read',{});}catch(_){/* Reading remains possible if the receipt fails. */}
   }catch(e){if(mounted)setState(()=>error=e.toString());}
   finally{if(mounted)setState(()=>busy=false);}
+ }
+ Future<void> reply()async{
+  if(selectedThread==null||selectedMail?['id']==null)return;
+  final sent=await showDialog<bool>(context:context,builder:(context)=>
+   _MailComposer(session:widget.session,mailbox:mailbox??'',
+    threadId:selectedThread,emailId:selectedMail?['id']?.toString(),
+    replyTo:selectedMail?['from']?.toString()));
+  if(sent==true&&mounted){
+   setState(()=>selectedMail=null);
+   await openThread(selectedThread!);
+  }
  }
  Future<void> compose()async{
   final sent=await showDialog<bool>(context:context,builder:(context)=>
@@ -84,6 +96,10 @@ class _StaffMailPageState extends State<StaffMailPage>{
        Text('Đến: ${selectedMail?['to']??''}'),
        const Divider(height:30),
        SelectableText(selectedMail?['text']?.toString()??'(Email không có bản văn bản thuần)'),
+       const SizedBox(height:18),
+       Align(alignment:Alignment.centerRight,child:FilledButton.tonalIcon(
+        onPressed:reply,icon:const Icon(Icons.reply_outlined),
+        label:const Text('Trả lời'))),
       ]):
       selectedThread!=null?
        ListView(children:[
@@ -112,36 +128,44 @@ class _StaffMailPageState extends State<StaffMailPage>{
 class _MailComposer extends StatefulWidget{
  final SalesSession session;
  final String mailbox;
- const _MailComposer({required this.session,required this.mailbox});
+ final String? threadId,emailId,replyTo;
+ const _MailComposer({required this.session,required this.mailbox,
+   this.threadId,this.emailId,this.replyTo});
  @override State<_MailComposer> createState()=>_MailComposerState();
 }
 class _MailComposerState extends State<_MailComposer>{
  final to=TextEditingController(),subject=TextEditingController(),text=TextEditingController();
  bool busy=false;String? error;
+ late final String requestId=const Uuid().v4();
  @override void dispose(){to.dispose();subject.dispose();text.dispose();super.dispose();}
  Future<void> send()async{
   if(busy)return;
-  if(!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(to.text.trim())||
-   subject.text.trim().isEmpty||text.text.trim().isEmpty){
+  if((widget.threadId==null&&(!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(to.text.trim())||subject.text.trim().isEmpty))||text.text.trim().isEmpty){
     setState(()=>error='Nhập đầy đủ người nhận, tiêu đề và nội dung.');return;
   }
   setState((){busy=true;error=null;});
   try{
-   await widget.session.post('/api/v1/mail/send',{
-    'request_id':const Uuid().v4(),
-    'to':to.text.trim(),'subject':subject.text.trim(),'text':text.text.trim()
-   });
+   if(widget.threadId!=null&&widget.emailId!=null){
+    await widget.session.post('/api/v1/mail/threads/${widget.threadId}/emails/${widget.emailId}/reply',{
+      'request_id':requestId,'text':text.text.trim()});
+   }else{
+    await widget.session.post('/api/v1/mail/send',{
+      'request_id':requestId,'to':to.text.trim(),
+      'subject':subject.text.trim(),'text':text.text.trim()});
+   }
    if(mounted)Navigator.of(context).pop(true);
   }catch(e){if(mounted)setState(()=>error=e.toString());}
   finally{if(mounted)setState(()=>busy=false);}
  }
  @override Widget build(BuildContext context)=>AlertDialog(
-  title:Text('Soạn thư · ${widget.mailbox}'),
+  title:Text(widget.threadId==null?'Soạn thư · ${widget.mailbox}':'Trả lời · ${widget.mailbox}'),
   content:SizedBox(width:480,child:SingleChildScrollView(child:Column(
    mainAxisSize:MainAxisSize.min,children:[
-    TextField(controller:to,decoration:const InputDecoration(labelText:'Đến')),
-    TextField(controller:subject,decoration:const InputDecoration(labelText:'Tiêu đề'),
-     maxLength:200),
+    if(widget.threadId==null)...[
+      TextField(controller:to,decoration:const InputDecoration(labelText:'Đến')),
+      TextField(controller:subject,decoration:const InputDecoration(labelText:'Tiêu đề'),maxLength:200),
+    ]else Padding(padding:const EdgeInsets.symmetric(vertical:8),
+      child:Align(alignment:Alignment.centerLeft,child:Text('Trả lời đến: ${widget.replyTo??'người gửi'}'))),
     TextField(controller:text,decoration:const InputDecoration(labelText:'Nội dung'),
      maxLines:8,minLines:4,maxLength:12000),
     if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error))
