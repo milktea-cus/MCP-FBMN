@@ -6,7 +6,7 @@ const file=(name='invoice.pdf',bytes='aGVsbG8=')=>({filename:name,content:bytes}
 
 test('published Resend signature centrally brands outbound HTML without trusting input',()=>{
  assert.equal(SIGNATURE_TEMPLATE,'fbmn-fieldwork-signature');
- const footer='<table><tr><td>FUTUREBOOK MIỀN NAM<br><a href="https://www.fbmn.vn">Website</a></td></tr></table>';
+ const footer='<table><tr><td>FUTUREBOOK MIỀN NAM<br>1092A Lê Đức Anh (QL01A), P. Tân Tạo, TP. Hồ Chí Minh<br><a href="https://www.fbmn.vn">Website</a></td></tr></table>';
  // The same markers are embedded in the centrally published Resend template.
  const template={
   status:'published',
