@@ -924,6 +924,10 @@ class _CustomerDetailState extends State<CustomerDetail> {
     super.initState();
     _hadSellingPending=pendingCustomerSelling(widget.queue,widget.customer.id)!=null;
     widget.queue?.addListener(_queueChanged);
+    // Cached ACL may be stale after an admin changes territory/permissions.
+    // Re-check it once rather than leaving the switch silently disabled.
+    if(!customerEditable(widget.customer,widget.service.identity))
+      unawaited(_refreshSelling());
     unawaited(load());
   }
   @override void dispose(){
@@ -957,6 +961,31 @@ class _CustomerDetailState extends State<CustomerDetail> {
         if(latest!=null&&!_accessDenied)_sellingCurrent=latest;
         _sellingBusy=false;
       });
+    }
+  }
+  Map<String,dynamic>? get _blockedCustomerPatch{
+    for(final op in widget.queue?.pending.reversed??<Map<String,dynamic>>[]){
+      if(op['path']=='/api/v1/customers/${widget.customer.id}'&&
+         op['method']=='PATCH'&&op['status']=='blocked')return op;
+    }
+    return null;
+  }
+  Future<void> _retryCustomerPatch(String key)async{
+    if(_sellingBusy||busy||widget.queue==null)return;
+    setState(()=>_sellingBusy=true);
+    try{
+      await widget.queue!.retryBlocked(key);
+      if(mounted)setState(()=>message=_blockedCustomerPatch==null
+        ?'Đã yêu cầu đồng bộ lại cập nhật khách hàng'
+        :'Cập nhật vẫn bị từ chối. Xem thông tin lỗi bên dưới.');
+    }catch(e){
+      if(mounted)setState(()=>message='Không thể đồng bộ lại: $e');
+    }finally{
+      if(mounted){
+        setState(()=>_sellingBusy=false);
+        if(!hasCustomerPatchPending(widget.queue,widget.customer.id))
+          unawaited(_refreshSelling());
+      }
     }
   }
   Future<void> _setSelling(bool desired)async{
@@ -1321,10 +1350,12 @@ class _CustomerDetailState extends State<CustomerDetail> {
   @override Widget build(BuildContext context){
     final c=_sellingCurrent??widget.customer,own=customerEditable(c,widget.service.identity)&&!_accessDenied;
     final sellingPending=pendingCustomerSelling(widget.queue,c.id)!=null;
+    final blockedCustomerPatch=_blockedCustomerPatch;
+    final customerPatchPending=hasCustomerPatchPending(widget.queue,c.id);
     final selling=customerSellingForDisplay(c,widget.queue);
     final sellingEditable=customerEditable(c,widget.service.identity)&&
       !_sellingBusy&&!busy&&!_accessDenied&&
-      !hasCustomerPatchPending(widget.queue,c.id);
+      !customerPatchPending;
     final cover=_coverPhoto;
     final gps=c.latitude==null||c.longitude==null?'Chưa ghi nhận':
       '${c.latitude!.toStringAsFixed(6)}, ${c.longitude!.toStringAsFixed(6)}';
@@ -1370,7 +1401,7 @@ class _CustomerDetailState extends State<CustomerDetail> {
                       Text(selling?'Đang bán':'Chưa bán',
                         style:Theme.of(context).textTheme.labelSmall),
                       const SizedBox(width:4),
-                      SizedBox(height:40,child:Switch.adaptive(
+                      SizedBox(height:48,child:Switch.adaptive(
                         key:const Key('customer-selling-switch'),
                         value:selling,
                         onChanged:sellingEditable?(value)=>_setSelling(value):null,
@@ -1378,6 +1409,11 @@ class _CustomerDetailState extends State<CustomerDetail> {
                     ]),
                     if(sellingPending)Text('Chờ đồng bộ',
                       style:Theme.of(context).textTheme.labelSmall),
+                    if(!own)Text('Chỉ xem · không có quyền sửa',
+                      style:Theme.of(context).textTheme.labelSmall),
+                    if(own&&customerPatchPending&&!sellingPending&&blockedCustomerPatch==null)
+                      Text('Đang chờ đồng bộ cập nhật',
+                        style:Theme.of(context).textTheme.labelSmall),
                   ]),
                 ]),
                 const SizedBox(height:3),
@@ -1400,6 +1436,16 @@ class _CustomerDetailState extends State<CustomerDetail> {
             ])),
           ]),
         )),
+        if(blockedCustomerPatch!=null)Padding(
+          padding:const EdgeInsets.symmetric(horizontal:14,vertical:6),
+          child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+            Text('Không đồng bộ được cập nhật khách hàng: ${blockedCustomerPatch['error']??'Chưa rõ lỗi'}',
+              style:Theme.of(context).textTheme.bodySmall),
+            TextButton.icon(
+              onPressed:_sellingBusy?null:()=>_retryCustomerPatch(blockedCustomerPatch['key'] as String),
+              icon:const Icon(Icons.sync,size:18),
+              label:const Text('Thử đồng bộ lại')),
+          ])),
         if(message!=null)Padding(padding:const EdgeInsets.symmetric(horizontal:14,vertical:2),
           child:Text(message!,maxLines:2,overflow:TextOverflow.ellipsis,
             style:Theme.of(context).textTheme.bodySmall)),
