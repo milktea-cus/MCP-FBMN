@@ -8,13 +8,20 @@ export async function staffRoutes(req:Request,env:AuthEnv,actor:{sub:string;admi
  if(!actor.admin)return json({error:'Chỉ Admin quản lý nhân viên'},403);
  const db=neon(env.DATABASE_URL);
  if(req.method==='GET'){
-  const items=await db`SELECT m.*,coalesce((SELECT jsonb_agg(jsonb_build_object('province',s.province,'district',s.district) ORDER BY s.province,s.district) FROM staff_scopes s WHERE s.user_sub=m.user_sub),'[]'::jsonb) AS scopes FROM staff_members m ORDER BY employee_code`;
+  const items=await db`SELECT m.*,mb.mailbox AS mail_box,coalesce((SELECT jsonb_agg(jsonb_build_object('province',s.province,'district',s.district) ORDER BY s.province,s.district) FROM staff_scopes s WHERE s.user_sub=m.user_sub),'[]'::jsonb) AS scopes FROM staff_members m LEFT JOIN staff_mailboxes mb ON mb.user_sub=m.user_sub ORDER BY employee_code`;
   return json({items});
  }
  if(req.method!=='POST')return json({error:'Method not allowed'},405);
  let data:Record<string,unknown>;try{const raw=await req.text();if(raw.length>64000)throw Error();data=JSON.parse(raw);}catch{return json({error:'JSON không hợp lệ'},400);}
  if(!data||typeof data!=='object'||Array.isArray(data))return json({error:'Dữ liệu nhân viên không hợp lệ.'},400);
  if(data?.job_title!==undefined&&(typeof data.job_title!=='string'||data.job_title.trim().length>120))return json({error:'Chức danh không hợp lệ (tối đa 120 ký tự).'},400);
+ const mailboxInput=data.mail_box;
+ if(mailboxInput!==undefined&&mailboxInput!==null&&typeof mailboxInput!=='string')
+  return json({error:'Hộp thư nhân viên không hợp lệ.'},400);
+ const mailBox=typeof mailboxInput==='string'?mailboxInput.trim().toLowerCase():null;
+ if(mailBox!==null&&mailBox!==''&&
+    !/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@fbmn[.]vn$/.test(mailBox))
+  return json({error:'Email hộp thư phải thuộc fbmn.vn'},400);
  const reportChanges=data.report_changes===undefined?[]:data.report_changes;
  if(!Array.isArray(reportChanges)||reportChanges.length>200)return json({error:'Danh sách cấp dưới không hợp lệ.'},400);
  for(const change of reportChanges){
@@ -52,6 +59,16 @@ export async function staffRoutes(req:Request,env:AuthEnv,actor:{sub:string;admi
   }
   const result=await db`SELECT public.sales_save_staff_with_reports(${actor.sub},${data.user_sub},${data.employee_code.trim()},${data.full_name.trim()},${String(data.phone??'')},${String(data.role)},${data.active},${manager as string|null},${JSON.stringify(canonical)}::jsonb,${String(data.scope_revision??'0')}::bigint,${typeof data.job_title==='string'?data.job_title.trim():String(old?.job_title??'')},${JSON.stringify(reportChanges)}::jsonb) AS item`;
   if(email&&String(result[0].item?.profile?.staff?.email??'').toLowerCase()!==email)return json({error:'Email xác thực chưa đồng bộ. Mở lại hồ sơ và thử lại.'},409);
+  // Mailbox grants are independent of the login identity. A blank value revokes.
+  // Preserve the assignment when older clients omit mail_box entirely.
+  if(mailBox!==null){
+   if(mailBox==='')await db`DELETE FROM public.staff_mailboxes WHERE user_sub=${data.user_sub}`;
+   else {
+    const occupied=await db`SELECT user_sub FROM public.staff_mailboxes WHERE mailbox=${mailBox} AND user_sub<>${data.user_sub} LIMIT 1`;
+    if(occupied.length)return json({error:'Hộp thư đã được gán cho nhân viên khác.'},409);
+    await db`INSERT INTO public.staff_mailboxes(user_sub,mailbox,updated_by) VALUES (${data.user_sub},${mailBox},${actor.sub}) ON CONFLICT(user_sub) DO UPDATE SET mailbox=excluded.mailbox,updated_by=excluded.updated_by,updated_at=now()`;
+   }
+  }
   return json({item:result[0].item});
  }catch(e){
   if(e instanceof AuthError)return json({error:e.message},e.status);
