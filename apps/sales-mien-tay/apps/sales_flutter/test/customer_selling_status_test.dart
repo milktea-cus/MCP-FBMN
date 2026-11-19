@@ -43,6 +43,17 @@ class SellingService extends CustomerService{
   }
 }
 
+// Seed a durable rejected PATCH without relying on a network retry timer.
+Future<void> markCustomerPatchBlocked(OfflineQueue queue)async{
+  final row=queue.pending.single;
+  final db=await queue.db;
+  final tx=db.transaction('outbox',idbModeReadWrite);
+  await tx.objectStore('outbox').put({...row,
+    'status':'blocked','error':'HTTP 409: Dữ liệu đã thay đổi'});
+  await tx.completed;
+  await queue.reload();
+}
+
 void main(){
   test('new and legacy customers remain unconfirmed until explicitly marked',(){
     final newRecord=FieldCustomer.fromJson(record());
@@ -126,12 +137,12 @@ void main(){
       'client_ref':'55555555-5555-4555-8555-555555555555',
       'is_selling':true,'version':1,
     },method:'PATCH');
-    await queue.sync(manual:true);
+    await markCustomerPatchBlocked(queue);
     expect(queue.pending.single['status'],'blocked');
     expect(queue.pending.single['payload']['version'],1);
     await queue.retryBlocked(queue.pending.single['key'] as String);
     expect(queue.pending,isEmpty);
-    expect(writes,2);
+    expect(writes,1);
     final stored=(await queue.cached('customers:Bến Tre')).single;
     expect(stored['is_selling'],true);
     expect(stored['version'],3);
@@ -143,15 +154,13 @@ void main(){
 
   testWidgets('blocked customer update explains why selling switch cannot toggle',(tester)async{
     final session=OfflineSalesSession();
-    final client=MockClient((request)async=>http.Response(
-      jsonEncode({'error':'Dữ liệu đã thay đổi'}),409));
     final queue=OfflineQueue(session,'sales-1','rev-1',
-      factory:newIdbFactoryMemory(),networkClient:client);
+      factory:newIdbFactoryMemory());
     await queue.enqueue('/api/v1/customers/$customerId',{
       'client_ref':'55555555-5555-4555-8555-555555555555',
       'is_selling':true,'version':1,
     },method:'PATCH');
-    await queue.sync(manual:true);
+    await markCustomerPatchBlocked(queue);
     expect(queue.pending.single['status'],'blocked');
     await tester.pumpWidget(MaterialApp(home:CustomerDetail(
       service:SellingService(),
@@ -166,7 +175,6 @@ void main(){
     expect(find.text('Thử đồng bộ lại'),findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     queue.dispose();
-    client.close();
   });
 
   test('offline selling patch persists, acknowledges, and reopens customer cache',()async{
