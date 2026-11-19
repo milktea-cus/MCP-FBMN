@@ -1,7 +1,7 @@
 import {neon} from '@neondatabase/serverless';
 
 type MailEnv={DATABASE_URL:string;RESEND_API_KEY?:string};
-type StaffActor={sub:string;staff:{active:boolean}};
+type StaffActor={sub:string;staff:Record<string,unknown>};
 const json=(value:unknown,status=200)=>new Response(JSON.stringify(value),{
  status,headers:{'Content-Type':'application/json; charset=utf-8',
    'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
