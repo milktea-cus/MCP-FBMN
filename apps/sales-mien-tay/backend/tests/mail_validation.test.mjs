@@ -1,16 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validateAttachments,validSignature,withSignature} from '../src/mail.ts';
+import {validateAttachments,renderBrandedMail,SIGNATURE_TEMPLATE} from '../src/mail.ts';
 
 const file=(name='invoice.pdf',bytes='aGVsbG8=')=>({filename:name,content:bytes});
 
-test('company mailbox signature is appended once by the server',()=>{
- assert.equal(withSignature('Xin chào','Công ty FBMN'),'Xin chào\n\nCông ty FBMN');
- assert.equal(withSignature('Xin chào','  '),'Xin chào');
- assert.equal(validSignature('A'.repeat(3000)),true);
- assert.equal(validSignature('A'.repeat(3001)),false);
- assert.equal(validSignature('bad\0signature'),false);
- assert.equal(validSignature({value:'not a string'}),false);
+test('published Resend signature centrally brands outbound HTML without trusting input',()=>{
+ assert.equal(SIGNATURE_TEMPLATE,'fbmn-fieldwork-signature');
+ const footer='<table><tr><td>FUTUREBOOK MIỀN NAM<br><a href="https://www.fbmn.vn">Website</a></td></tr></table>';
+ // The same markers are embedded in the centrally published Resend template.
+ const template={
+  status:'published',
+  html:'<!DOCTYPE html><html><body><!-- FBMN_SIGNATURE_START -->'+footer+
+       '<!-- FBMN_SIGNATURE_END --></body></html>',
+  text:'FUTUREBOOK MIỀN NAM · info@fbmn.vn'
+ };
+ const rendered=renderBrandedMail('Xin chào <script>alert(1)</script>\nLần 2',template);
+ assert.ok(rendered);
+ assert.match(rendered.html,/FUTUREBOOK MIỀN NAM/);
+ assert.match(rendered.html,/&lt;script&gt;/);
+ assert.doesNotMatch(rendered.html,/<script>/);
+ assert.match(rendered.html,/Lần 2/);
+ assert.equal(rendered.html.split('FUTUREBOOK MIỀN NAM').length,2);
+ assert.match(rendered.text,/info@fbmn.vn/);
+ assert.equal(renderBrandedMail('Xin chào',{...template,status:'draft'}),null);
+ assert.equal(renderBrandedMail('Xin chào',{...template,html:'<table>no markers</table>'}),null);
 });
 
 test('only bounded business documents and images can be sent',()=>{
