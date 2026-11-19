@@ -222,7 +222,11 @@ class _StaffEditorState extends State<StaffEditor> {
   if(!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email.text.trim())){
    setState(()=>error='Email không hợp lệ.');return;
   }
-  if(mailBox.text.trim().isNotEmpty&&!RegExp(r'^[a-zA-Z0-9.!#$%&\x27*+/=?^_`{|}~-]+@fbmn[.]vn
+  if(mailBox.text.trim().isNotEmpty&&
+      !RegExp(r'^[a-zA-Z0-9._+-]+@fbmn[.]vn$').hasMatch(mailBox.text.trim().toLowerCase())){
+   setState(()=>error='Hộp thư phải thuộc fbmn.vn hoặc bỏ trống.');return;
+  }
+  if(jobTitle.text.trim().length>120){
    setState(()=>error='Chức danh tối đa 120 ký tự.');return;
   }
   if(role!='manager'&&reports.isNotEmpty){
