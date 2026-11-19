@@ -8,11 +8,10 @@ const emailId='22222222-2222-4222-8222-222222222222';
 const fileId='33333333-3333-4333-8333-333333333333';
 
 class FakeMailSession extends SalesSession {
- String signature='';
  final sendPaths=<String>[];
  Map<String,dynamic>? sentPayload;
  @override Future<Map<String,dynamic>> get(String path) async {
-  if(path=='/api/v1/mail/me')return {'mailbox':'info@fbmn.vn','enabled':true,'signature':signature};
+  if(path=='/api/v1/mail/me')return {'mailbox':'info@fbmn.vn','enabled':true};
   if(path.startsWith('/api/v1/mail/threads?'))return {
    'items':[{'id':threadId,'subject':'Thư thử nghiệm','from':'customer@example.test','read':false}]
   };
@@ -36,11 +35,7 @@ class FakeMailSession extends SalesSession {
  @override Future<Map<String,dynamic>> postMail(String path,Map<String,dynamic> data) async {
   sendPaths.add(path);sentPayload=data;return {'status':'sent'};
  }
- @override Future<Map<String,dynamic>> putMail(String path,Map<String,dynamic> data) async {
-  if(path!='/api/v1/mail/signature')throw StateError('Wrong setting path');
-  signature=data['signature'].toString();
-  return {'signature':signature};
- }
+
 }
 
 void main(){
@@ -79,7 +74,7 @@ void main(){
   expect(find.text('Thư đến'),findsOneWidget);
  });
 
- testWidgets('signature setting is scoped to the active inbox and shown on compose',(tester) async{
+ testWidgets('mail composer has no signature editor and sends only authored content',(tester) async{
   tester.view.physicalSize=const Size(390,844);
   tester.view.devicePixelRatio=1;
   addTearDown(tester.view.resetPhysicalSize);
@@ -87,17 +82,20 @@ void main(){
   final session=FakeMailSession();
   await tester.pumpWidget(MaterialApp(home:StaffMailPage(session:session)));
   await tester.pumpAndSettle();
-
-  await tester.tap(find.byTooltip('Thiết lập chữ ký'));
-  await tester.pumpAndSettle();
-  await tester.enterText(find.byType(TextField),'Công ty FBMN - Bộ phận CSKH');
-  await tester.tap(find.text('Lưu chữ ký'));
-  await tester.pumpAndSettle();
-  expect(session.signature,'Công ty FBMN - Bộ phận CSKH');
-
+  expect(find.byTooltip('Thiết lập chữ ký'),findsNothing);
   await tester.tap(find.byTooltip('Soạn email'));
   await tester.pumpAndSettle();
-  expect(find.text('Công ty FBMN - Bộ phận CSKH'),findsOneWidget);
+  expect(find.text('Chữ ký tự động'),findsNothing);
   expect(find.text('Đính kèm tệp (4 tệp, tổng 5 MB)'),findsOneWidget);
+  final fields=find.byType(TextField);
+  await tester.enterText(fields.at(0),'client@example.test');
+  await tester.enterText(fields.at(1),'Chào hỏi');
+  await tester.enterText(fields.at(2),'Xin chào anh!');
+  await tester.tap(find.text('Gửi email'));
+  await tester.pumpAndSettle();
+  expect(session.sendPaths.single,'/api/v1/mail/send');
+  expect(session.sentPayload?['text'],'Xin chào anh!');
+  expect(session.sentPayload?.containsKey('signature'),false);
  });
+
 }
