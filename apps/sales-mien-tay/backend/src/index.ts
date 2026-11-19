@@ -202,6 +202,8 @@ export default {
       if(catalogImportResponse)return catalogImportResponse;
       const catalogResponse=await catalogRoutes(req,env,user,url);
       if(catalogResponse)return catalogResponse;
+      const localResponse=await localRouteRoutes(req,env,user,url);
+      if(localResponse)return localResponse;
       const localMonthResponse=await localMonthlyRoutes(req,env,user,url);
       if(localMonthResponse)return localMonthResponse;
       const monthlyResponse=await monthlyPlanRoutes(req,env,user,url);
