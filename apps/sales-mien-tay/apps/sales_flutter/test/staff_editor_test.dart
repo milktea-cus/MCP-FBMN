@@ -28,7 +28,7 @@ void main(){
   final fields=find.byType(TextField);
   await tester.enterText(fields.at(0),'Sales Test');
   await tester.enterText(fields.at(1),'sales@example.invalid');
-  await tester.enterText(fields.at(2),'TEST-001');
+  await tester.enterText(fields.at(3),'TEST-001');
   await tester.ensureVisible(find.text('Địa bàn phụ trách riêng'));await tester.tap(find.text('Địa bàn phụ trách riêng'));await tester.pumpAndSettle();
   await tester.ensureVisible(find.text('Tiền Giang'));await tester.tap(find.text('Tiền Giang'));await tester.pumpAndSettle();
   await tester.ensureVisible(find.text('Toàn tỉnh').first);await tester.tap(find.text('Toàn tỉnh').first);await tester.pumpAndSettle();
