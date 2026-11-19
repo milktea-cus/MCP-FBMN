@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
@@ -91,12 +92,20 @@ class _StaffMailPageState extends State<StaffMailPage>{
  Future<void> downloadAttachment(Map<String,dynamic> item)async{
   if(selectedThread==null||selectedMail?['id']==null||item['id']==null)return;
   try{
-   final result=await widget.session.get(
-    '/api/v1/mail/threads/$selectedThread/emails/${selectedMail!['id']}/attachments/${item['id']}');
-   final raw=result['url']?.toString()??'';
-   final uri=Uri.tryParse(raw);
-   if(uri==null||uri.scheme!='https')throw StateError('Đường dẫn tệp không hợp lệ');
-   if(!await launchUrl(uri,mode:LaunchMode.externalApplication))throw StateError('Không mở được tệp');
+   final path='/api/v1/mail/threads/$selectedThread/emails/${selectedMail!['id']}/attachments/${item['id']}';
+   if(kIsWeb){
+    // Open directly from the click gesture to avoid popup blockers.
+    final uri=widget.session.uri('$path/download');
+    if(!await launchUrl(uri,mode:LaunchMode.platformDefault))
+     throw StateError('Trình duyệt chặn cửa sổ tải tệp');
+   }else{
+    // Native external browsers don't carry the app's encrypted session cookie.
+    final result=await widget.session.get(path);
+    final uri=Uri.tryParse(result['url']?.toString()??'');
+    if(uri==null||uri.scheme!='https')throw StateError('Đường dẫn tệp không hợp lệ');
+    if(!await launchUrl(uri,mode:LaunchMode.externalApplication))
+     throw StateError('Không mở được tệp');
+   }
   }catch(e){if(mounted)setState(()=>error='Không tải được tệp: $e');}
  }
  Future<void> compose()async{
