@@ -17,7 +17,7 @@ class _StaffMailPageState extends State<StaffMailPage>{
  @override void initState(){super.initState();load();}
  Future<void> load({String folder='inbox'})async{
   if(!mounted)return;
-  setState((){busy=true;error=null;selectedFolder=folder;});
+  setState((){busy=true;error=null;selectedFolder=folder;selectedThread=null;selectedMail=null;});
   try{
    final me=await widget.session.get('/api/v1/mail/me');
    final result=await widget.session.get('/api/v1/mail/threads?folder=$folder');
@@ -146,10 +146,10 @@ class _MailComposerState extends State<_MailComposer>{
   setState((){busy=true;error=null;});
   try{
    if(widget.threadId!=null&&widget.emailId!=null){
-    await widget.session.post('/api/v1/mail/threads/${widget.threadId}/emails/${widget.emailId}/reply',{
+    await widget.session.postMail('/api/v1/mail/threads/${widget.threadId}/emails/${widget.emailId}/reply',{
       'request_id':requestId,'text':text.text.trim()});
    }else{
-    await widget.session.post('/api/v1/mail/send',{
+    await widget.session.postMail('/api/v1/mail/send',{
       'request_id':requestId,'to':to.text.trim(),
       'subject':subject.text.trim(),'text':text.text.trim()});
    }
