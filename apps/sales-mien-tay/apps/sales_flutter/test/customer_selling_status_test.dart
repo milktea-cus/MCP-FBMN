@@ -158,11 +158,15 @@ void main(){
     final session=OfflineSalesSession();
     final queue=OfflineQueue(session,'sales-1','rev-1',
       factory:newIdbFactoryMemory());
-    await queue.enqueue('/api/v1/customers/$customerId',{
-      'client_ref':'55555555-5555-4555-8555-555555555555',
-      'is_selling':true,'version':1,
-    },method:'PATCH');
-    await markCustomerPatchBlocked(queue);
+    // idb_shim uses asynchronous transactions; run them outside widget
+    // fake-async so IndexedDB setup cannot deadlock the test runner.
+    await tester.runAsync(() async{
+      await queue.enqueue('/api/v1/customers/$customerId',{
+        'client_ref':'55555555-5555-4555-8555-555555555555',
+        'is_selling':true,'version':1,
+      },method:'PATCH');
+      await markCustomerPatchBlocked(queue);
+    });
     expect(queue.pending.single['status'],'blocked');
     await tester.pumpWidget(MaterialApp(home:CustomerDetail(
       service:SellingService(),
