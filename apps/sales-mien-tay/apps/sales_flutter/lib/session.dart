@@ -137,6 +137,17 @@ class SalesSession {
       throw const ApiFailure(504,'Kết nối máy chủ quá chậm. Vui lòng thử lại.');
     }
   }
+  /// Sending mail can require two provider calls: draft creation, then send.
+  /// Keep the business API's existing 15-second timeout unchanged.
+  Future<Map<String,dynamic>> postMail(String path,Map<String,dynamic> data) async {
+    if(!path.startsWith('/api/v1/mail/'))throw ArgumentError('Invalid mail path');
+    try{
+      return decodeApi(await http.post(uri(path),headers:sessionHeaders(cookie),
+        body:jsonEncode(data)).timeout(const Duration(seconds:60)));
+    } on TimeoutException {
+      throw const ApiFailure(504,'Chưa xác nhận gửi thư thành công; không soạn lại trước khi kiểm tra thư nháp.');
+    }
+  }
   Future<void> requestOtp(String email) async { await post('/api/auth/otp/request',{'email':email}); }
   Future<void> login(String email,String password,{bool otp=false}) async {
     late final http.Response r;
