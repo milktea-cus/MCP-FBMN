@@ -58,7 +58,7 @@
 
 **Lưu ý loại trừ:** Không lấy điểm bán điện thoại, vật liệu, dịch vụ tàu và hồ sơ đăng ký ngành nghề làm VPP nếu chưa có bằng chứng mặt hàng.
 
-## P1 — Hai điểm nguồn công khai cần kiểm nghiệp vụ bổ sung
+## P1 — Ba điểm nguồn công khai cần kiểm nghiệp vụ bổ sung
 
 - `Văn phòng phẩm - Sửa chữa vi tính Đại Quang` tại ấp Thới Bình/Cờ Đỏ cũ: tên có VPP nhưng danh mục Maps liên quan camera, chưa xác minh còn bán đồ học sinh.
 - `Văn phòng phẩm Cường Quyên` tại Đường số 12/Cờ Đỏ cũ: Maps ghi Book store nhưng chưa có số điện thoại, chưa kiểm hàng thực tế.
