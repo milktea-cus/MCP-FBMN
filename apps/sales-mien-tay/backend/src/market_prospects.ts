@@ -66,9 +66,7 @@ export async function marketProspectRoutes(req:Request,env:AuthEnv,actor:Actor,u
       (SELECT count(*)::int FROM public.field_market_prospect_photos f WHERE f.prospect_id=p.id AND f.status='ready') AS photo_count
     FROM public.field_prospects p LEFT JOIN public.schools s ON s.id=p.school_id
     WHERE p.province IS NOT NULL AND
-     (${actor.admin} OR p.owner_sub=${actor.sub} OR
-       (${actor.manager} AND public.sales_staff_in_subtree(${actor.sub},p.owner_sub)))
-     AND public.sales_can_access(${actor.sub},p.owner_sub,p.province,p.district)
+     public.sales_market_prospect_allowed(${actor.sub},p.id)
      AND (${province}='' OR p.province=${province})
      AND (${district}='' OR p.district=${district})
      AND (${status}='' OR p.status=${status})
@@ -94,9 +92,7 @@ export async function marketProspectRoutes(req:Request,env:AuthEnv,actor:Actor,u
       ORDER BY c.name LIMIT 20`,
    db`SELECT p.id,p.name,p.province,p.district,p.status,p.converted_customer_id
       FROM public.field_prospects p WHERE p.tax_code=${value} AND p.province IS NOT NULL
-      AND (${actor.admin} OR p.owner_sub=${actor.sub} OR
-        (${actor.manager} AND public.sales_staff_in_subtree(${actor.sub},p.owner_sub)))
-      AND public.sales_can_access(${actor.sub},p.owner_sub,p.province,p.district)
+      AND public.sales_market_prospect_allowed(${actor.sub},p.id)
       ORDER BY p.created_at DESC LIMIT 20`
   ]);
   return respond({customers,prospects});
@@ -131,9 +127,7 @@ export async function marketProspectRoutes(req:Request,env:AuthEnv,actor:Actor,u
  const permitted=async()=>{
   const rows=await db`SELECT p.id,p.owner_sub,p.province,p.district FROM public.field_prospects p
     WHERE p.id=${id}::uuid AND p.province IS NOT NULL AND
-     (${actor.admin} OR p.owner_sub=${actor.sub} OR
-      (${actor.manager} AND public.sales_staff_in_subtree(${actor.sub},p.owner_sub)))
-     AND public.sales_can_access(${actor.sub},p.owner_sub,p.province,p.district)`;
+     public.sales_market_prospect_allowed(${actor.sub},p.id)`;
   return rows.length>0;
  };
  if(req.method==='GET'&&action===''){
