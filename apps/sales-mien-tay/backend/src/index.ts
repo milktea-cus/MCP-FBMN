@@ -17,6 +17,7 @@ import {customerWorkRoutes} from './customer_work';
 import {workSessionRoutes} from './work_sessions';
 import {tripRoutes} from './trips';
 import {areaVisitRoutes} from './area_visits';
+import {marketProspectRoutes} from './market_prospects';
 import {areaVisitMediaRoutes} from './area_visit_media';
 import {routeTemplateRoutes} from './route_templates';
 import {catalogRoutes} from './catalog';
@@ -224,6 +225,8 @@ export default {
       if(dayRouteResponse)return dayRouteResponse;
       const areaPhotoResponse=await areaVisitMediaRoutes(req,env,user,url);
       if(areaPhotoResponse)return areaPhotoResponse;
+      const prospectResponse=await marketProspectRoutes(req,env,user,url);
+      if(prospectResponse)return prospectResponse;
       const areaVisitResponse=await areaVisitRoutes(req,env,user,url);
       if(areaVisitResponse)return areaVisitResponse;
       const surveyResponse=await surveyRoutes(req,env,user,url);
