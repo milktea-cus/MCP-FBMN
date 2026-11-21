@@ -62,7 +62,7 @@ export async function marketProspectRoutes(req:Request,env:AuthEnv,actor:Actor,u
       p.phone,p.tax_code,p.note,p.source_kind,p.school_id,p.status,p.converted_customer_id,
       p.last_visit_at,p.last_visit_latitude,p.last_visit_longitude,p.version,p.created_at,
       s.name AS school_name,
-      (SELECT count(*)::int FROM public.field_prospect_visits v WHERE v.prospect_id=p.id) AS visits,
+      (SELECT count(*)::int FROM public.field_prospect_visits v WHERE v.prospect_id=p.id) + CASE WHEN p.area_visit_id IS NULL THEN 0 ELSE 1 END AS visits,
       (SELECT count(*)::int FROM public.field_market_prospect_photos f WHERE f.prospect_id=p.id AND f.status='ready') AS photo_count
     FROM public.field_prospects p LEFT JOIN public.schools s ON s.id=p.school_id
     WHERE p.province IS NOT NULL AND
@@ -139,15 +139,38 @@ export async function marketProspectRoutes(req:Request,env:AuthEnv,actor:Actor,u
  if(req.method==='GET'&&action===''){
   if(!await permitted())return fail('Không tìm thấy điểm bán hoặc không có quyền',404);
   const rows=await db`SELECT p.*,
-    (SELECT count(*)::int FROM public.field_prospect_visits v WHERE v.prospect_id=p.id) AS visit_count
+    (SELECT count(*)::int FROM public.field_prospect_visits v WHERE v.prospect_id=p.id) + CASE WHEN p.area_visit_id IS NULL THEN 0 ELSE 1 END AS visit_count
     FROM public.field_prospects p WHERE p.id=${id}::uuid`;
   return respond({item:rows[0]});
  }
+ if(req.method==='PATCH'&&action===''){
+  let b:Record<string,unknown>;try{b=await body(req);}catch{return fail('JSON không hợp lệ');}
+  const name=clean(b.name,240),address=clean(b.address_line,500);
+  const code=tax(b.tax_code),phone=clean(b.phone,20);
+  const category=b.category??'khac',note=clean(b.note,2000)??'';
+  if(!Number.isInteger(b.version)||Number(b.version)<1||!name||name.length<2||
+   !address||address.length<3||code===undefined||
+   !['tap_hoa','sieu_thi','dai_ly','npp','nha_sach','van_phong_pham','cua_hang','khac'].includes(String(category))||
+   (b.phone!==null&&b.phone!==undefined&&b.phone!==''&&(!phone||phone.length<8)))
+   return fail('Thông tin chỉnh sửa không hợp lệ');
+  try{
+   const rows=await db`SELECT public.sales_market_prospect_update(
+    ${actor.sub},${id}::uuid,${Number(b.version)},${name},${address},
+    ${String(category)},${phone||null},${code??null},${note}) AS item`;
+   return respond({item:rows[0]?.item});
+  }catch(e){return failure(e);}
+ }
  if(req.method==='GET'&&action==='visits'){
   if(!await permitted())return fail('Không tìm thấy điểm bán hoặc không có quyền',404);
-  const rows=await db`SELECT id,owner_sub,checked_at,latitude,longitude,accuracy_m,note
-    FROM public.field_prospect_visits WHERE prospect_id=${id}::uuid
-    ORDER BY checked_at DESC LIMIT 100`;
+  const rows=await db`SELECT x.id,x.owner_sub,x.checked_at,x.latitude,x.longitude,x.accuracy_m,x.note
+    FROM (
+     SELECT id,owner_sub,checked_at,latitude,longitude,accuracy_m,note
+      FROM public.field_prospect_visits WHERE prospect_id=${id}::uuid
+     UNION ALL
+     SELECT a.id,a.owner_sub,a.checkin_at,a.latitude,a.longitude,a.accuracy_m,a.note
+      FROM public.field_area_visits a
+      JOIN public.field_prospects p ON p.area_visit_id=a.id WHERE p.id=${id}::uuid
+    ) x ORDER BY x.checked_at DESC LIMIT 100`;
   return respond({items:rows});
  }
  if(req.method==='POST'&&action==='visits'){
