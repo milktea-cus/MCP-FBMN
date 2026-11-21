@@ -1,7 +1,27 @@
 # MCP-FBMN — KIỂM KÊ 13 TỈNH CŨ: KẾT THÚC VÒNG 1, BẮT ĐẦU VÒNG 2
 Ngày: **21/11/2026**. Repository `milktea-cus/MCP-FBMN` branch `main`; Neon production project `raspy-bar-51596929`, branch `br-super-mountain-bdije4mj`.
 
-## Cập nhật migration 156 — 21/11/2026 (snapshot hiện hành)
+## Cập nhật migration 157 — 21/11/2026 (snapshot hiện hành)
+
+| Chỉ số | Neon production sau khi chạy migration 157 |
+|---|---:|
+| Lead nghiên cứu `field_prospects` | **724** (+1 so với 156) |
+| Địa bàn cũ có lead | **132/134** (không đổi) |
+| Địa bàn còn 1–2 lead | **31** (giảm từ 32) |
+| Lead có URL HTTPS và research source key | **724/724** cho mỗi tiêu chí |
+| `status=new`, chưa ghé | **724/724** |
+| Có dấu lượt ghé / GPS chuyến ghé | **0** |
+| Lead có số điện thoại | **531** |
+| Trùng `research_source_key` | **0** |
+
+- Migration [`157_old_provinces_round02_p1_thoi_lai_2026.sql`](../backend/migrations/157_old_provinces_round02_p1_thoi_lai_2026.sql), commit [`e1f8083`](https://github.com/milktea-cus/MCP-FBMN/commit/e1f80831e51507bcc1246db3b327541a3590ea9a): ghi **1 lead nghiên cứu online** `VPP Cô Thảo`, `3H54+QVF, ĐT922, Huyện Thới Lai, Cần Thơ cũ`, SĐT `0917432459`, source key `gmap:ChIJrVQLKQCRoDERsXJin0GU688`. Source: https://www.google.com/maps/search/?api=1&query=VPP%20Co%20Thao%20Thoi%20Lai&query_place_id=ChIJrVQLKQCRoDERsXJin0GU688 . Nguồn Maps ghi tên VPP nhưng phân loại `Store`, **chưa được Sales xác minh mặt hàng VPP, địa điểm hoặc hoạt động năm 2026**. Không thêm GPS, visit, khách chính, trạng thái đã bán.
+- Sau đối soát Neon, chạy lại chính SQL migration 157 trả **0 dòng**, xác nhận idempotent; 724/724 research lead vẫn trạng thái `new` và không có dấu ghé.
+- **Cảnh báo chống trùng liên địa bàn:** `Nhà Sách-Photocopy-VPP - Trường Long` tại `1087 ĐT926, Trường Long, Huyện Phong Điền cũ`, Maps ID `ChIJRQi6ZfqPoDERBM8Qwhr6zkY`, có số công khai `0967377514`. Số này **đã nằm trên lead `Nhà sách Hưng Thạnh` ở Quận Cái Răng cũ** (`gmap:ChIJVRCgQwCJoDERp0s309Py8jo`), chưa xác định có phải cùng chủ, số bị gán sai, hay trùng thông tin. **Không nhập điểm Trường Long**, không bỏ số để vượt chống trùng; cần gọi/xác minh trước khi quyết định.
+- Các ứng viên `Nhà sách Thứ Hai - Công ty B.H` và `Văn phòng phẩm - Coffee - Nước ép Huỳnh Châu` của Huyện Thới Lai đã có trong `field_prospects`, **không nhập lặp**.
+- **Hai huyện P0 trắng vẫn là `Huyện Long Mỹ/Hậu Giang cũ` và `Huyện Vĩnh Lợi/Bạc Liêu cũ`**. Điểm `Nhà sách Long Mỹ` xuất hiện trên nguồn thuộc **thị xã Long Mỹ cũ**; không gán sang huyện. Giữ cảnh báo khách chính `NS Thể Minh` gán sai địa bàn, không tự sửa khách chính vì liên quan phân quyền/tuyến Sales.
+- Lô 157 chỉ thay đổi dữ liệu và tài liệu: **không deploy lại Worker/Vercel**; CI commit tài liệu được kiểm riêng, không được coi là nghiệm thu API/Auth/PWA/Android hay GPS thiết bị thực.
+
+## Cập nhật migration 156 — 21/11/2026 (snapshot lịch sử trước 157)
 
 | Chỉ số | Neon production |
 |---|---:|
