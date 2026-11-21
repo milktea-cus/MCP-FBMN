@@ -1,0 +1,33 @@
+{
+  "batch": "2026-11-21-ben-tre-mocay-stores-sweep-03",
+  "province_old": "Bến Tre",
+  "date": "2026-11-21",
+  "outlets": [
+    {
+      "district": "Huyện Mỏ Cày Nam",
+      "name": "Nhà sách Thanh Thủy",
+      "address_line": "Khu vực trung tâm thị trấn Mỏ Cày cũ, huyện Mỏ Cày Nam (plus code 38X2+XGP), gần Trường Tạ Thị Kiều",
+      "category": "nha_sach",
+      "phone": "02753848881",
+      "tax_code": null,
+      "source_key": "gmap:ChIJDQBwOycPoDERqyrQZ10YHpM",
+      "source_url": "https://www.google.com/maps/search/?api=1&query=Nh%C3%A0%20s%C3%A1ch%20Thanh%20Th%E1%BB%A7y%20M%E1%BB%8F%20C%C3%A0y&query_place_id=ChIJDQBwOycPoDERqyrQZ10YHpM",
+      "confidence": "mapped_bookstore",
+      "evidence": "Google Maps book store with phone and distinct Plus Code",
+      "verification_note": "Chưa có số nhà theo địa chỉ hành chính cũ; có thể gọi điện kiểm tra trước khi ghé."
+    },
+    {
+      "district": "Huyện Mỏ Cày Nam",
+      "name": "Nhà sách Thành Đạt",
+      "address_line": "241 đường Bùi Quang Chiêu, khu phố 2, thị trấn Mỏ Cày cũ, huyện Mỏ Cày Nam",
+      "category": "nha_sach",
+      "phone": "0338217917",
+      "tax_code": null,
+      "source_key": "gmap:ChIJ42cYIwAJoDEROknZoFa2cUE",
+      "source_url": "https://www.google.com/maps/search/?api=1&query=Nh%C3%A0%20s%C3%A1ch%20Th%C3%A0nh%20%C4%90%E1%BA%A1t%20241%20B%C3%B9i%20Quang%20Chi%C3%AAu%20M%E1%BB%8F%20C%C3%A0y&query_place_id=ChIJ42cYIwAJoDEROknZoFa2cUE",
+      "confidence": "mapped_bookstore",
+      "evidence": "Google Maps book store with distinct address and phone",
+      "verification_note": "Địa danh thị trấn/huyện theo đơn vị cũ cần đối chiếu khi Sales đi thực địa."
+    }
+  ]
+}
