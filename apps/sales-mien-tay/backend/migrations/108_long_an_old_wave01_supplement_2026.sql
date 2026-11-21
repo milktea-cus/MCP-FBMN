@@ -1,0 +1,27 @@
+-- 108 | 2026-11-21 | Long An old wave 1 supplemental 7 source-backed candidates.
+-- Explicitly keep retail status unknown for wholesale/office listings. No fictional GPS/visits.
+WITH src AS(
+ SELECT x.*,md5('fbmn:longan-old:wave1-supplement:'||x.source_key) dg
+ FROM jsonb_to_recordset('[{"district":"Huyện Đức Hòa","name":"Nhà sách Thanh Kiều","address_line":"468 ĐT824, xã Mỹ Hạnh Nam cũ, huyện Đức Hòa","category":"nha_sach","phone":"0933680246","tax_code":null,"source_key":"gmap:ChIJ5ZSu83zVCjERbIbF0vWj9Oo","source_url":"https://www.google.com/maps/search/?api=1&query=Nh%C3%A0%20s%C3%A1ch%20Thanh%20Ki%E1%BB%81u%20M%E1%BB%B9%20H%E1%BA%A1nh&query_place_id=ChIJ5ZSu83zVCjERbIbF0vWj9Oo","verification_note":"Nhà sách/VPP có địa chỉ Maps. Chưa Sales ghé."},{"district":"Huyện Đức Hòa","name":"Nhà sách Ngọc Nhi","address_line":"Khu vực Đức Hòa Hạ cũ, huyện Đức Hòa (Plus Code RF88+WM5)","category":"nha_sach","phone":"0934580976","tax_code":null,"source_key":"gmap:ChIJ6ymhr2DVCjERD1JzBHk7ZwY","source_url":"https://www.google.com/maps/search/?api=1&query=Nh%C3%A0%20s%C3%A1ch%20Ng%E1%BB%8Dc%20Nhi%20%C4%90%E1%BB%A9c%20H%C3%B2a&query_place_id=ChIJ6ymhr2DVCjERD1JzBHk7ZwY","verification_note":"Chưa có số nhà, cần đối chiếu tại chỗ."},{"district":"Huyện Cần Giuộc","name":"VPP Nhà Yên","address_line":"185 Nguyễn An Ninh, thị trấn Cần Giuộc cũ","category":"van_phong_pham","phone":null,"tax_code":null,"source_key":"gmap:ChIJZz9qGwA3dTERX-GFlL2Ur1g","source_url":"https://www.google.com/maps/search/?api=1&query=VPP%20Nh%C3%A0%20Y%C3%AAn%20C%E1%BA%A7n%20Giu%E1%BB%99c&query_place_id=ChIJZz9qGwA3dTERX-GFlL2Ur1g","verification_note":"Nguồn Maps xếp loại quà tặng; tên VPP, cần xác minh có bán hàng VPP."},{"district":"Huyện Cần Giuộc","name":"VPP Cần Giuộc (Tân Kim)","address_line":"Tổ 1, ấp Kim Định, xã Tân Kim cũ, huyện Cần Giuộc","category":"van_phong_pham","phone":"0984447468","tax_code":null,"source_key":"gmap:ChIJzbK-i_4xdTERgBWGZx50SP8","source_url":"https://www.google.com/maps/search/?api=1&query=V%C4%83n%20ph%C3%B2ng%20ph%E1%BA%A9m%20C%E1%BA%A7n%20Giu%E1%BB%99c%20T%C3%A2n%20Kim&query_place_id=ChIJzbK-i_4xdTERgBWGZx50SP8","verification_note":"Nguồn xếp loại văn phòng doanh nghiệp, cần xác minh quầy bán lẻ."},{"district":"Huyện Cần Giuộc","name":"VPP Hoàng Long","address_line":"285 Quốc lộ 50, khu phố 3, thị trấn Cần Giuộc cũ","category":"van_phong_pham","phone":"02723825345","tax_code":null,"source_key":"gmap:ChIJhfO87Nk2dTERp3McBCT-q88","source_url":"https://www.google.com/maps/search/?api=1&query=VPP%20Ho%C3%A0ng%20Long%20C%E1%BA%A7n%20Giu%E1%BB%99c&query_place_id=ChIJhfO87Nk2dTERp3McBCT-q88","verification_note":"Nhà sản xuất/cung ứng VPP, chưa xác minh bán lẻ."},{"district":"Huyện Cần Đước","name":"Công ty VPP Liên Hương","address_line":"56 ấp 1, xã Long Khê cũ, huyện Cần Đước","category":"van_phong_pham","phone":null,"tax_code":"1101856127","source_key":"tax:vpp-lien-huong-1101856127","source_url":"https://infodoanhnghiep.com/thong-tin/CONG-TY-TNHH-VAN-PHONG-PHAM-LIEN-HUONG-56127.html","verification_note":"Hồ sơ pháp nhân VPP, chưa xác minh có cửa hàng bán lẻ."},{"district":"Huyện Cần Đước","name":"Cửa hàng Sách - VPP Phạm Công Bình","address_line":"Số 59, thị trấn Cần Đước cũ (chưa rõ tên đường)","category":"van_phong_pham","phone":null,"tax_code":null,"source_key":"web:vpp-pham-cong-binh-59-canduoc","source_url":"https://vietnam.contact.page/locations/vn-vi10-long-an/listings?page=13","verification_note":"Danh bạ xếp bán buôn sách/VPP; chưa xác minh hoạt động bán lẻ hoặc số nhà đủ."}]'::jsonb) AS x(
+ district text,name text,address_line text,category text,phone text,tax_code text,
+ source_key text,source_url text,verification_note text)
+), ins AS(
+ INSERT INTO public.field_prospects(
+ id,area_visit_id,owner_sub,name,address_line,province,district,category,phone,tax_code,
+ note,status,source_kind,research_source_key,research_source_url,research_batch)
+ SELECT
+ (substr(s.dg,1,8)||'-'||substr(s.dg,9,4)||'-5'||substr(s.dg,14,3)||'-8'||substr(s.dg,18,3)||'-'||substr(s.dg,21,12))::uuid,
+ NULL,'ef943de4-18f7-49ef-8340-eefb18855534',
+ s.name,s.address_line,'Long An',s.district,s.category,s.phone,s.tax_code,
+ 'Nguồn nghiên cứu 21/11/2026; Chưa ghé; GPS chưa xác minh. '||s.verification_note||' Nguồn: '||s.source_url,
+ 'new','manual',s.source_key,s.source_url,'2026-11-21-long-an-old-wave-01-supplement'
+ FROM src s WHERE s.district IN ('Huyện Đức Hòa','Huyện Cần Giuộc','Huyện Cần Đước')
+ AND s.source_url LIKE 'https://%'
+ AND NOT EXISTS(SELECT 1 FROM public.customers c WHERE c.province='Long An' AND c.district=s.district AND lower(btrim(c.name))=lower(btrim(s.name)))
+ AND NOT EXISTS(SELECT 1 FROM public.field_prospects p WHERE p.province='Long An' AND p.district=s.district AND
+ (p.research_source_key=s.source_key OR (lower(btrim(p.name))=lower(btrim(s.name)) AND lower(btrim(p.address_line))=lower(btrim(s.address_line)))))
+ ON CONFLICT(research_source_key) WHERE research_source_key IS NOT NULL DO NOTHING
+ RETURNING district,phone,tax_code
+)
+SELECT district,count(*)::int inserted,count(*) FILTER(WHERE phone IS NOT NULL)::int phones,
+ count(*) FILTER(WHERE tax_code IS NOT NULL)::int taxes FROM ins GROUP BY district ORDER BY district;
