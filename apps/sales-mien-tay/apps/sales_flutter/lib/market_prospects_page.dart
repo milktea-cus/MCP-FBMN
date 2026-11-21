@@ -505,40 +505,84 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
  @override Widget build(BuildContext context){
   final all=[...pendingNew,...items.where((i)=>!pendingNew.any((p)=>p['id']==i['id']))];
   return Column(children:[
-   Padding(padding:const EdgeInsets.fromLTRB(12,12,12,6),child:Column(
+   Padding(padding:const EdgeInsets.fromLTRB(12,8,12,6),child:Column(
     crossAxisAlignment:CrossAxisAlignment.start,children:[
-    Row(children:[Expanded(child:Text('Điểm bán tiềm năng',style:Theme.of(context).textTheme.titleLarge)),
-     IconButton(tooltip:'Làm mới',onPressed:loading?null:()=>_load(),
-      icon:const Icon(Icons.refresh_outlined)),
-     IconButton(tooltip:'Thêm điểm bán',onPressed:_create,icon:const Icon(Icons.add_circle_outline)),
+    // Search and high-contrast actions share one 44px touch row.
+    Row(children:[
+     Expanded(child:SizedBox(height:44,child:TextField(
+      controller:search,
+      onChanged:(_){debounce?.cancel();debounce=Timer(
+       const Duration(milliseconds:350),(){if(mounted)unawaited(_load());});},
+      decoration:const InputDecoration(
+       hintText:'Tìm điểm bán',isDense:true,
+       contentPadding:EdgeInsets.symmetric(horizontal:10,vertical:10),
+       prefixIcon:Icon(Icons.search_outlined,size:20),
+       prefixIconConstraints:BoxConstraints(minWidth:38)),
+     ))),
+     const SizedBox(width:6),
+     SizedBox(width:44,height:44,child:IconButton.filledTonal(
+      tooltip:'Làm mới danh sách',onPressed:loading?null:()=>_load(),
+      icon:const Icon(Icons.refresh_rounded,size:22))),
+     const SizedBox(width:6),
+     SizedBox(width:44,height:44,child:IconButton.filled(
+      tooltip:'Thêm điểm bán',onPressed:_create,
+      icon:const Icon(Icons.add_rounded,size:24))),
     ]),
-    TextField(controller:search,onChanged:(_){debounce?.cancel();debounce=Timer(
-     const Duration(milliseconds:350),(){if(mounted)unawaited(_load());});},
-     decoration:const InputDecoration(labelText:'Tìm theo tên điểm bán',
-      isDense:true,prefixIcon:Icon(Icons.search_outlined))),
     const SizedBox(height:8),
+    // All three searchable filters remain on one row on narrow phones.
     Row(children:[
      Expanded(child:DropdownButtonFormField<String>(
       key:ValueKey('filter-province:$province'),
-      initialValue:province,isExpanded:true,decoration:const InputDecoration(labelText:'Tỉnh cũ',isDense:true),
+      initialValue:province,isExpanded:true,
+      style:Theme.of(context).textTheme.bodySmall?.copyWith(
+       color:Theme.of(context).colorScheme.onSurface),
+      icon:const Icon(Icons.expand_more,size:18),
+      decoration:const InputDecoration(
+       labelText:'Tỉnh cũ',isDense:true,
+       contentPadding:EdgeInsets.symmetric(horizontal:8,vertical:9)),
       items:[const DropdownMenuItem(value:'',child:Text('Tất cả')),
-       for(final p in widget.regions.provinces)DropdownMenuItem(value:p,child:Text(p,overflow:TextOverflow.ellipsis))],
-      onChanged:widget.initialSchool!=null?null:(v){setState((){province=v??'';district='';});unawaited(_load());})),
-     const SizedBox(width:8),
+       for(final p in widget.regions.provinces)DropdownMenuItem(value:p,
+        child:Text(p,maxLines:1,overflow:TextOverflow.ellipsis))],
+      onChanged:widget.initialSchool!=null?null:(v){
+       setState((){province=v??'';district='';});unawaited(_load());
+      })),
+     const SizedBox(width:6),
      Expanded(child:DropdownButtonFormField<String>(
       key:ValueKey('filter-district:$province:$district'),
-      initialValue:district,isExpanded:true,decoration:const InputDecoration(labelText:'Huyện cũ',isDense:true),
+      initialValue:district,isExpanded:true,
+      style:Theme.of(context).textTheme.bodySmall?.copyWith(
+       color:Theme.of(context).colorScheme.onSurface),
+      icon:const Icon(Icons.expand_more,size:18),
+      decoration:const InputDecoration(
+       labelText:'Huyện cũ',isDense:true,
+       contentPadding:EdgeInsets.symmetric(horizontal:8,vertical:9)),
       items:[const DropdownMenuItem(value:'',child:Text('Tất cả')),
        for(final d in widget.regions.districts[province]??<String>[])
-        DropdownMenuItem(value:d,child:Text(d,overflow:TextOverflow.ellipsis))],
-      onChanged:widget.initialSchool!=null||province.isEmpty?null:(v){setState(()=>district=v??'');unawaited(_load());})),
+        DropdownMenuItem(value:d,
+         child:Text(d,maxLines:1,overflow:TextOverflow.ellipsis))],
+      onChanged:widget.initialSchool!=null||province.isEmpty?null:(v){
+       setState(()=>district=v??'');unawaited(_load());
+      })),
+     const SizedBox(width:6),
+     Expanded(child:DropdownButtonFormField<String>(
+      key:ValueKey('filter-status:$status'),
+      initialValue:status,isExpanded:true,
+      style:Theme.of(context).textTheme.bodySmall?.copyWith(
+       color:Theme.of(context).colorScheme.onSurface),
+      icon:const Icon(Icons.expand_more,size:18),
+      decoration:const InputDecoration(
+       labelText:'Trạng thái',isDense:true,
+       contentPadding:EdgeInsets.symmetric(horizontal:8,vertical:9)),
+      items:const [
+       DropdownMenuItem(value:'',child:Text('Tất cả',maxLines:1)),
+       DropdownMenuItem(value:'new',child:Text('Đang tìm',maxLines:1)),
+       DropdownMenuItem(value:'converted',child:Text('Đã chuyển',maxLines:1)),
+       DropdownMenuItem(value:'closed',child:Text('Không phù hợp',
+        maxLines:1,overflow:TextOverflow.ellipsis)),
+      ],
+      onChanged:(v){setState(()=>status=v??'');unawaited(_load());})),
     ]),
     const SizedBox(height:6),
-    Wrap(spacing:8,children:[
-     for(final v in <String>['','new','converted','closed'])
-      ChoiceChip(label:Text(switch(v){'new'=>'Đang tìm','converted'=>'Đã chuyển','closed'=>'Không phù hợp',_=>'Tất cả'}),
-       selected:status==v,onSelected:(_){setState(()=>status=v);unawaited(_load());}),
-    ]),
     Text(offline?'Dữ liệu đã lưu máy · cần mạng để cập nhật':'$total điểm bán phù hợp',
       style:Theme.of(context).textTheme.bodySmall),
     if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
