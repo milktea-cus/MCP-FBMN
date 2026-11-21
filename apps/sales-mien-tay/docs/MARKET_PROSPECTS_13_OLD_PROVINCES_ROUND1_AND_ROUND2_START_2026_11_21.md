@@ -1,7 +1,40 @@
 # MCP-FBMN — KIỂM KÊ 13 TỈNH CŨ: KẾT THÚC VÒNG 1, BẮT ĐẦU VÒNG 2
 Ngày: **21/11/2026**. Repository `milktea-cus/MCP-FBMN` branch `main`; Neon production project `raspy-bar-51596929`, branch `br-super-mountain-bdije4mj`.
 
-## P0/P1 — migration 155 đối soát 21/11/2026 (snapshot mới nhất)
+## Cập nhật migration 156 — 21/11/2026 (snapshot hiện hành)
+
+| Chỉ số | Neon production |
+|---|---:|
+| Lead online nghiên cứu | **723** |
+| Địa bàn cũ có lead | **132/134** |
+| Địa bàn có 1–2 lead | **32** (giảm từ 36 đầu lượt) |
+| URL HTTPS và research key | **723/723**; **723/723** |
+| Trạng thái chưa ghé `new` | **723** |
+| Lượt ghé hoặc GPS ghi vào lead | **0** |
+| Có số điện thoại | **530** |
+
+- Migration [`156_old_provinces_round02_p1_chau_thanh_o_mon_thot_not_2026.sql`](../backend/migrations/156_old_provinces_round02_p1_chau_thanh_o_mon_thot_not_2026.sql), commit [`fb5db87`](https://github.com/milktea-cus/MCP-FBMN/commit/fb5db87d93e5ea73914399f8aee765d433030e39): thêm **4** lead chưa ghé gồm VPP Song Di tại **Huyện Châu Thành/Hậu Giang cũ**, VPP Trí Tuệ + Minh Lợi tại **Quận Ô Môn cũ**, Nhà sách Xuân Châu tại **Quận Thốt Nốt cũ**. Nguồn Google Maps, chưa xác minh thực địa.
+- Tổng lượt rà này: migrations 155 + 156 = **15 lead mới**, thêm huyện Kiên Hải vào danh sách địa bàn có lead. Còn **Huyện Long Mỹ/Hậu Giang cũ** và **Huyện Vĩnh Lợi/Bạc Liêu cũ** chưa có lead đủ chứng cứ; không gán doanh nghiệp bán buôn/cửa hàng ngoài huyện thành VPP bán lẻ.
+- Nguồn địa giới `ấp Phú Hòa` thuộc `xã Đông Phú`, **Huyện Châu Thành/Hậu Giang cũ**: https://thuvienphapluat.vn/van-ban/Bo-may-hanh-chinh/De-an-02-DA-UBND-2024-thanh-lap-thi-tran-Dong-Phu-thuoc-huyen-Chau-Thanh-Hau-Giang-640934.aspx.
+- Đã loại trùng `Nhà sách Minh Thư` ĐT925/Châu Thành Hậu Giang vì Maps ID `ChIJEwGuv7RhoDER8p_t9-pBiOU` đã nằm trong `field_prospects`. Không nhầm với lead `Nhà sách Minh Thư` tại Cờ Đỏ, vốn có cảnh báo sai ánh xạ tên với `Nhà sách Nhuận Điền`.
+- Kiểm lại migration 156: chạy lại thêm **0** bản ghi; batch không trùng tên/điện thoại với khách chính theo SQL, không trùng source key, không có GPS/lượt ghé. Các điểm chỉ có tên và phân loại bản đồ vẫn chờ Sales xác minh loại hàng thực bán và tình trạng hoạt động.
+- CI workflow commit cuối, API/Auth, và máy thật cần kiểm riêng; không deploy Worker/Vercel chỉ vì đổi SQL/tài liệu.
+
+### 32 địa bàn còn ít lead
+
+| Tỉnh cũ | Huyện/thị xã/quận cũ (số lead) |
+|---|---|
+| An Giang | Huyện An Phú (2); Huyện Chợ Mới (2); Huyện Tri Tôn (2) |
+| Bạc Liêu | Huyện Phước Long (2); Huyện Đông Hải (1) |
+| Cà Mau | Huyện Ngọc Hiển (2); Huyện Năm Căn (2) |
+| Cần Thơ | Huyện Phong Điền (2); Huyện Thới Lai (2); Huyện Vĩnh Thạnh (2) |
+| Hậu Giang | Huyện Châu Thành (2); Huyện Châu Thành A (2); Huyện Phụng Hiệp (2); Huyện Vị Thủy (2); Thị xã Long Mỹ (2) |
+| Kiên Giang | Huyện An Minh (2); Huyện Châu Thành (1); Huyện Giang Thành (2); Huyện Kiên Hải (1); Huyện Kiên Lương (2); Huyện U Minh Thượng (2); Huyện Vĩnh Thuận (2) |
+| Sóc Trăng | Huyện Châu Thành (2); Huyện Cù Lao Dung (2); Huyện Mỹ Tú (2); Huyện Trần Đề (1); Thị xã Ngã Năm (2); Thị xã Vĩnh Châu (2) |
+| Trà Vinh | Huyện Duyên Hải (2) |
+| Đồng Tháp | Huyện Cao Lãnh (2); Huyện Châu Thành (2); Huyện Hồng Ngự (2) |
+
+## P0/P1 — migration 155 đối soát 21/11/2026 (snapshot lịch sử trước 156)
 
 | Chỉ số | Neon production |
 |---|---:|
