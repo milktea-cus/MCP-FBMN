@@ -1,5 +1,5 @@
 -- 153 | 2026-11-21 | Round 2 P1: sparse old districts; public research-only leads.
--- 20 sourced candidates in 10 old districts across 6 old provinces.
+-- 20 sourced candidates in 12 old districts across 6 old provinces.
 -- Verified against production customers + existing field_prospects by name/phone/source before commit.
 -- Google Maps classification is NOT proof of business operation, actual stationery inventory or retail status.
 -- Hồng Hà source proves historical distributor listing, NOT 2026 opening. All leads remain unvisited.
