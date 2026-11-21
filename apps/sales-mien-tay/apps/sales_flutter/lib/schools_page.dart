@@ -11,7 +11,8 @@ import 'session.dart';
 class SchoolDirectoryPage extends StatefulWidget {
   final OfflineQueue queue;
   final SalesSession session;
-  const SchoolDirectoryPage({super.key,required this.queue,required this.session});
+  final Future<void> Function(Map<String,dynamic> school)? onDevelop;
+  const SchoolDirectoryPage({super.key,required this.queue,required this.session,this.onDevelop});
 
   @override State<SchoolDirectoryPage> createState()=>_SchoolDirectoryPageState();
 }
@@ -243,6 +244,10 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
               child:Text('Vị trí chưa xác minh · Maps tìm theo địa chỉ',
                 style:Theme.of(context).textTheme.labelSmall)),
           ])),
+          if(widget.onDevelop!=null)IconButton(
+            tooltip:'Phát triển điểm bán từ trường học',
+            onPressed:()=>widget.onDevelop!(school),
+            icon:const Icon(Icons.add_business_outlined)),
           IconButton(
             tooltip:verified?'Chỉ đường bằng GPS đã xác minh':
               'Tìm trường trên Google Maps (chưa xác minh GPS)',
