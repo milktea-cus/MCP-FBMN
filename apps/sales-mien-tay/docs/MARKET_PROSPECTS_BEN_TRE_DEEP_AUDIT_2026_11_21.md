@@ -8,9 +8,10 @@ Cơ sở dữ liệu Neon `raspy-bar-51596929` / branch production. Dữ liệu 
 - Trước đợt rà sâu: **55** lead Bến Tre cũ.
 - Import `098`: **+14** điểm (mỗi huyện có thêm ít nhất 1 ứng viên).
 - Import `100`: **+6** điểm bản đồ địa phương (Ba Tri, Chợ Lách, Giồng Trôm, Thạnh Phú).
-- Sau: **75 điểm** (39 Nhà sách, 36 Văn phòng phẩm), 9/9 huyện cũ; **52** có điện thoại, **12** MST có nguồn; **75** có URL nguồn và khóa chống trùng riêng.
+- Import `101`: **+2** Nhà sách Thanh Thủy và Thành Đạt (Mỏ Cày Nam).
+- Sau: **77 điểm** (41 Nhà sách, 36 Văn phòng phẩm), 9/9 huyện cũ; **54** có điện thoại, **12** MST có nguồn; **77** có URL nguồn và khóa chống trùng riêng.
 - **14 Khách hàng chính Bến Tre** trong `public.customers` không đưa vào leads; toàn hệ thống `customers=55` và `schools=796` vẫn nguyên; Bến Tre `schools=64`.
-- `status='new'` cả **75**, `converted_customer_id=NULL`, không có `last_visit_at/GPS`; visits **0**, ảnh thực địa **0**; không tự cập nhật `is_selling`.
+- `status='new'` cả **77**, `converted_customer_id=NULL`, không có `last_visit_at/GPS`; visits **0**, ảnh thực địa **0**; không tự cập nhật `is_selling`.
 
 | Địa bàn cũ | Nhà sách | Văn phòng phẩm | Tổng điểm |
 |---|---:|---:|---:|
@@ -21,9 +22,9 @@ Cơ sở dữ liệu Neon `raspy-bar-51596929` / branch production. Dữ liệu 
 | Huyện Chợ Lách | 2 | 4 | 6 |
 | Huyện Giồng Trôm | 4 | 1 | 5 |
 | Huyện Mỏ Cày Bắc | 4 | 2 | 6 |
-| Huyện Mỏ Cày Nam | 5 | 1 | 6 |
+| Huyện Mỏ Cày Nam | 7 | 1 | 8 |
 | Huyện Thạnh Phú | 2 | 4 | 6 |
-| **Tổng** | **39** | **36** | **75** |
+| **Tổng** | **41** | **36** | **77** |
 
 **Chú ý:** tổng theo bảng cuối cùng là 39 nhà sách, 36 VPP. Các con số dùng dữ liệu group-by đọc lại DB, không cộng tay dự đoán.
 
@@ -34,7 +35,8 @@ Cơ sở dữ liệu Neon `raspy-bar-51596929` / branch production. Dữ liệu 
 - [Bình Đại rà lần hai — 6 điểm](../data/market_prospects_binh_dai_second_pass_2026_11_21.json).
 - [Lô rà sâu 9 huyện — 14 điểm, kèm `confidence`, bằng chứng và 5 trường hợp không nhập](../data/market_prospects_ben_tre_deep_research_2026_11_21.json).
 - [Lô địa điểm nhỏ từ Google Maps — 6 điểm](../data/market_prospects_ben_tre_local_maps_sweep_2026_11_21.json).
-- [Migration 098](../backend/migrations/098_ben_tre_9_districts_deep_research_2026.sql), [Migration 100](../backend/migrations/100_ben_tre_additional_local_map_research_2026.sql): hai import có `ON CONFLICT research_source_key DO NOTHING`, so tên/địa chỉ với cả Khách hàng và lead; chạy lại trả **0 bản ghi**.
+- [Lô hai Nhà sách Mỏ Cày Nam — 2 điểm](../data/market_prospects_ben_tre_mocay_stores_sweep_2026_11_21.json).
+- [Migration 098](../backend/migrations/098_ben_tre_9_districts_deep_research_2026.sql), [Migration 100](../backend/migrations/100_ben_tre_additional_local_map_research_2026.sql) và [Migration 101](../backend/migrations/101_ben_tre_mocay_bookstore_sweep_2026.sql): ba import có `ON CONFLICT research_source_key DO NOTHING`, so tên/địa chỉ với cả Khách hàng và lead; chạy lại trả **0 bản ghi**.
 - [Migration 099](../backend/migrations/099_ben_tre_research_verification_flags_2026.sql): 4 cảnh báo nguồn có thể lỗi thời/địa chỉ khác nhau; chạy lại trả **0 bản ghi**, không thay trạng thái.
 
 ## 3. Điểm có chứng cứ mạnh
@@ -62,9 +64,9 @@ Các cảnh báo **không tự chấm dứt/đóng lead**, không ghi GPS hay x�
 
 ## 5. Nghiệm thu DB/API và ranh giới hoàn thiện
 
-- **75/75** nguồn có URL và `research_source_key`; không trùng tên (không phân biệt hoa/thường) trong cùng huyện.
+- **77/77** nguồn có URL và `research_source_key`; không trùng tên (không phân biệt hoa/thường) trong cùng huyện.
 - Import 098, 099, 100 đều idempotent khi chạy lại.
-- Permission readback `sales_market_prospect_allowed`: Admin **75/75**; hai Manager có quyền Bến Tre **75/75**; Sales không có quyền Bến Tre **0/75**. Không tự cấp thêm quyền.
+- Permission readback `sales_market_prospect_allowed`: Admin **77/77**; hai Manager có quyền Bến Tre **77/77**; Sales không có quyền Bến Tre **0/77**. Không tự cấp thêm quyền.
 - **Chưa** nghiệm thu GPS/camera thực địa hay việc mọi cửa hàng còn hoạt động. Dữ liệu nghiên cứu có thể thiếu tiệm nhỏ, tạp hóa kiêm VPP, nhà sách không hiện trên Internet.
 - **9/9 huyện có dữ liệu ≠ đã rà 100% từng xã/ấp**. Không có nguồn đáng tin cậy để xác nhận tổng số cửa hàng thực tế. Để được đánh dấu kiểm kê đầy đủ, cần Sales đối chiếu từng xã cũ, gọi/xác minh các điểm nghi vấn và bổ sung tiệm không có mặt trực tuyến.
 
