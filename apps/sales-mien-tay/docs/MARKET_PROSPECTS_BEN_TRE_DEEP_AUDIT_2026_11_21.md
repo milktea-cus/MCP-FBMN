@@ -8,7 +8,7 @@ Cơ sở dữ liệu Neon `raspy-bar-51596929` / branch production. Dữ liệu 
 - Trước đợt rà sâu: **55** lead Bến Tre cũ.
 - Import `098`: **+14** điểm (mỗi huyện có thêm ít nhất 1 ứng viên).
 - Import `100`: **+6** điểm bản đồ địa phương (Ba Tri, Chợ Lách, Giồng Trôm, Thạnh Phú).
-- Sau: **75 điểm** (37 Nhà sách, 38 Văn phòng phẩm), 9/9 huyện cũ; **52** có điện thoại, **12** MST có nguồn; **75** có URL nguồn và khóa chống trùng riêng.
+- Sau: **75 điểm** (39 Nhà sách, 36 Văn phòng phẩm), 9/9 huyện cũ; **52** có điện thoại, **12** MST có nguồn; **75** có URL nguồn và khóa chống trùng riêng.
 - **14 Khách hàng chính Bến Tre** trong `public.customers` không đưa vào leads; toàn hệ thống `customers=55` và `schools=796` vẫn nguyên; Bến Tre `schools=64`.
 - `status='new'` cả **75**, `converted_customer_id=NULL`, không có `last_visit_at/GPS`; visits **0**, ảnh thực địa **0**; không tự cập nhật `is_selling`.
 
