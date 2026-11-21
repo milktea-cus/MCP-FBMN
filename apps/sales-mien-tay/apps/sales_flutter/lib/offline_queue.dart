@@ -217,9 +217,10 @@ class OfflineQueue extends ChangeNotifier {
     if(thumbnailSha256!=null)'thumbnail_sha256':thumbnailSha256,
     if(mime!=null)'mime':mime,
     if(RegExp(r'^/api/v1/area-visits/[a-f0-9-]{36}/photos$').hasMatch(path))
-      'area_visit_id':path.split('/')[4], 'upload_id':id,
+      'area_visit_id':path.split('/')[4],
     if(RegExp(r'^/api/v1/market-prospects/[a-f0-9-]{36}/photos$').hasMatch(path))
-      'market_prospect_id':path.split('/')[4], 'upload_id':id});
+      'market_prospect_id':path.split('/')[4],
+    if(path.endsWith('/photos'))'upload_id':id});
   }
   await tx.completed;
   await reload();
