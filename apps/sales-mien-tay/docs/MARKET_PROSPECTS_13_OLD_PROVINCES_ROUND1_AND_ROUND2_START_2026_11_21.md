@@ -1,7 +1,41 @@
 # MCP-FBMN — KIỂM KÊ 13 TỈNH CŨ: KẾT THÚC VÒNG 1, BẮT ĐẦU VÒNG 2
 Ngày: **21/11/2026**. Repository `milktea-cus/MCP-FBMN` branch `main`; Neon production project `raspy-bar-51596929`, branch `br-super-mountain-bdije4mj`.
 
-## P1: Migrations 153–154 — đối soát Neon production ngày 21/11/2026 (snapshot mới nhất)
+## P0/P1 — migration 155 đối soát 21/11/2026 (snapshot mới nhất)
+
+| Chỉ số | Neon production |
+|---|---:|
+| Lead nghiên cứu toàn bộ 13 tỉnh cũ | **719** |
+| Huyện/quận/thị xã/thành phố cũ đã có lead | **132/134** |
+| Lead có URL nguồn HTTPS / research key | **719/719** / **719/719** |
+| Trạng thái `new`, chưa ghé | **719** |
+| Có lượt ghé hoặc GPS nghiên cứu bị gắn thành GPS xác minh | **0** |
+| Nhà sách / VPP-đầu mối (phân loại nghiên cứu) | **387 / 332** |
+| Có số điện thoại | **527** |
+| Địa bàn chỉ có 1–2 lead | **34** (trước migration 155: **36**) |
+
+- Migration [`155_old_provinces_round02_p0_kien_hai_p1_five_sparse_2026.sql`](../backend/migrations/155_old_provinces_round02_p0_kien_hai_p1_five_sparse_2026.sql), commit [`2708727`](https://github.com/milktea-cus/MCP-FBMN/commit/2708727eb7255f8339ae236fcff076448c8b51ca): **11 lead nghiên cứu**; Kiên Hải 1, Tịnh Biên 4, Gò Quao 2, Hà Tiên 2, Mỹ Tú 1, Hồng Ngự 1.
+- **P0 tiến triển từ 131/134 lên 132/134**: phát hiện điểm `Dịch vụ & VPP Nguyệt Ánh` (Tổ 6 ấp An Phú, xã Nam Du CŨ, huyện Kiên Hải, Kiên Giang cũ; SĐT `0888776303`), Google Maps ID `ChIJfQ_Qv_IDpzERUxMF4hqS_R8`. Nguồn địa giới chính thức: https://kienhai.angiang.gov.vn/lich-su-hinh-thanh-huyen-kien-hai; chưa đến cửa hàng, chưa xác minh trực tiếp tồn tại hoặc bán hàng năm 2026.
+- **Còn 2 huyện cũ chưa có lead nghiên cứu:** Huyện Long Mỹ (Hậu Giang cũ) và Huyện Vĩnh Lợi (Bạc Liêu cũ). Không đánh đồng `NS Thể Minh` (khách chính đã có ở Huyện Long Mỹ) với lead chưa nhập. Không gán điểm `Nhà sách Long Mỹ` ở thị xã sang huyện Long Mỹ.
+- Phân loại nguồn rõ: `VPP Sa Sa`, `Ty Ty`, `Bảo Khang`, `Anh Khoa` từ Maps tại Tịnh Biên; `Kim Cương`, `Mỹ phẩm Lắm` tại Gò Quao; `Thanh Bình` và tiệm photo tại Hà Tiên; `Gia Linh` tại Mỹ Tú; `Lê Ngô` tại Hồng Ngự. Một số chỉ có loại `Novelty store`/`Wholesaler`, **không coi là đã xác minh có quầy bán lẻ VPP**; Sales phải kiểm trực tiếp. `Thanh Bình` có hồ sơ ngành bán lẻ tại https://thuvienphapluat.vn/ma-so-thue/van-phong-pham-thanh-binh-mst-1701431743.html.
+- **Ứng viên chưa nhập cho Long Mỹ**: Công ty TNHH Thiết bị Văn phòng Phương Vy, MST `6300350408`, ấp 1 TT Vĩnh Viễn cũ: nguồn ghi ngành chính **bán buôn máy móc, thiết bị và phụ tùng**, không xác nhận cửa hàng sách/VPP bán lẻ. https://smartvision.com.vn/doanh-nghiep/ho-so/3036579-cong-ty-tnhh-thiet-bi-van-phong-phuong-vy/ . Chỉ làm đầu mối cần gọi xác minh, không tính làm cửa hàng. **Vĩnh Lợi:** các kết quả tìm được chủ yếu nằm TP Bạc Liêu cũ, tạp hóa hoặc hồ sơ đã ngừng; không tự gán sang Vĩnh Lợi.
+- **Chất lượng dữ liệu:** các truy vấn kiểm sau migration 155 trả `research_source_key` trùng **0**, tên/điện thoại trùng với `customers` của batch 155 **0**, lượt ghé/GPS **0**. Mọi lead mới là `status=new`, `source_kind=manual`, có URL nguồn; URL không chứng minh cửa hàng còn hoạt động. CI/API, phân quyền và thiết bị thật cần nghiệm thu riêng.
+
+### 34 địa bàn còn 1–2 lead nghiên cứu
+
+| Tỉnh cũ | Địa bàn còn ít lead |
+|---|---|
+| An Giang | Huyện An Phú (2); Huyện Chợ Mới (2); Huyện Tri Tôn (2) |
+| Bạc Liêu | Huyện Phước Long (2); Huyện Đông Hải (1) |
+| Cà Mau | Huyện Ngọc Hiển (2); Huyện Năm Căn (2) |
+| Cần Thơ | Huyện Phong Điền (2); Huyện Thới Lai (2); Huyện Vĩnh Thạnh (2); Quận Thốt Nốt (2); Quận Ô Môn (2) |
+| Hậu Giang | Huyện Châu Thành (1); Huyện Châu Thành A (2); Huyện Phụng Hiệp (2); Huyện Vị Thủy (2); Thị xã Long Mỹ (2) |
+| Kiên Giang | Huyện An Minh (2); Huyện Châu Thành (1); Huyện Giang Thành (2); Huyện Kiên Hải (1); Huyện Kiên Lương (2); Huyện U Minh Thượng (2); Huyện Vĩnh Thuận (2) |
+| Sóc Trăng | Huyện Châu Thành (2); Huyện Cù Lao Dung (2); Huyện Mỹ Tú (2); Huyện Trần Đề (1); Thị xã Ngã Năm (2); Thị xã Vĩnh Châu (2) |
+| Trà Vinh | Huyện Duyên Hải (2) |
+| Đồng Tháp | Huyện Cao Lãnh (2); Huyện Châu Thành (2); Huyện Hồng Ngự (2) |
+
+## P1: Migrations 153–154 — đối soát Neon production ngày 21/11/2026 (snapshot lịch sử trước 155)
 
 | Chỉ số | Neon production |
 |---|---:|
