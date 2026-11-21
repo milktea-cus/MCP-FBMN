@@ -1,7 +1,30 @@
 # MCP-FBMN — KIỂM KÊ 13 TỈNH CŨ: KẾT THÚC VÒNG 1, BẮT ĐẦU VÒNG 2
 Ngày: **21/11/2026**. Repository `milktea-cus/MCP-FBMN` branch `main`; Neon production project `raspy-bar-51596929`, branch `br-super-mountain-bdije4mj`.
 
-## P0: Migration 151 — đối soát production 21/11/2026 (snapshot mới nhất)
+## P1 migration 152 — đối soát production ngày 21/11/2026 (snapshot mới nhất)
+
+| Chỉ tiêu | Số liệu thực tế |
+|---|---:|
+| Lead nghiên cứu `field_prospects` | **679** |
+| Huyện/quận/thị xã/thành phố cũ có lead | **131/134** |
+| Lead có URL HTTPS và source key | **679/679**, **679/679** |
+| Lead trạng thái `new`, chưa ghé | **679** |
+| GPS hoặc lượt ghé gắn lead | **0** |
+| Nhà sách / VPP-đầu mối | **380 / 299** |
+| Lead có điện thoại | **489** |
+| Địa bàn có 1–2 lead | **46** |
+
+- **Commit dữ liệu:** [`290186e`](https://github.com/milktea-cus/MCP-FBMN/commit/290186e3c9fc17715bc7d5e8e1974e7ad4021e73), file `backend/migrations/152_old_provinces_round02_p1_co_do_cao_lanh_2026.sql` đã được commit **trước khi chạy** trên Neon production.
+- **Đã nhập 3 lead P1 chưa ghé:**
+  - **VPP Cô Duyên** — Chợ đầu mối, xã Mỹ Hiệp, **Huyện Cao Lãnh / Đồng Tháp cũ**, điện thoại `0939917100`. Nguồn điểm bán Hồng Hà: https://vpphongha.com.vn/vi/gaga ; chợ Mỹ Hiệp được xác nhận thuộc huyện Cao Lãnh cũ bởi Cổng tỉnh Đồng Tháp: https://dongthap.gov.vn/web/cong-thong-tin-dtp/tin-tuc/chi-tiet?id=6639346.
+  - **VPP Cường Quyên** — Đường số 12, plus code 3CVJ+GC4, **Huyện Cờ Đỏ / Cần Thơ cũ**, Maps ID `ChIJhR-1vaKZoDERk4xN_5zpbus`. Chưa có số điện thoại / chưa xác minh bán lẻ.
+  - **VPP - Sửa chữa vi tính Đại Quang** — Đường Hà Huy Giáp, ấp Thới Bình, plus code 3CRM+M3M, **Huyện Cờ Đỏ / Cần Thơ cũ**, Maps ID `ChIJO-01r2eZoDERyFg2RRfywOU`. Danh mục bản đồ là camera/CCTV, chỉ tên cơ sở có VPP; **Sales phải xác minh có bán VPP**.
+- SQL migration chạy lại **0 dòng thêm**, đối soát trong batch với `customers` theo tên/số điện thoại **0 trùng**, toàn bảng không có `research_source_key` trùng, và tất cả 679 lead không có dấu GPS/lượt ghé. **Không tự xác nhận cửa hàng còn hoạt động năm 2026.**
+- **Còn 3 huyện P0 không có lead:** Huyện Vĩnh Lợi/Bạc Liêu, Huyện Long Mỹ/Hậu Giang, Huyện Kiên Hải/Kiên Giang. Đã tạo [checklist 15 trường mốc và tuyến khảo sát thực địa](OLD13_ROUND02_P0_THREE_DISTRICTS_SALES_FIELD_VERIFY_2026_11_21.md) (Vĩnh Lợi 10; Long Mỹ 4; Kiên Hải 1). 15 mốc này không có GPS được xác minh và **không phải điểm bán**.
+- **Sai ánh xạ nguồn cần xử lý riêng:** một lead `Nhà sách Minh Thư` ở **ấp Thới Bình, Cờ Đỏ** từ batch cũ đang dẫn nguồn Hồng Hà, nhưng Hồng Hà liệt kê địa chỉ này là **Nhà sách Nhuận Điền** (0939688455); Minh Thư thuộc **An Khánh**. Không nhân đôi bằng cách chèn lead Nhuận Điền mới, cũng không tự sửa bản ghi cũ trong migration append-only; cần đối soát và chỉnh lý nguồn có kiểm soát.
+- CI của commit `760e078` (đợt trước) đã **success**: https://github.com/milktea-cus/MCP-FBMN/actions/runs/44905191143 . CI của các commit mới phải kiểm riêng. PWA/Android và xác thực GPS chưa nghiệm thu từ các thay đổi chỉ liên quan SQL/tài liệu.
+
+## P0: Migration 151 — đối soát production 21/11/2026 (snapshot lịch sử trước 152)
 
 | Chỉ tiêu | Neon production |
 |---|---:|
