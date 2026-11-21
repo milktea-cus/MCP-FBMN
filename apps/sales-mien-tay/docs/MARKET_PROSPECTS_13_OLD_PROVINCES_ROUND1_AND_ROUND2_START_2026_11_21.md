@@ -1,7 +1,46 @@
 # MCP-FBMN — KIỂM KÊ 13 TỈNH CŨ: KẾT THÚC VÒNG 1, BẮT ĐẦU VÒNG 2
 Ngày: **21/11/2026**. Repository `milktea-cus/MCP-FBMN` branch `main`; Neon production project `raspy-bar-51596929`, branch `br-super-mountain-bdije4mj`.
 
-## P1 migration 152 — đối soát production ngày 21/11/2026 (snapshot mới nhất)
+## P1: Migrations 153–154 — đối soát Neon production ngày 21/11/2026 (snapshot mới nhất)
+
+| Chỉ số | Neon production |
+|---|---:|
+| Lead nghiên cứu (13 tỉnh cũ) | **708** |
+| Địa bàn huyện/đô thị cũ có lead | **131/134** |
+| URL nguồn HTTPS / source key | **708/708** / **708/708** |
+| Trạng thái `new`, chưa ghé | **708/708** |
+| Liên kết lượt ghé/GPS đã xác minh | **0** |
+| Nhà sách / VPP-đầu mối nghiên cứu | **387 / 321** |
+| Có điện thoại | **517** |
+| Địa bàn có 1–2 lead | **36** (trước khi bổ sung: **46**) |
+
+**Đã nhập thêm 29 lead nghiên cứu** trong vòng này từ nguồn Google Maps, danh bạ địa phương Sổ Tay Vàng và danh sách đối tác Văn phòng phẩm Hồng Hà. Đây **không phải** số điểm đã ghé hoặc đã xác minh hoạt động năm 2026.
+
+- Migration [`153_old_provinces_round02_p1_sparse_six_provinces_2026.sql`](../backend/migrations/153_old_provinces_round02_p1_sparse_six_provinces_2026.sql): **20 lead / 12 địa bàn / 6 tỉnh cũ**, commit [`7db28c0`](https://github.com/milktea-cus/MCP-FBMN/commit/7db28c02e8da39267a579dafa1c6f58751434846).
+- Migration [`154_old_provinces_round02_p1_tamnong_giongrieng_myxuyen_2026.sql`](../backend/migrations/154_old_provinces_round02_p1_tamnong_giongrieng_myxuyen_2026.sql): **9 lead** ở Tam Nông (3), Giồng Riềng (2), Mỹ Xuyên (4), commit [`3bd4432`](https://github.com/milktea-cus/MCP-FBMN/commit/3bd44327fff86ea6e56271e50c305622d81f4c57).
+- Migration 153 và 154 đều kiểm **idempotent**: chạy lại trên Neon production thêm **0** bản ghi. Kiểm toàn bảng không có trùng `research_source_key`, kiểm tên/số điện thoại giữa **batch 153+154 với khách chính** có **0** xung đột theo phép so khớp đã chạy. **Không** thay đổi `customers`, không ghi GPS, không gắn visit.
+- Một số cơ sở ghi tên đa ngành (photo, máy tính, camera, nước ép) hoặc được trang danh bạ phân loại chung. **Cần Sales kiểm tra thực sự bán sách/VPP**; không được gọi là điểm bán đã xác minh chỉ vì tên hay URL Maps.
+- Các ứng viên khác bị loại khi đối soát vì đã có lead trước đó: Cửa hàng sách báo Á Châu (Châu Phú), Nhà sách Châu Thành và Hiệu sách Thái Hưng (An Giang), Nhà sách Ngã Năm 2 (Sóc Trăng), Nhà sách Hà Tiên, Nhà sách Hoa Hồng (Kiên Lương), Nhà sách Gia Hân (Vĩnh Châu), và nhiều cửa hàng khác. Không được thêm nguồn khác để nhân đôi khách.
+- Tránh nhầm địa giới sau 2025: huyện Châu Thành thuộc Đồng Tháp **cũ** không tự nhận điểm chỉ ghi `Châu Thành, Đồng Tháp` **mới** (có thể nằm ở Tiền Giang cũ). Hai điểm có tên `VPP Dung`, `Quầy sách Lynh Mai` đang chờ đối chiếu xã cũ; **không nhập** chỉ để tăng số.
+- **Ba huyện cũ hoàn toàn chưa có lead** không đổi: Kiên Hải (Kiên Giang), Huyện Long Mỹ (Hậu Giang), Vĩnh Lợi (Bạc Liêu). Đã có [checklist khảo sát thực địa với 15 trường mốc](OLD13_ROUND02_P0_THREE_DISTRICTS_SALES_FIELD_VERIFY_2026_11_21.md); không tạo lead không đủ nguồn.
+- Nguồn tham khảo cụ thể cho migration 154: https://sotayvang.com/nha-sach-tran-hung-dao-tt-tram-chim/ ; https://sotayvang.com/hieu-sach-minh-phung-tt-tram-chim/ ; https://sotayvang.com/van-phong-pham-thuy-duong-ban-tan-dinh/ ; https://sotayvang.com/co-so-in-photocopy-van-phong-pham-vu-hien-ban-tan-dinh/ ; https://sotayvang.com/cua-hang-van-phong-pham-trung-hung-tt-my-xuyen/.
+- Chưa nghiệm thu API/thiết bị thật từ các thay đổi SQL/tài liệu; không deploy Worker hay Vercel riêng cho dữ liệu này. **CI đợt mới phải kiểm ở GitHub Actions**.
+
+### Danh sách 36 địa bàn còn chỉ 1–2 lead
+
+| Tỉnh cũ | Địa bàn (số lead nghiên cứu) |
+|---|---|
+| An Giang | Huyện An Phú (2); Huyện Chợ Mới (2); Huyện Tri Tôn (2); Thị xã Tịnh Biên (1) |
+| Bạc Liêu | Huyện Phước Long (2); Huyện Đông Hải (1) |
+| Cà Mau | Huyện Ngọc Hiển (2); Huyện Năm Căn (2) |
+| Cần Thơ | Huyện Phong Điền (2); Huyện Thới Lai (2); Huyện Vĩnh Thạnh (2); Quận Thốt Nốt (2); Quận Ô Môn (2) |
+| Hậu Giang | Huyện Châu Thành (1); Huyện Châu Thành A (2); Huyện Phụng Hiệp (2); Huyện Vị Thủy (2); Thị xã Long Mỹ (2) |
+| Kiên Giang | Huyện An Minh (2); Huyện Châu Thành (1); Huyện Giang Thành (2); Huyện Gò Quao (1); Huyện Kiên Lương (2); Huyện U Minh Thượng (2); Huyện Vĩnh Thuận (2); Thành phố Hà Tiên (1) |
+| Sóc Trăng | Huyện Châu Thành (2); Huyện Cù Lao Dung (2); Huyện Mỹ Tú (1); Huyện Trần Đề (1); Thị xã Ngã Năm (2); Thị xã Vĩnh Châu (2) |
+| Trà Vinh | Huyện Duyên Hải (2) |
+| Đồng Tháp | Huyện Cao Lãnh (2); Huyện Châu Thành (2); Huyện Hồng Ngự (1) |
+
+## P1 migration 152 — đối soát production ngày 21/11/2026 (snapshot lịch sử)
 
 | Chỉ tiêu | Số liệu thực tế |
 |---|---:|
