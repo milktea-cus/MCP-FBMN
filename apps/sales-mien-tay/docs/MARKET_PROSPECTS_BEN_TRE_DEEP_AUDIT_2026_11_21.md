@@ -26,7 +26,7 @@ Cơ sở dữ liệu Neon `raspy-bar-51596929` / branch production. Dữ liệu 
 | Huyện Thạnh Phú | 2 | 4 | 6 |
 | **Tổng** | **41** | **36** | **77** |
 
-**Chú ý:** tổng theo bảng cuối cùng là 39 nhà sách, 36 VPP. Các con số dùng dữ liệu group-by đọc lại DB, không cộng tay dự đoán.
+**Chú ý:** tổng theo bảng cuối cùng là 41 nhà sách, 36 VPP. Các con số dùng dữ liệu group-by đọc lại DB, không cộng tay dự đoán.
 
 ## 2. File nguồn và SQL tái lập
 
@@ -65,7 +65,7 @@ Các cảnh báo **không tự chấm dứt/đóng lead**, không ghi GPS hay x�
 ## 5. Nghiệm thu DB/API và ranh giới hoàn thiện
 
 - **77/77** nguồn có URL và `research_source_key`; không trùng tên (không phân biệt hoa/thường) trong cùng huyện.
-- Import 098, 099, 100 đều idempotent khi chạy lại.
+- Import 098, 099, 100 và 101 đều idempotent khi chạy lại.
 - Permission readback `sales_market_prospect_allowed`: Admin **77/77**; hai Manager có quyền Bến Tre **77/77**; Sales không có quyền Bến Tre **0/77**. Không tự cấp thêm quyền.
 - **Chưa** nghiệm thu GPS/camera thực địa hay việc mọi cửa hàng còn hoạt động. Dữ liệu nghiên cứu có thể thiếu tiệm nhỏ, tạp hóa kiêm VPP, nhà sách không hiện trên Internet.
 - **9/9 huyện có dữ liệu ≠ đã rà 100% từng xã/ấp**. Không có nguồn đáng tin cậy để xác nhận tổng số cửa hàng thực tế. Để được đánh dấu kiểm kê đầy đủ, cần Sales đối chiếu từng xã cũ, gọi/xác minh các điểm nghi vấn và bổ sung tiệm không có mặt trực tuyến.
