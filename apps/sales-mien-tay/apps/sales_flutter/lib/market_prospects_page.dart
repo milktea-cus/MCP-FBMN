@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:typed_data';
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -327,6 +329,103 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
    _notice('Đã lưu trạng thái không phù hợp · chờ đồng bộ');
   }catch(e){_notice('Chưa lưu được: $e');}
  }
+
+ Future<void> _openConvertedCustomer(Map<String,dynamic> lead) async {
+  final customerId=lead['converted_customer_id']?.toString()??'';
+  if(customerId.isEmpty){_notice('Chưa có mã Khách hàng sau đồng bộ');return;}
+  try{
+   final response=await widget.session.get('/api/v1/customers/$customerId');
+   if(!mounted)return;
+   final customer=FieldCustomer.fromJson(Map<String,dynamic>.from(response['item'] as Map));
+   final service=CustomerService(salesOrigin,widget.session.cookie,
+    identity:widget.queue.identity,revision:widget.queue.revision);
+   await Navigator.push(context,MaterialPageRoute(builder:(_)=>CustomerDetail(
+    service:service,customer:customer,regions:widget.regions,queue:widget.queue)));
+  }catch(e){_notice('Không mở được hồ sơ Khách hàng: $e');}
+ }
+ Future<Uint8List> _image(String leadId,String imageId) async{
+  final response=await http.get(widget.session.uri(
+   '/api/v1/market-prospects/$leadId/photos/$imageId?thumbnail=1'),
+   headers:sessionHeaders(widget.session.cookie)).timeout(const Duration(seconds:15));
+  if(response.statusCode!=200)throw StateError('Không tải được ảnh');
+  return response.bodyBytes;
+ }
+ Future<void> _details(Map<String,dynamic> current) async {
+  if(current['pending_status']!=null){
+   _notice('Điểm bán chưa đồng bộ; có thể xem và sửa ngay trên card.');return;
+  }
+  final id=current['id'].toString();
+  try {
+   final response=await Future.wait([
+    widget.session.get('/api/v1/market-prospects/$id'),
+    widget.session.get('/api/v1/market-prospects/$id/visits'),
+    widget.session.get('/api/v1/market-prospects/$id/photos')]);
+   if(!mounted)return;
+   final item=Map<String,dynamic>.from(response[0]['item'] as Map);
+   final visits=(response[1]['items'] as List? ?? [])
+    .map((x)=>Map<String,dynamic>.from(x as Map)).toList();
+   final photos=(response[2]['items'] as List? ?? [])
+    .map((x)=>Map<String,dynamic>.from(x as Map)).toList();
+   await showModalBottomSheet<void>(context:context,isScrollControlled:true,
+    showDragHandle:true,builder:(sheetCtx)=>SafeArea(child:DraggableScrollableSheet(
+     expand:false,initialChildSize:.75,minChildSize:.4,maxChildSize:.94,
+     builder:(ctx,scroll)=>ListView(controller:scroll,
+      padding:const EdgeInsets.fromLTRB(16,0,16,26),children:[
+      Text(item['name']?.toString()??'Điểm bán',
+       style:Theme.of(ctx).textTheme.titleLarge),
+      const SizedBox(height:6),
+      Text(item['address_line']?.toString()??''),
+      Text('${item['district']} · ${item['province']}'),
+      const SizedBox(height:10),
+      Text('Nguồn: ${item['source_kind']??'Chưa xác định'}'),
+      if(item['phone']!=null)Text('Điện thoại: ${item['phone']}'),
+      if(item['tax_code']!=null)Text('MST: ${item['tax_code']}'),
+      if((item['note']?.toString()??'').isNotEmpty)
+       Text('Ghi chú: ${item['note']}'),
+      if(item['status']=='converted')...[
+       const SizedBox(height:12),
+       FilledButton.icon(
+        onPressed:(){
+         Navigator.pop(sheetCtx);
+         unawaited(_openConvertedCustomer(item));
+        },icon:const Icon(Icons.open_in_new),label:const Text('Mở hồ sơ Khách hàng')),
+      ],
+      const SizedBox(height:14),
+      Text('Lịch sử ghé thực tế · ${visits.length}',
+       style:Theme.of(ctx).textTheme.titleMedium),
+      if(visits.isEmpty)const Text('Chưa ghi nhận ghé thực tế'),
+      for(final v in visits)ListTile(
+       dense:true,leading:const Icon(Icons.location_on_outlined),
+       title:Text(v['checked_at']?.toString().replaceFirst('T',' ').split('.').first??''),
+       subtitle:Text('GPS: ${v['latitude']}, ${v['longitude']} · sai số ${v['accuracy_m']} m'
+         '\n${v['note']??''}'),
+       isThreeLine:true,
+       trailing:IconButton(tooltip:'Mở vị trí GPS trên bản đồ',
+        icon:const Icon(Icons.map_outlined),
+        onPressed:()=>launchUrl(Uri.https('www.google.com','/maps/search/',{
+         'api':'1','query':'${v['latitude']},${v['longitude']}'
+        }),mode:LaunchMode.externalApplication)),
+      ),
+      const SizedBox(height:12),
+      Text('Ảnh cửa hàng · ${photos.length}',style:Theme.of(ctx).textTheme.titleMedium),
+      if(photos.isEmpty)const Text('Chưa có ảnh đã đồng bộ'),
+      if(photos.isNotEmpty)Wrap(spacing:8,runSpacing:8,children:[
+       for(final p in photos.take(12))SizedBox(width:110,height:120,
+        child:Column(children:[
+         Expanded(child:ClipRRect(borderRadius:BorderRadius.circular(8),
+          child:FutureBuilder<Uint8List>(
+           future:_image(id,p['id'].toString()),
+           builder:(_,snapshot)=>snapshot.hasData
+            ?Image.memory(snapshot.data!,width:110,fit:BoxFit.cover)
+            :Center(child:Icon(snapshot.hasError
+             ?Icons.broken_image_outlined:Icons.image_outlined))))),
+         Text(p['kind']?.toString()??'Ảnh',maxLines:1,overflow:TextOverflow.ellipsis),
+        ])),
+      ]),
+     ]))));
+  }catch(e){_notice('Không tải được lịch sử điểm bán: $e');}
+ }
+
  Widget _card(Map<String,dynamic> lead){
   final isNew=lead['status']=='new',converted=lead['status']=='converted';
   final visits=(lead['visits'] as num?)?.toInt()??0;
@@ -359,14 +458,25 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
     if(lead['pending_status']!=null||pending)
       Text(blocked?'Đồng bộ bị từ chối · xem Chi tiết đồng bộ':'Có thao tác chờ đồng bộ',
         style:TextStyle(color:Theme.of(context).colorScheme.error)),
-    Row(children:[
+    Wrap(spacing:1,runSpacing:0,crossAxisAlignment:WrapCrossAlignment.center,
+     children:[
      IconButton(tooltip:'Tìm trên Google Maps (chưa xác minh cổng)',
       onPressed:()=>launchUrl(maps,mode:LaunchMode.externalApplication),
       icon:const Icon(Icons.directions_outlined)),
-     if((lead['phone']?.toString()??'').isNotEmpty)
+     if((lead['phone']?.toString()??'').isNotEmpty)...[
       IconButton(tooltip:'Gọi điện',
        onPressed:()=>launchUrl(Uri(scheme:'tel',path:lead['phone'].toString())),
        icon:const Icon(Icons.phone_outlined)),
+      IconButton(tooltip:'Mở Zalo',
+       onPressed:(){
+        final number=lead['phone'].toString().replaceAll(RegExp(r'[^0-9]'),'');
+        if(number.isNotEmpty)launchUrl(Uri.https('zalo.me','/$number'),
+          mode:LaunchMode.externalApplication);
+       },
+       icon:const Icon(Icons.chat_bubble_outline)),
+     ],
+     IconButton(tooltip:'Xem chi tiết, lịch sử và ảnh',
+      onPressed:()=>_details(lead),icon:const Icon(Icons.info_outline)),
      if(isNew)PopupMenuButton<ImageSource>(
       tooltip:'Chụp hoặc chọn ảnh cửa hàng',
       icon:const Icon(Icons.add_a_photo_outlined),
@@ -375,11 +485,13 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
        PopupMenuItem(value:ImageSource.camera,child:Text('Chụp ảnh')),
        PopupMenuItem(value:ImageSource.gallery,child:Text('Chọn ảnh')),
       ]),
-     const Spacer(),
      if(isNew&&!converted)
       TextButton(onPressed:blocked?null:()=>_visit(lead),child:const Text('Ghé thăm')),
      if(isNew&&visits>0&&!pending)
       FilledButton.tonal(onPressed:()=>_convert(lead),child:const Text('Đưa vào KH')),
+     if(converted)
+      TextButton.icon(onPressed:()=>_openConvertedCustomer(lead),
+       icon:const Icon(Icons.open_in_new,size:18),label:const Text('Hồ sơ KH')),
      if(isNew&&!pending&&lead['pending_status']==null)
       PopupMenuButton<String>(tooltip:'Thao tác khác',
        onSelected:(v){if(v=='close')unawaited(_close(lead));if(v=='edit')unawaited(_create(edit:lead));},
