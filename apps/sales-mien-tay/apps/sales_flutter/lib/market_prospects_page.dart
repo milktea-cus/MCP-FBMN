@@ -10,6 +10,7 @@ import 'customers.dart';
 import 'models.dart';
 import 'offline_queue.dart';
 import 'session.dart';
+import 'theme.dart';
 
 /// Canonical field_prospects list; PWA uses IndexedDB and Android uses SQLite
 /// through the existing account-scoped OfflineQueue. The customer bottom
@@ -534,7 +535,8 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
      Expanded(child:DropdownButtonFormField<String>(
       key:ValueKey('filter-province:$province'),
       initialValue:province,isExpanded:true,
-      style:Theme.of(context).textTheme.bodySmall?.copyWith(
+      style:Theme.of(context).textTheme.bodyMedium?.copyWith(
+       fontSize:SalesTheme.controlFontSize,
        color:Theme.of(context).colorScheme.onSurface),
       icon:const Icon(Icons.expand_more,size:18),
       decoration:const InputDecoration(
@@ -550,7 +552,8 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
      Expanded(child:DropdownButtonFormField<String>(
       key:ValueKey('filter-district:$province:$district'),
       initialValue:district,isExpanded:true,
-      style:Theme.of(context).textTheme.bodySmall?.copyWith(
+      style:Theme.of(context).textTheme.bodyMedium?.copyWith(
+       fontSize:SalesTheme.controlFontSize,
        color:Theme.of(context).colorScheme.onSurface),
       icon:const Icon(Icons.expand_more,size:18),
       decoration:const InputDecoration(
@@ -567,7 +570,8 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
      Expanded(child:DropdownButtonFormField<String>(
       key:ValueKey('filter-status:$status'),
       initialValue:status,isExpanded:true,
-      style:Theme.of(context).textTheme.bodySmall?.copyWith(
+      style:Theme.of(context).textTheme.bodyMedium?.copyWith(
+       fontSize:SalesTheme.controlFontSize,
        color:Theme.of(context).colorScheme.onSurface),
       icon:const Icon(Icons.expand_more,size:18),
       decoration:const InputDecoration(
