@@ -38,7 +38,7 @@ Các bản ghi được ghi thẳng `public.field_prospects` với `status='new'
 
 - Trước đợt 1, **0** leads `province='Tiền Giang'`, nhưng `customers` có sẵn **7** hồ sơ toàn tỉnh, trong đó Chợ Gạo có **Hiệu Sách - Diễm**, **Minh Đức**, Mỹ Tho có **NPP Lê Phương**, **Siêu Thị 19k**. Không nhập lại các hồ sơ này thành lead. NPP Lê Phương có shop VPP tại 110 Nam Kỳ Khởi Nghĩa; vì đây có thể là cùng doanh nghiệp đã tồn tại, **không** đếm dưới lead mới.
 - SQL kiểm trùng `research_source_key`: 0 hàng; trùng exact `district + lower(trim(name)) + lower(trim(address_line))`: 0; trùng tên chính xác khách hàng chính: 0. Đây **không** phải hệ thống phát hiện mọi đổi tên/cùng MST/nhiều chi nhánh (theo contract, MST trùng chỉ cảnh báo).
-- Chạy lại migration 114: 0 bản ghi được tạo. Chạy lại migration 113 cần kiểm tra riêng trong báo cáo nghiệp vụ.
+- Chạy lại migration 113 **và** 114 trên Neon production: cả hai trả **0 bản ghi mới**, kiểm tra idempotent đạt.
 - **39/39** có URL HTTPS; **29/39** có điện thoại; **3/39** có MST; **39/39** vẫn **Chưa ghé**, chưa có vị trí GPS xác minh. Tất cả nguồn công khai đều cần Sales đối chiếu tình trạng hiện nay.
 - Một số nguồn là doanh nghiệp bán sỉ, photocopy, quà tặng hoặc bách hóa có VPP (VD Giai Phát, Trường An Phát, Moss, Trung tâm Bách hóa Tân Phước); **không khẳng định là cửa hàng sách/VPP bán lẻ đã được xác minh**. Ghi chú cảnh báo trong từng hồ sơ.
 - MST hộ Nguyễn Trung có định dạng 12 ký tự từ dữ liệu nhà thầu, **không ghi trực tiếp** vì schema yêu cầu 10 hoặc 13 số; giữ URL và note để đối chiếu chính xác, tránh sửa/bịa MST.
