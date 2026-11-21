@@ -116,6 +116,34 @@ BEGIN
  RETURN to_jsonb(saved);
 END $fn$;
 
+-- Editable lead metadata; never rewrite GPS evidence or reassign scope silently.
+CREATE OR REPLACE FUNCTION public.sales_market_prospect_update(
+ p_actor text,p_prospect uuid,p_version integer,p_name text,p_address text,
+ p_category text,p_phone text,p_tax text,p_note text)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE lead public.field_prospects%ROWTYPE;
+BEGIN
+ SELECT * INTO lead FROM public.field_prospects WHERE id=p_prospect FOR UPDATE;
+ IF NOT FOUND OR lead.owner_sub<>p_actor OR lead.province IS NULL OR
+  NOT public.sales_can_access(p_actor,lead.owner_sub,lead.province,lead.district)
+ THEN RAISE EXCEPTION 'market_forbidden'; END IF;
+ IF lead.status<>'new' OR lead.version<>p_version THEN
+   RAISE EXCEPTION 'market_conflict';END IF;
+ IF length(btrim(coalesce(p_name,''))) NOT BETWEEN 2 AND 240 OR
+  length(btrim(coalesce(p_address,''))) NOT BETWEEN 3 AND 500 OR
+  p_category NOT IN ('tap_hoa','sieu_thi','dai_ly','npp','nha_sach','van_phong_pham','cua_hang','khac') OR
+  (p_phone IS NOT NULL AND length(p_phone) NOT BETWEEN 8 AND 20) OR
+  (p_tax IS NOT NULL AND p_tax !~ '^[0-9]{10}([0-9]{3})?$') OR
+  length(coalesce(p_note,''))>2000
+ THEN RAISE EXCEPTION 'market_invalid';END IF;
+ UPDATE public.field_prospects
+ SET name=btrim(p_name),address_line=btrim(p_address),category=p_category,
+  phone=p_phone,tax_code=p_tax,note=coalesce(p_note,''),
+  updated_at=now(),version=version+1
+ WHERE id=p_prospect RETURNING * INTO lead;
+ RETURN to_jsonb(lead);
+END $fn$;
+
 CREATE OR REPLACE FUNCTION public.sales_market_prospect_visit(
  p_actor text,p_prospect uuid,p_ref uuid,p_checked timestamptz,
  p_lat double precision,p_lon double precision,p_accuracy double precision,p_note text)
@@ -188,7 +216,7 @@ BEGIN
  END IF;
  IF lead.status<>'new' OR NOT EXISTS(
   SELECT 1 FROM public.field_prospect_visits v WHERE v.prospect_id=p_prospect
- ) THEN RAISE EXCEPTION 'market_visit_required';END IF;
+ ) AND lead.area_visit_id IS NULL THEN RAISE EXCEPTION 'market_visit_required';END IF;
  IF p_customer IS NOT NULL THEN
   SELECT * INTO customer FROM public.customers WHERE id=p_customer
     AND public.sales_customer_allowed(p_actor,id,'view');
@@ -214,6 +242,8 @@ BEGIN
  RETURN to_jsonb(lead);
 END $fn$;
 
+REVOKE ALL ON FUNCTION public.sales_market_prospect_update(text,uuid,integer,text,text,text,text,text,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.sales_market_prospect_update(text,uuid,integer,text,text,text,text,text,text) TO sales_api;
 REVOKE ALL ON FUNCTION public.sales_market_prospect_create(text,uuid,text,text,text,text,text,text,text,text,uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.sales_market_prospect_visit(text,uuid,uuid,timestamptz,double precision,double precision,double precision,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.sales_market_prospect_close(text,uuid) FROM PUBLIC;
