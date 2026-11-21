@@ -2,7 +2,16 @@
 
 **Ngày đối soát:** 21/11/2026. **Nguồn:** bảng `public.schools`, `public.customers`, `public.field_prospects` trên Neon production `raspy-bar-51596929` / `br-super-mountain-bdije4mj`. Không phải danh sách điểm bán đã xác minh; tên trường dùng **làm mốc đi khảo sát**, không tạo lead tự động.
 
-**Độ phủ:** 679 lead tại 131/134 huyện/đô thị cũ sau migration 152. Cả ba huyện dưới đây vẫn 0 lead, không được coi là 0 nhà sách/VPP ngoài đời.
+**Snapshot lịch sử trước migration 155:** 679 lead tại 131/134 huyện/đô thị cũ sau migration 152. Khi đó cả ba huyện đều 0 lead; **hiện tại xem phần cập nhật ngay phía trên**, Kiên Hải đã có 1 lead chờ xác minh.
+
+## Cập nhật sau migration 155 — tình trạng production 21/11/2026
+
+- **719** lead nghiên cứu tại **132/134** địa bàn cũ; hiện chỉ còn **2 huyện trắng**: `Huyện Long Mỹ (Hậu Giang cũ)` và `Huyện Vĩnh Lợi (Bạc Liêu cũ)`.
+- **Kiên Hải đã có 1 lead online chưa xác minh**: `Dịch vụ & VPP Nguyệt Ánh`, tổ 6, ấp An Phú, xã Nam Du CŨ, huyện Kiên Hải (SĐT **0888776303**). Nguồn Maps: https://www.google.com/maps/search/?api=1&query=Dich%20vu%20va%20VPP%20Nguyet%20Anh%20Kien%20Hai&query_place_id=ChIJfQ_Qv_IDpzERUxMF4hqS_R8 ; xác nhận ấp An Phú thuộc Nam Du từ UBND Kiên Hải: https://kienhai.angiang.gov.vn/lich-su-hinh-thanh-huyen-kien-hai .
+- Sales **ưu tiên gọi trước** để xác nhận số điện thoại, mặt hàng VPP và còn quầy bán thực tế tại ấp An Phú, sau đó mới ghé địa bàn đảo; không phát sinh GPS/check-in từ việc tra cứu trực tuyến. Các trường mốc Kiên Hải bên dưới vẫn dùng để quét tiếp.
+- **Long Mỹ huyện:** `Công ty TNHH Thiết bị Văn phòng Phương Vy` có MST `6300350408`, ấp 1, thị trấn Vĩnh Viễn cũ, nhưng **ngành chính là bán buôn máy móc/thiết bị**, chưa có nguồn chứng minh bán lẻ sách/VPP. Chỉ dùng làm thông tin gọi xác minh, **không** đưa vào `field_prospects`. https://smartvision.com.vn/doanh-nghiep/ho-so/3036579-cong-ty-tnhh-thiet-bi-van-phong-phuong-vy/
+- **Vĩnh Lợi huyện:** các listing tạp hóa tại Châu Hưng A/Long Thạnh không có chứng cứ rõ về bán VPP; không tự coi là nhà sách/VPP. Tiếp tục quét 10 trường mốc và chợ thị trấn bên dưới.
+- **Phần dưới là danh sách 15 trường mốc lịch sử** để Sales khảo sát thực địa, **không phải 15 điểm bán** và không phải số huyện trắng hiện hành.
 
 ## Quy trình Sales để bổ sung P0 an toàn
 
