@@ -1,0 +1,19 @@
+-- 146 | 2026-11-21 | ROUND 2 coverage-gap sweep: Kien Giang old Chau Thanh, U Minh Thuong.
+-- Public research leads only. Correct old boundaries even if modern map lists An Giang.
+WITH src AS (
+ SELECT x.*,md5('fbmn:kiengiang-old:round02:'||x.source_key) dg
+ FROM jsonb_to_recordset('[{"district":"Huyện Châu Thành","name":"Cửa hàng văn phòng phẩm Quách Lỷ","address_line":"108 ấp An Bình, xã Bình An cũ, huyện Châu Thành, Kiên Giang","category":"van_phong_pham","phone":"0773616113","tax_code":null,"source_key":"gmap:ChIJMQ-vpYDJoDERpDGN2Y3BdEg","source_url":"https://sotayvang.com/cua-hang-van-phong-pham-quach-ly-binh-an/","verification_note":"Danh bạ xác nhận 108 ấp An Bình, xã Bình An, Châu Thành Kiên Giang cũ. Có điểm bản đồ nhưng chưa Sales ghé; chỉ ghi 1 cơ sở."},{"district":"Huyện U Minh Thượng","name":"Tiệm sách Cô Nga","address_line":"Khu vực huyện U Minh Thượng cũ, Kiên Giang (nay địa chỉ tỉnh An Giang); chưa có số nhà","category":"nha_sach","phone":"0845832429","tax_code":null,"source_key":"gmap:ChIJ1d1LAJjVoDER27DjNDqziwA","source_url":"https://www.google.com/maps/search/?api=1&query=Ti%E1%BB%87m%20s%C3%A1ch%20C%C3%B4%20Nga%20U%20Minh%20Th%C6%B0%E1%BB%A3ng&query_place_id=ChIJ1d1LAJjVoDER27DjNDqziwA","verification_note":"Điểm Google Maps phân loại hiệu sách tại U Minh Thượng, có điện thoại; chưa xác minh xã/số nhà và mặt hàng."},{"district":"Huyện U Minh Thượng","name":"Văn phòng phẩm Trung Hiếu","address_line":"QL63, khu vực xã Vĩnh Hòa cũ, huyện U Minh Thượng, Kiên Giang (Plus Code M4FF+3RP)","category":"van_phong_pham","phone":"0986543889","tax_code":null,"source_key":"gmap:ChIJ5c_oDeDToDER-OnpfKzm1Fg","source_url":"https://www.google.com/maps/search/?api=1&query=V%C4%83n%20ph%C3%B2ng%20ph%E1%BA%A9m%20Trung%20Hi%E1%BA%BFu%20U%20Minh%20Th%C6%B0%E1%BB%A3ng&query_place_id=ChIJ5c_oDeDToDER-OnpfKzm1Fg","verification_note":"Bản đồ ghi QL63, xã Vĩnh Hòa, U Minh Thượng cũ, Plus Code; cần xác minh địa chỉ và quầy bán."}]'::jsonb) AS x(district text,name text,address_line text,category text,phone text,tax_code text,source_key text,source_url text,verification_note text)
+),ins AS(
+ INSERT INTO public.field_prospects(id,area_visit_id,owner_sub,name,address_line,province,district,category,phone,tax_code,note,status,source_kind,research_source_key,research_source_url,research_batch)
+ SELECT (substr(s.dg,1,8)||'-'||substr(s.dg,9,4)||'-5'||substr(s.dg,14,3)||'-8'||substr(s.dg,18,3)||'-'||substr(s.dg,21,12))::uuid,
+ NULL,'ef943de4-18f7-49ef-8340-eefb18855534',s.name,s.address_line,'Kiên Giang',s.district,s.category,s.phone,s.tax_code,
+ 'Vòng rà bù nguồn công khai 21/11/2026; CHƯA GHÉ; GPS chưa xác minh; chưa xác minh hoạt động bán lẻ. '||s.verification_note||' Nguồn: '||s.source_url,
+ 'new','manual',s.source_key,s.source_url,'2026-11-21-kien-giang-old-round02-gaps-01'
+ FROM src s WHERE s.district IN ('Huyện Châu Thành','Huyện U Minh Thượng') AND s.source_url LIKE 'https://%'
+ AND NOT EXISTS(SELECT 1 FROM customers c WHERE c.province='Kiên Giang' AND c.district=s.district
+ AND (lower(trim(c.name))=lower(trim(s.name)) OR (c.phone IS NOT NULL AND s.phone IS NOT NULL AND c.phone=s.phone)))
+ AND NOT EXISTS(SELECT 1 FROM field_prospects p WHERE p.province='Kiên Giang' AND p.district=s.district
+ AND (p.research_source_key=s.source_key OR (lower(trim(p.name))=lower(trim(s.name)) AND lower(trim(p.address_line))=lower(trim(s.address_line)))
+ OR (p.phone IS NOT NULL AND s.phone IS NOT NULL AND p.phone=s.phone) OR (p.tax_code IS NOT NULL AND s.tax_code IS NOT NULL AND p.tax_code=s.tax_code)))
+ ON CONFLICT(research_source_key) WHERE research_source_key IS NOT NULL DO NOTHING RETURNING district,category,phone)
+ SELECT district,count(*)::int inserted,count(*) FILTER(WHERE category='nha_sach')::int bookstores FROM ins GROUP BY district ORDER BY district;
