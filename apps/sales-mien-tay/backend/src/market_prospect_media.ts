@@ -32,9 +32,7 @@ export async function marketProspectMediaRoutes(req:Request,env:Env,actor:Actor,
      JOIN public.field_prospects p ON p.id=f.prospect_id
      WHERE f.id=${id}::uuid AND f.prospect_id=${lead}::uuid AND f.status='ready'
       AND p.province IS NOT NULL
-      AND (${actor.admin} OR p.owner_sub=${actor.sub} OR
-       (${actor.manager} AND public.sales_staff_in_subtree(${actor.sub},p.owner_sub)))
-      AND public.sales_can_access(${actor.sub},p.owner_sub,p.province,p.district) LIMIT 1`;
+      AND public.sales_market_prospect_allowed(${actor.sub},p.id) LIMIT 1`;
    if(!rows.length)return bad('Không có ảnh hoặc không có quyền',404);
    const key=url.searchParams.get('thumbnail')==='1'?rows[0].thumbnail_key:rows[0].object_key;
    const file=await env.PHOTOS_BUCKET.get(key);
@@ -45,9 +43,7 @@ export async function marketProspectMediaRoutes(req:Request,env:Env,actor:Actor,
   const rows=await db`SELECT f.id,f.kind,f.bytes,f.captured_at FROM public.field_market_prospect_photos f
     JOIN public.field_prospects p ON p.id=f.prospect_id
     WHERE p.id=${lead}::uuid AND f.status='ready' AND p.province IS NOT NULL
-     AND (${actor.admin} OR p.owner_sub=${actor.sub} OR
-       (${actor.manager} AND public.sales_staff_in_subtree(${actor.sub},p.owner_sub)))
-     AND public.sales_can_access(${actor.sub},p.owner_sub,p.province,p.district)
+     AND public.sales_market_prospect_allowed(${actor.sub},p.id)
     ORDER BY f.captured_at DESC LIMIT 12`;
   return json({items:rows});
  }
