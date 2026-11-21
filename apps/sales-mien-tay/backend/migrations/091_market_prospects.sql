@@ -21,6 +21,33 @@ ALTER TABLE public.field_prospects
   ADD CONSTRAINT field_market_prospects_source_check CHECK (source_kind IN ('route','manual','school')),
   ADD CONSTRAINT field_market_prospects_tax_check CHECK (tax_code IS NULL OR tax_code ~ '^[0-9]{10}([0-9]{3})?$'),
   ADD CONSTRAINT field_market_prospects_version_check CHECK (version>0);
+-- Existing route-generated prospects remain part of the same directory.
+-- Derive historical territory from their actual area stop/route when present.
+CREATE OR REPLACE FUNCTION public.field_market_prospect_inherit_area()
+RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public AS $inherit$
+DECLARE p text; d text;
+BEGIN
+ IF NEW.area_visit_id IS NOT NULL AND (NEW.province IS NULL OR NEW.district IS NULL) THEN
+  SELECT coalesce(nullif(st.province,''),nullif(mp.province,'')),
+    coalesce(nullif(st.district,''),nullif(mp.district,''))
+  INTO p,d
+  FROM public.field_area_visits v
+  LEFT JOIN public.field_route_stops st ON st.id=v.day_route_stop_id
+  LEFT JOIN public.field_day_routes r ON r.id=coalesce(v.day_route_id,st.day_route_id)
+  LEFT JOIN public.field_monthly_plans mp ON mp.id=r.monthly_plan_id
+  WHERE v.id=NEW.area_visit_id;
+  NEW.province:=coalesce(NEW.province,p);
+  NEW.district:=coalesce(NEW.district,d);
+ END IF;
+ RETURN NEW;
+END $inherit$;
+DROP TRIGGER IF EXISTS field_market_prospect_area_inherit ON public.field_prospects;
+CREATE TRIGGER field_market_prospect_area_inherit
+ BEFORE INSERT OR UPDATE OF area_visit_id ON public.field_prospects
+ FOR EACH ROW EXECUTE FUNCTION public.field_market_prospect_inherit_area();
+-- Backfill only location labels from evidenced old visits, never invent GPS.
+UPDATE public.field_prospects SET area_visit_id=area_visit_id
+ WHERE area_visit_id IS NOT NULL AND (province IS NULL OR district IS NULL);
 CREATE INDEX IF NOT EXISTS field_market_prospects_geo ON public.field_prospects(province,district,status,created_at DESC);
 CREATE INDEX IF NOT EXISTS field_market_prospects_tax ON public.field_prospects(tax_code) WHERE tax_code IS NOT NULL;
 
