@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:image_picker/image_picker.dart';
+import 'survey_media.dart';
 import 'customers.dart';
 import 'models.dart';
 import 'offline_queue.dart';
@@ -288,6 +290,21 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
    _notice('Đã lưu yêu cầu chuyển khách · chờ đồng bộ');
   }catch(e){_notice('Chưa lưu được yêu cầu chuyển: $e');}
  }
+ Future<void> _photo(Map<String,dynamic> lead,ImageSource source)async{
+  try{
+   final picked=await ImagePicker().pickImage(source:source);
+   if(picked==null)return;
+   final media=compressSurveyMedia(await picked.readAsBytes());
+   final id=const Uuid().v4(),leadId=lead['id'].toString();
+   await widget.queue.enqueue('/api/v1/market-prospects/${lead['id']}/photos',{
+    'client_ref':id,'kind':'front',
+    'captured_at':DateTime.now().toUtc().toIso8601String(),
+   },photo:media.image,thumbnail:media.thumbnail,
+     sha256:media.hash,thumbnailSha256:media.thumbnailHash,mime:'image/jpeg',
+     dependsOn:lead['pending_status']!=null?[leadId]:const []);
+   _notice('Ảnh đã lưu trên máy · chờ đồng bộ R2');
+  }catch(e){_notice('Không lưu được ảnh: $e');}
+ }
  Future<void> _close(Map<String,dynamic> lead)async{
   final accepted=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(
    title:const Text('Đánh dấu không phù hợp?'),
@@ -329,6 +346,8 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
       Text('Nguồn: ${lead['school_name']}',style:Theme.of(context).textTheme.labelSmall),
     if(lead['tax_code']!=null)
       Text('MST: ${lead['tax_code']}',style:Theme.of(context).textTheme.labelSmall),
+    if((lead['photo_count'] as num?)?.toInt()!=null)
+      Text('Ảnh thực tế: ${lead['photo_count']}',style:Theme.of(context).textTheme.labelSmall),
     if(lead['pending_status']!=null||pending)
       Text(blocked?'Đồng bộ bị từ chối · xem Chi tiết đồng bộ':'Có thao tác chờ đồng bộ',
         style:TextStyle(color:Theme.of(context).colorScheme.error)),
@@ -340,6 +359,14 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
       IconButton(tooltip:'Gọi điện',
        onPressed:()=>launchUrl(Uri(scheme:'tel',path:lead['phone'].toString())),
        icon:const Icon(Icons.phone_outlined)),
+     if(isNew)PopupMenuButton<ImageSource>(
+      tooltip:'Chụp hoặc chọn ảnh cửa hàng',
+      icon:const Icon(Icons.add_a_photo_outlined),
+      onSelected:(source)=>unawaited(_photo(lead,source)),
+      itemBuilder:(_)=>const [
+       PopupMenuItem(value:ImageSource.camera,child:Text('Chụp ảnh')),
+       PopupMenuItem(value:ImageSource.gallery,child:Text('Chọn ảnh')),
+      ]),
      const Spacer(),
      if(isNew&&!converted)
       TextButton(onPressed:blocked?null:()=>_visit(lead),child:const Text('Ghé thăm')),
