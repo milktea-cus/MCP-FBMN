@@ -1,9 +1,34 @@
 # MCP-FBMN — KIỂM KÊ 13 TỈNH CŨ: KẾT THÚC VÒNG 1, BẮT ĐẦU VÒNG 2
 Ngày: **21/11/2026**. Repository `milktea-cus/MCP-FBMN` branch `main`; Neon production project `raspy-bar-51596929`, branch `br-super-mountain-bdije4mj`.
 
-## Cập nhật Neon production sau migration 150 — 21/11/2026
+## P0: Migration 151 — đối soát production 21/11/2026 (snapshot mới nhất)
 
-> **Snapshot hiện hành**, đã đối soát trực tiếp trên project Neon production `raspy-bar-51596929`, branch `br-super-mountain-bdije4mj`. Các bảng phía dưới được giữ lại dưới dạng **snapshot lịch sử trước migration 150** để tránh mất dấu vết kiểm kê.
+| Chỉ tiêu | Neon production |
+|---|---:|
+| Lead nghiên cứu | **676** |
+| Địa bàn cũ có lead | **131/134** |
+| Lead có URL nguồn HTTPS / source key | **676 / 676** |
+| Trạng thái `new`, chưa ghé | **676** |
+| Gắn visit hoặc tọa độ ghé thăm | **0** |
+| Nhà sách / VPP-đầu mối | **380 / 296** |
+| Có điện thoại | **488** |
+| Địa bàn chỉ có 1–2 lead | **47** |
+
+- Commit migration `151_old_provinces_round02_tran_de_thay_dong_2026.sql`: [`aa400b4`](https://github.com/milktea-cus/MCP-FBMN/commit/aa400b46fd33456cf8ee87aec3a61f651ac38675), nhập thành công **1** lead `Cơ sở In Ấn - Văn Phòng Phẩm Thầy Đông`, 417 Khu 3 ấp Châu Thành, **Lịch Hội Thượng / Huyện Trần Đề / Sóc Trăng cũ**. Maps listing `ChIJ0YmJgMa1oTERPo9-ZHru8ws`, điện thoại `0914578063`: https://www.google.com/maps/search/?api=1&query=Thay%20Dong%20Van%20Phong%20Pham%20Lich%20Hoi%20Thuong&query_place_id=ChIJ0YmJgMa1oTERPo9-ZHru8ws.
+- **LƯU Ý nghiệp vụ:** Maps xếp điểm Thầy Đông là *print shop*, tên cơ sở có `Văn Phòng Phẩm`. Đây chỉ là lead **chờ Sales gọi để xác minh có bán VPP và còn hoạt động**, không phải một nhà sách đã xác minh. Không có GPS, check-in hay khách chính được tạo.
+- SQL migration **idempotent**: chạy lần hai trả **0** bản ghi; đối soát `research_source_key` không trùng, tên/số điện thoại với `customers` của batch 151: **0**.
+- **Còn 3 địa bàn P0 chưa có lead:** Kiên Giang / Huyện Kiên Hải; Hậu Giang / Huyện Long Mỹ; Bạc Liêu / Huyện Vĩnh Lợi.
+- **Ứng viên loại trừ để tránh nhập sai:**
+  - **Long Mỹ huyện:** `Dụng Cụ Học Sinh - Trần Bắc` ghi `ĐT930, ấp 2, Long Mỹ, Hậu Giang`, không rõ xã và không phân biệt **huyện** với **thị xã**. Nguồn https://giatot24gio.com/dung-cu-hoc-sinh-tran-bac-dd93082.html — chỉ lưu để nghiên cứu, chưa nhập.
+  - **Long Mỹ huyện:** `Chi nhánh Nhà sách Hồng Ân` có hồ sơ chi nhánh đã **ngừng hoạt động và chấm dứt hiệu lực mã số thuế**. Nguồn https://masothue.com/1801093287-001-chi-nhanh-cong-ty-tnhh-mot-thanh-vien-phan-dang-nha-sach-hong-an — không nhập; nguồn còn có các địa chỉ liên quan khác, không tự gán huyện.
+  - **Vĩnh Lợi:** `Tạp hóa Cô Ly` tại Châu Hưng A có mô tả VPP từ trang giới thiệu tổng hợp nhưng chưa có bằng chứng độc lập về mặt hàng VPP thực bán. Nguồn https://hanoidep.vn/cua-hang-tap-hoa-co-ly-chau-hung-a-vinh-loi-bac-lieu/ — không nhập. `Tin học Mực in Nam Phương` được bản đồ phân loại tiệm in, chưa đủ căn cứ là **điểm bán sách/VPP**; không nhập.
+  - **Kiên Hải:** tìm theo Hòn Tre, Lại Sơn, Hòn Nghệ nhưng chưa tìm được địa chỉ nhà sách/VPP đủ cụ thể để nhập. Các hồ sơ doanh nghiệp và điểm bán điện thoại/đèn không được coi là nhà sách/VPP.
+  - **Trần Đề:** `Hồng Gia Phúc` bản đồ định vị ở **Thới An Đông / Bình Thủy, Cần Thơ cũ**, không gán sang Trần Đề chỉ vì trang tổng hợp có từ khóa Trần Đề.
+- **Chưa nghiệm thu UI, API, GPS hay thiết bị thật chỉ từ bản ghi SQL.** Đối soát CI phải thực hiện riêng; CI vắng mặt không đồng nghĩa xanh.
+
+## Cập nhật Neon production sau migration 150 — 21/11/2026 (snapshot lịch sử)
+
+> **Snapshot lịch sử trước migration 151**, đã đối soát trực tiếp trên project Neon production `raspy-bar-51596929`, branch `br-super-mountain-bdije4mj`. Các bảng phía dưới được giữ lại dưới dạng **snapshot lịch sử trước migration 150** để tránh mất dấu vết kiểm kê.
 
 | Chỉ tiêu | Hiện tại |
 |---|---:|
