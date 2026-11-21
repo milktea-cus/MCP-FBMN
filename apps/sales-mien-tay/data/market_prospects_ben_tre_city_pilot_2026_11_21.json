@@ -1,0 +1,190 @@
+{
+  "province_old": "Bến Tre",
+  "district_old": "Thành phố Bến Tre",
+  "status": "new",
+  "verification_status": "directory_only_no_site_visit",
+  "captured_date": "2026-11-21",
+  "description": "Dữ liệu địa điểm công khai phục vụ thử UX; không phải danh sách kiểm kê đầy đủ hoặc xác minh ghé thực tế; không tự động chuyển khách hoặc đang bán.",
+  "excluded_existing_customers": [
+    "NS Nhân Văn – 38A Nguyễn Trung Trực",
+    "NS Kim Anh – 512F Nguyễn Văn Cánh",
+    "NS Hoà Bình – 228 Nguyễn Huệ"
+  ],
+  "not_imported_due_to_ambiguity": [
+    "Nhà sách Bến Tre 1 – 8 Nguyễn Văn Tư (trùng tên nhà sách tại 52 Nguyễn Trãi)",
+    "VPP Sen Việt – nguồn công khai bất đồng giữa 34D và 265B Nguyễn Văn Tư",
+    "NPP Hoà Bình – 228 Nguyễn Huệ (trùng địa chỉ khách hàng chính)"
+  ],
+  "outlets": [
+    {
+      "source_key": "gmap:ChIJ4_nTWmapCjERRgwAmIVp6dc",
+      "name": "VPP Bến Tre",
+      "address_line": "22A đường Tán Kế, phường An Hội, TP. Bến Tre cũ",
+      "category": "van_phong_pham",
+      "phone": "0869039090",
+      "tax_code": "1301131505",
+      "source_url": "https://vppbentre.vn/gioi-thieu/",
+      "evidence": "website cửa hàng và Google Maps"
+    },
+    {
+      "source_key": "gmap:ChIJfSEIEPaoCjERLYsi8ZlYmP8",
+      "name": "Nhà sách FAHASA Bến Tre (Sense City)",
+      "address_line": "Lầu 1, Sense City, 26A Trần Quốc Tuấn, phường An Hội, TP. Bến Tre cũ",
+      "category": "nha_sach",
+      "phone": "02753511324",
+      "tax_code": null,
+      "source_url": "https://bentretoplist.com/top-10-dia-chi-ban-giay-goi-qua-o-ben-tre-da-dang-mau-xinh/",
+      "evidence": "địa chỉ chi nhánh và Google Maps"
+    },
+    {
+      "source_key": "gmap:ChIJ9_vUjg4ToDERVuNk5j-kfAU",
+      "name": "Nhà sách FAHASA GO! Bến Tre",
+      "address_line": "Lầu 1, TTTM GO! Bến Tre, đường Võ Nguyên Giáp (QL60), xã Sơn Đông, TP. Bến Tre cũ",
+      "category": "nha_sach",
+      "phone": "02753545152",
+      "tax_code": "0304132047135",
+      "source_url": "https://chogia.vn/ma-so-thue/doanh-nghiep/0304132047-135",
+      "evidence": "hồ sơ chi nhánh và Google Maps"
+    },
+    {
+      "source_key": "gmap:ChIJEaHS5zOpCjERzFBEdWcpua0",
+      "name": "Nhà sách Bến Tre 1",
+      "address_line": "52 Nguyễn Trãi, phường An Hội, TP. Bến Tre cũ",
+      "category": "nha_sach",
+      "phone": "02753822273",
+      "tax_code": null,
+      "source_url": "https://nxbgd.vn/Attachments/files/PDF/He%20thong%20cua%20hang%20toan%20quoc%202025-2026.pdf",
+      "evidence": "danh mục cửa hàng NXB Giáo dục 2025–26, trang 15"
+    },
+    {
+      "source_key": "gmap:ChIJ2YmdSwCpCjERjSKYOh1JxFI",
+      "name": "Nhà sách Hùng Vương – Chi nhánh Bến Tre",
+      "address_line": "Ki ốt 02, Chợ Lạc Hồng, phường Phú Khương, TP. Bến Tre cũ",
+      "category": "nha_sach",
+      "phone": "0816826039",
+      "tax_code": "1200100525005",
+      "source_url": "https://www.stg.edu.vn/lien-he/",
+      "evidence": "website hệ thống và danh mục NXB Giáo dục 2025–26"
+    },
+    {
+      "source_key": "gmap:ChIJCWfF81uoCjERIoisjQe85Xc",
+      "name": "Cửa hàng VPP Kim Hoà",
+      "address_line": "3 Đại lộ Đồng Khởi, phường An Hội, TP. Bến Tre cũ",
+      "category": "van_phong_pham",
+      "phone": "02753600622",
+      "tax_code": null,
+      "source_url": "https://bentretoplist.com/top-9-cua-hang-van-phong-pham-tai-ben-tre-da-dang-hang-hoa/",
+      "evidence": "danh bạ cửa hàng và Google Maps"
+    },
+    {
+      "source_key": "gmap:ChIJ7eSnzVioCjERjvpnAcJZxwk",
+      "name": "Cửa hàng Văn phòng phẩm Văn Học",
+      "address_line": "37 Đại lộ Đồng Khởi, phường An Hội, TP. Bến Tre cũ",
+      "category": "van_phong_pham",
+      "phone": "02753823398",
+      "tax_code": null,
+      "source_url": "https://www.viet-biz.com/c%E1%BB%ADa-h%C3%A0ng-v%C4%83n-h%E1%BB%8Dc-0275-3823-398",
+      "evidence": "danh bạ công khai và Google Maps"
+    },
+    {
+      "source_key": "gmap:ChIJq9eCA16oCjER4qOBWbe4SYE",
+      "name": "Nhà sách Phương Anh",
+      "address_line": "161 Đoàn Hoàng Minh, phường An Hội, TP. Bến Tre cũ",
+      "category": "nha_sach",
+      "phone": "02753810414",
+      "tax_code": null,
+      "source_url": "https://www.viet-biz.com/nh%C3%A0-s%C3%A1ch-ph%C6%B0%C6%A1ng-anh-0275-3810-414",
+      "evidence": "danh bạ công khai và Google Maps"
+    },
+    {
+      "source_key": "gmap:ChIJkTaEA16oCjERxcRFfUCKSXE",
+      "name": "Nhà sách Năm Phong",
+      "address_line": "20 Đoàn Hoàng Minh, phường An Hội, TP. Bến Tre cũ",
+      "category": "nha_sach",
+      "phone": "02753825525",
+      "tax_code": null,
+      "source_url": "https://www.google.com/maps/search/?api=1&query=Nh%C3%A0%20s%C3%A1ch%20N%C4%83m%20Phong%20B%E1%BA%BFn%20Tre&query_place_id=ChIJkTaEA16oCjERxcRFfUCKSXE",
+      "evidence": "hồ sơ địa điểm Google Maps"
+    },
+    {
+      "source_key": "gmap:ChIJ_6EA82-oCjERj0RjURoQlt8",
+      "name": "Nhà sách Quang Minh",
+      "address_line": "49 Nguyễn Văn Tư, khu phố 3, TP. Bến Tre cũ",
+      "category": "nha_sach",
+      "phone": "02753833433",
+      "tax_code": null,
+      "source_url": "https://www.google.com/maps/search/?api=1&query=Nh%C3%A0%20s%C3%A1ch%20Quang%20Minh%20B%E1%BA%BFn%20Tre&query_place_id=ChIJ_6EA82-oCjERj0RjURoQlt8",
+      "evidence": "hồ sơ địa điểm Google Maps"
+    },
+    {
+      "source_key": "gmap:ChIJdefwPPSoCjERtiluOiV-xek",
+      "name": "Hiệu sách Thắng Hiệp",
+      "address_line": "193 Đại lộ Đồng Khởi, phường Phú Khương, TP. Bến Tre cũ",
+      "category": "nha_sach",
+      "phone": "02753813754",
+      "tax_code": null,
+      "source_url": "https://www.google.com/maps/search/?api=1&query=Hi%E1%BB%87u%20s%C3%A1ch%20Th%E1%BA%AFng%20Hi%E1%BB%87p&query_place_id=ChIJdefwPPSoCjERtiluOiV-xek",
+      "evidence": "hồ sơ địa điểm Google Maps"
+    },
+    {
+      "source_key": "gmap:ChIJK02h01ioCjERBRzUX2Wdlaw",
+      "name": "Cửa hàng Thiết bị Văn phòng Đức Trí",
+      "address_line": "23 Đại lộ Đồng Khởi, phường An Hội, TP. Bến Tre cũ",
+      "category": "van_phong_pham",
+      "phone": "02753812948",
+      "tax_code": null,
+      "source_url": "https://www.google.com/maps/search/?api=1&query=Thi%E1%BA%BFt%20b%E1%BB%8B%20V%C4%83n%20ph%C3%B2ng%20%C4%90%E1%BB%A9c%20Tr%C3%AD&query_place_id=ChIJK02h01ioCjERBRzUX2Wdlaw",
+      "evidence": "hồ sơ địa điểm Google Maps; cần xác nhận còn hoạt động"
+    },
+    {
+      "source_key": "gmap:ChIJBfthSu2oCjERSqg2IXW0ntg",
+      "name": "Văn phòng phẩm Kim Thư",
+      "address_line": "294A3 Đại lộ Đồng Khởi, phường Phú Tân, TP. Bến Tre cũ",
+      "category": "van_phong_pham",
+      "phone": null,
+      "tax_code": null,
+      "source_url": "https://www.google.com/maps/search/?api=1&query=VPP%20Kim%20Th%C6%B0%20B%E1%BA%BFn%20Tre&query_place_id=ChIJBfthSu2oCjERSqg2IXW0ntg",
+      "evidence": "hồ sơ địa điểm Google Maps; cần xác nhận còn hoạt động"
+    },
+    {
+      "source_key": "web:cbstore:17haibatrung",
+      "name": "CB STORE – Bến Tre",
+      "address_line": "17 Hai Bà Trưng, phường An Hội, TP. Bến Tre cũ",
+      "category": "nha_sach",
+      "phone": "0328575168",
+      "tax_code": null,
+      "source_url": "https://store.cbcentres.com/pages/lien-he",
+      "evidence": "website chính thức CB STORE"
+    },
+    {
+      "source_key": "gmap:ChIJjTjI9eSpCjERC18JHp3C3eg",
+      "name": "Nhà sách Bến Tre Online",
+      "address_line": "Đường Hùng Vương, khu phố 4, TP. Bến Tre cũ",
+      "category": "nha_sach",
+      "phone": null,
+      "tax_code": null,
+      "source_url": "https://www.google.com/maps/search/?api=1&query=NhaSachBenTre.Com&query_place_id=ChIJjTjI9eSpCjERC18JHp3C3eg",
+      "evidence": "Google Maps có vị trí; chưa có số nhà rõ ràng"
+    },
+    {
+      "source_key": "gmap:ChIJMY1CE-aoCjERYFJmtiqmwuQ",
+      "name": "Văn phòng phẩm & Photo BH Bến Tre",
+      "address_line": "21F1 Nguyễn Thị Định, phường Phú Tân, TP. Bến Tre cũ",
+      "category": "van_phong_pham",
+      "phone": "0907979283",
+      "tax_code": null,
+      "source_url": "https://www.google.com/maps/search/?api=1&query=V%C4%83n%20ph%C3%B2ng%20ph%E1%BA%A9m%20Photo%20BH%20B%E1%BA%BFn%20Tre&query_place_id=ChIJMY1CE-aoCjERYFJmtiqmwuQ",
+      "evidence": "hồ sơ địa điểm Google Maps"
+    },
+    {
+      "source_key": "web:vppbaohan:500f5nguyenthidinh",
+      "name": "Văn phòng phẩm Bảo Hân",
+      "address_line": "500F5 Nguyễn Thị Định, khu phố 2, phường Phú Khương, TP. Bến Tre cũ",
+      "category": "van_phong_pham",
+      "phone": null,
+      "tax_code": "1300992692",
+      "source_url": "https://www.yellowpages.vn/lgs/1187769567/van-phong-pham-bao-han.html",
+      "evidence": "danh bạ doanh nghiệp và dữ liệu MST công khai"
+    }
+  ]
+}
