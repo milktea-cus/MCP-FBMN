@@ -29,6 +29,28 @@ void main() {
     expect(dark.filledButtonTheme.style!.minimumSize!.resolve({})!.height, 44);
   });
 
+  test('prospect action colors remain visible in both themes', () {
+    double contrast(Color a, Color b) {
+      final aL = a.computeLuminance();
+      final bL = b.computeLuminance();
+      final lighter = aL > bL ? aL : bL;
+      final darker = aL > bL ? bL : aL;
+      return (lighter + 0.05) / (darker + 0.05);
+    }
+
+    for (final brightness in [Brightness.light, Brightness.dark]) {
+      final colors = SalesTheme.build(width: 390, brightness: brightness).colorScheme;
+      // MarketProspectsPage: refresh uses onSurface/surfaceContainerHighest;
+      // Add uses onPrimary/primary. Both must remain readable on iOS PWA.
+      expect(contrast(colors.onSurface, colors.surfaceContainerHighest),
+          greaterThanOrEqualTo(4.5));
+      expect(contrast(colors.onPrimary, colors.primary),
+          greaterThanOrEqualTo(4.5));
+      expect(contrast(colors.onSurfaceVariant, colors.surfaceContainerHighest),
+          greaterThanOrEqualTo(3.0));
+    }
+  });
+
   test('theme preference survives restoration', () async {
     SharedPreferences.setMockInitialValues({});
     await SalesThemePreference.select(ThemeMode.dark);
