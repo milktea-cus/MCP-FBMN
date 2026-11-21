@@ -521,13 +521,39 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
        prefixIconConstraints:BoxConstraints(minWidth:38)),
      ))),
      const SizedBox(width:6),
-     SizedBox(width:44,height:44,child:IconButton.filledTonal(
-      tooltip:'Làm mới danh sách',onPressed:loading?null:()=>_load(),
-      icon:const Icon(Icons.refresh_rounded,size:22))),
+     // Explicit high-contrast foreground and text glyphs: some iOS WebKit
+     // builds show filled IconButton circles without the rounded icon glyphs.
+     SizedBox(width:44,height:44,child:IconButton(
+      key:const ValueKey('market-prospects-refresh'),
+      tooltip:'Làm mới danh sách',
+      onPressed:loading?null:()=>_load(),
+      style:IconButton.styleFrom(
+       backgroundColor:Theme.of(context).colorScheme.surfaceContainerHighest,
+       foregroundColor:Theme.of(context).colorScheme.onSurface,
+       disabledBackgroundColor:Theme.of(context).colorScheme.surfaceContainerHighest,
+       disabledForegroundColor:Theme.of(context).colorScheme.onSurfaceVariant,
+       padding:EdgeInsets.zero,
+       shape:RoundedRectangleBorder(
+        borderRadius:BorderRadius.circular(SalesTheme.controlRadius))),
+      icon:Text('↻',style:TextStyle(
+       fontSize:30,height:1,fontWeight:FontWeight.w700,
+       color:loading
+        ?Theme.of(context).colorScheme.onSurfaceVariant
+        :Theme.of(context).colorScheme.onSurface)))),
      const SizedBox(width:6),
-     SizedBox(width:44,height:44,child:IconButton.filled(
-      tooltip:'Thêm điểm bán',onPressed:_create,
-      icon:const Icon(Icons.add_rounded,size:24))),
+     SizedBox(width:44,height:44,child:IconButton(
+      key:const ValueKey('market-prospects-add'),
+      tooltip:'Thêm điểm bán',
+      onPressed:_create,
+      style:IconButton.styleFrom(
+       backgroundColor:Theme.of(context).colorScheme.primary,
+       foregroundColor:Theme.of(context).colorScheme.onPrimary,
+       padding:EdgeInsets.zero,
+       shape:RoundedRectangleBorder(
+        borderRadius:BorderRadius.circular(SalesTheme.controlRadius))),
+      icon:Text('+',style:TextStyle(
+       fontSize:29,height:1,fontWeight:FontWeight.w700,
+       color:Theme.of(context).colorScheme.onPrimary)))),
     ]),
     const SizedBox(height:8),
     // All three searchable filters remain on one row on narrow phones.
