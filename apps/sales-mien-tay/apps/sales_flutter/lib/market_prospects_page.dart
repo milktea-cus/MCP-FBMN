@@ -214,7 +214,7 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
   finally{name.dispose();address.dispose();phone.dispose();tax.dispose();note.dispose();}
  }
  Future<void> _visit(Map<String,dynamic> lead)async{
-  if(lead['pending_status']!=null){_notice('Cần đồng bộ điểm bán mới trước khi ghé.');return;}
+  if(lead['pending_status']=='blocked'){_notice('Điểm bán bị từ chối đồng bộ. Kiểm tra trước khi ghi GPS.');return;}
   try{
    final pos=await captureGps(context);
    if(!mounted)return;
@@ -238,7 +238,7 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
     'captured_at':pos.timestamp.toUtc().toIso8601String(),
     'latitude':pos.latitude,'longitude':pos.longitude,
     'accuracy_m':pos.accuracy,'location_consent':true,'note':text,
-   });
+   },dependsOn:lead['pending_status']!=null?[lead['id'].toString()]:const []);
    _notice('Đã lưu GPS ghé thăm trên máy · chờ đồng bộ');
    if(mounted)setState((){});
   }catch(e){_notice('Không ghi nhận được lượt ghé: $e');}
