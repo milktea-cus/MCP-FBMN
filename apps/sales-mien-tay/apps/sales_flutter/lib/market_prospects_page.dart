@@ -44,7 +44,7 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
   super.dispose();
  }
  void _queueChanged(){if(mounted)setState((){});}
- String _cacheKey(int n)=>'market-prospects:v1:$province:$district:$status:$n';
+ String _cacheKey(int n)=>'market-prospects:v2:${widget.initialSchool?['id']??''}:$province:$district:$status:$n';
  Future<void> _load({bool append=false})async{
   final token=++generation,next=append?page+1:1;
   final p=province,d=district,s=status,q=search.text.trim();
@@ -112,6 +112,7 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
    (province.isEmpty||r['province']==province)&&
    (district.isEmpty||r['district']==district)&&
    (status.isEmpty||status=='new')&&
+   (search.text.trim().isEmpty||r['name'].toString().toLowerCase().contains(search.text.trim().toLowerCase()))&&
    (widget.initialSchool==null||r['school_id']==widget.initialSchool!['id'])
   ).toList();
  }
@@ -139,18 +140,22 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
    return true;
   }
  }
- Future<void> _create()async{
+ Future<void> _create({Map<String,dynamic>? edit})async{
   final name=TextEditingController(),address=TextEditingController(),
    phone=TextEditingController(),tax=TextEditingController(),note=TextEditingController();
-  var category='van_phong_pham',p=province.isNotEmpty?province:'',
-   d=district.isNotEmpty?district:'';
+  var category=edit?['category']?.toString()??'van_phong_pham',
+   p=edit?['province']?.toString()??(province.isNotEmpty?province:''),
+   d=edit?['district']?.toString()??(district.isNotEmpty?district:'');
   final regions=widget.regions;
   final school=widget.initialSchool;
-  if(school!=null){p=school['province_old'].toString();d=school['district_old'].toString();}
+  if(school!=null&&edit==null){p=school['province_old'].toString();d=school['district_old'].toString();}
+  if(edit!=null){name.text=edit['name']?.toString()??'';address.text=edit['address_line']?.toString()??'';
+   phone.text=edit['phone']?.toString()??'';tax.text=edit['tax_code']?.toString()??'';
+   note.text=edit['note']?.toString()??'';}
   try{
    final payload=await showDialog<Map<String,dynamic>>(context:context,builder:(ctx)=>
     StatefulBuilder(builder:(ctx,refresh)=>AlertDialog(
-    title:Text(school==null?'Thêm điểm bán tiềm năng':'Điểm bán gần ${school['name']}'),
+    title:Text(edit!=null?'Sửa điểm bán':school==null?'Thêm điểm bán tiềm năng':'Điểm bán gần ${school['name']}'),
     content:SizedBox(width:460,child:SingleChildScrollView(child:Column(
      mainAxisSize:MainAxisSize.min,children:[
      TextField(controller:name,maxLength:240,decoration:const InputDecoration(labelText:'Tên điểm bán *')),
@@ -160,14 +165,14 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
       isExpanded:true,decoration:const InputDecoration(labelText:'Tỉnh cũ *'),
       items:[for(final value in regions.provinces)DropdownMenuItem(value:value,
        child:Text(value,overflow:TextOverflow.ellipsis))],
-      onChanged:school==null?(v)=>refresh((){p=v??'';d='';}):null),
+      onChanged:school==null&&edit==null?(v)=>refresh((){p=v??'';d='';}):null),
      const SizedBox(height:8),
      DropdownButtonFormField<String>(
       key:ValueKey('market-district:$p:$d'),initialValue:d.isEmpty?null:d,
       isExpanded:true,decoration:const InputDecoration(labelText:'Huyện cũ *'),
       items:[for(final value in regions.districts[p]??<String>[])
        DropdownMenuItem(value:value,child:Text(value,overflow:TextOverflow.ellipsis))],
-      onChanged:school==null?(v)=>refresh(()=>d=v??''):null),
+      onChanged:school==null&&edit==null?(v)=>refresh(()=>d=v??''):null),
      const SizedBox(height:8),
      TextField(controller:address,maxLength:500,decoration:const InputDecoration(labelText:'Địa chỉ *')),
      const SizedBox(height:8),
@@ -197,18 +202,21 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
        ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content:Text('Cần tên, địa bàn, địa chỉ; MST nếu có phải đủ 10 hoặc 13 số')));return;
       }
       Navigator.pop(ctx,{
-       'client_ref':const Uuid().v4(),'name':n,'address_line':a,'province':p,
-       'district':d,'category':category,'phone':phone.text.trim().isEmpty?null:phone.text.trim(),
+       'client_ref':const Uuid().v4(),'name':n,'address_line':a,
+       if(edit==null)'province':p,
+       if(edit==null)'district':d,
+       if(edit!=null)'version':edit['version'],
+       'category':category,'phone':phone.text.trim().isEmpty?null:phone.text.trim(),
        'tax_code':t.isEmpty?null:t,'note':note.text.trim(),
-       if(school!=null)'school_id':school['id'],
+       if(school!=null&&edit==null)'school_id':school['id'],
       });
-     },child:const Text('Lưu điểm bán'))],
+     },child:Text(edit==null?'Lưu điểm bán':'Lưu sửa'))],
    )));
    if(payload==null||!mounted)return;
    final mst=payload['tax_code'] as String?;
-   if(mst!=null&& !await _confirmTax(mst))return;
-   await widget.queue.enqueue('/api/v1/market-prospects',payload);
-   _notice('Đã lưu điểm bán trên máy · chờ đồng bộ');
+   if(mst!=null&&mst!=edit?['tax_code']?.toString()&& !await _confirmTax(mst))return;
+   await widget.queue.enqueue(edit==null?'/api/v1/market-prospects':'/api/v1/market-prospects/${edit['id']}',payload,method:edit==null?'POST':'PATCH');
+   _notice('Đã lưu thông tin trên máy · chờ đồng bộ');
    if(mounted)setState((){});
   }catch(e){_notice('Chưa lưu được: $e');}
   finally{name.dispose();address.dispose();phone.dispose();tax.dispose();note.dispose();}
@@ -374,8 +382,11 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
       FilledButton.tonal(onPressed:()=>_convert(lead),child:const Text('Đưa vào KH')),
      if(isNew&&!pending&&lead['pending_status']==null)
       PopupMenuButton<String>(tooltip:'Thao tác khác',
-       onSelected:(v){if(v=='close')unawaited(_close(lead));},
-       itemBuilder:(_)=>[const PopupMenuItem(value:'close',child:Text('Không phù hợp'))]),
+       onSelected:(v){if(v=='close')unawaited(_close(lead));if(v=='edit')unawaited(_create(edit:lead));},
+       itemBuilder:(_)=>const [
+        PopupMenuItem(value:'edit',child:Text('Sửa điểm bán')),
+        PopupMenuItem(value:'close',child:Text('Không phù hợp')),
+       ]),
     ]),
    ])));
  }
