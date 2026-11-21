@@ -62,7 +62,8 @@ export async function marketProspectRoutes(req:Request,env:AuthEnv,actor:Actor,u
       p.phone,p.tax_code,p.note,p.source_kind,p.school_id,p.status,p.converted_customer_id,
       p.last_visit_at,p.last_visit_latitude,p.last_visit_longitude,p.version,p.created_at,
       s.name AS school_name,
-      (SELECT count(*)::int FROM public.field_prospect_visits v WHERE v.prospect_id=p.id) AS visits
+      (SELECT count(*)::int FROM public.field_prospect_visits v WHERE v.prospect_id=p.id) AS visits,
+      (SELECT count(*)::int FROM public.field_market_prospect_photos f WHERE f.prospect_id=p.id AND f.status='ready') AS photo_count
     FROM public.field_prospects p LEFT JOIN public.schools s ON s.id=p.school_id
     WHERE p.province IS NOT NULL AND
      (${actor.admin} OR p.owner_sub=${actor.sub} OR
