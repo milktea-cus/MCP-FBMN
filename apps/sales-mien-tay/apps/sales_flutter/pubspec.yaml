@@ -1,7 +1,7 @@
 name: sales_mien_tay
 publish_to: none
 description: Field Work - ứng dụng Sales offline-first Android/PWA
-version: 1.0.0-rc.12+12
+version: 1.0.0-rc.13+13
 environment:
   sdk: '>=3.5.0 <4.0.0'
 dependencies:
