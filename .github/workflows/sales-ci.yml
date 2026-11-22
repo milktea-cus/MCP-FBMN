@@ -23,7 +23,7 @@ permissions:
 # application/auth source changes use distinct cancellation groups, so a
 # school inventory commit cannot cancel a critical Android release gate.
 concurrency:
-  group: sales-ci-forms-v3-${{ github.workflow }}-${{ github.ref }}-${{ startsWith(github.event.head_commit.message, 'data(schools):') && 'school-audit' || 'app-auth' }}
+  group: sales-ci-forms-v4-${{ github.workflow }}-${{ github.ref }}-${{ startsWith(github.event.head_commit.message, 'data(schools):') && 'school-audit' || (startsWith(github.event.head_commit.message, 'data(hcm):') || startsWith(github.event.head_commit.message, 'docs(hcm):')) && 'hcm-research' || 'app-auth' }}
   cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
