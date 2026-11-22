@@ -433,73 +433,116 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
   final blocked=lead['pending_status']=='blocked';
   final name=lead['name']?.toString()??'Điểm bán';
   final address=lead['address_line']?.toString()??'';
+  final phone=lead['phone']?.toString().trim()??'';
+  final hasPhone=phone.isNotEmpty;
+  final pending=widget.queue.pending.any((r)=>
+   r['path']?.toString().startsWith('/api/v1/market-prospects/${lead['id']}/')==true);
+  final canManage=isNew&&!pending&&lead['pending_status']==null;
+  final canConvert=isNew&&visits>0&&!pending;
   final maps=Uri.https('www.google.com','/maps/search/',{
    'api':'1','query':'$name, $address, ${lead['district']}, ${lead['province']}, Việt Nam',
   });
-  final pending=widget.queue.pending.any((r)=>
-   r['path']?.toString().startsWith('/api/v1/market-prospects/${lead['id']}/')==true);
+  final theme=Theme.of(context);
+  final scheme=theme.colorScheme;
+  final statusLabel=converted?'Đã chuyển':lead['status']=='closed'?'Không phù hợp':
+   visits>0?'Đã ghé':'Chưa ghé';
+  // The 44px action targets follow SalesTheme; secondary actions live in the
+  // overflow menu so the row never wraps on 320–390px phones.
+  const touch=BoxConstraints(minWidth:44,minHeight:44);
+  final actionStyle=TextButton.styleFrom(
+   minimumSize:const Size(0,44),
+   padding:const EdgeInsets.symmetric(horizontal:4),
+   textStyle:const TextStyle(fontWeight:FontWeight.w700),
+  );
   return Card(margin:const EdgeInsets.fromLTRB(10,4,10,4),
    child:Padding(padding:const EdgeInsets.all(12),child:Column(
     crossAxisAlignment:CrossAxisAlignment.start,children:[
-    Row(children:[
-     Expanded(child:Text(name,style:Theme.of(context).textTheme.titleSmall)),
-     Text(converted?'Đã chuyển':lead['status']=='closed'?'Không phù hợp':
-      visits>0?'Đã ghé':'Chưa ghé',
-      style:Theme.of(context).textTheme.labelMedium),
+    Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
+     Expanded(child:Text(name,
+      style:(theme.textTheme.titleMedium??const TextStyle()).copyWith(
+       fontSize:18,fontWeight:FontWeight.w800,height:1.25,color:scheme.onSurface))),
+     const SizedBox(width:8),
+     DecoratedBox(
+      decoration:BoxDecoration(
+       color:scheme.surfaceContainerHighest,
+       borderRadius:BorderRadius.circular(SalesTheme.controlRadius)),
+      child:Padding(padding:const EdgeInsets.symmetric(horizontal:8,vertical:6),
+       child:Text(statusLabel,style:theme.textTheme.labelMedium))),
     ]),
-    const SizedBox(height:4),
-    Text('${lead['district']} · ${lead['province']}',style:Theme.of(context).textTheme.bodySmall),
+    const SizedBox(height:8),
+    Text('${lead['district']} · ${lead['province']}',style:theme.textTheme.bodySmall),
+    const SizedBox(height:2),
     Text(address,maxLines:2,overflow:TextOverflow.ellipsis),
     if(lead['school_name']!=null)
-      Text('Nguồn: ${lead['school_name']}',style:Theme.of(context).textTheme.labelSmall),
+      Text('Nguồn: ${lead['school_name']}',style:theme.textTheme.labelSmall),
     if(lead['tax_code']!=null)
-      Text('MST: ${lead['tax_code']}',style:Theme.of(context).textTheme.labelSmall),
+      Text('MST: ${lead['tax_code']}',style:theme.textTheme.labelSmall),
     if((lead['photo_count'] as num?)?.toInt()!=null)
-      Text('Ảnh thực tế: ${lead['photo_count']}',style:Theme.of(context).textTheme.labelSmall),
+      Text('Ảnh thực tế: ${lead['photo_count']}',style:theme.textTheme.labelSmall),
     if(lead['pending_status']!=null||pending)
       Text(blocked?'Đồng bộ bị từ chối · xem Chi tiết đồng bộ':'Có thao tác chờ đồng bộ',
-        style:TextStyle(color:Theme.of(context).colorScheme.error)),
-    Wrap(spacing:1,runSpacing:0,crossAxisAlignment:WrapCrossAlignment.center,
-     children:[
+        style:TextStyle(color:scheme.error)),
+    const Divider(height:16),
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
      IconButton(tooltip:'Tìm trên Google Maps (chưa xác minh cổng)',
+      constraints:touch,
       onPressed:()=>launchUrl(maps,mode:LaunchMode.externalApplication),
       icon:const Icon(Icons.directions_outlined)),
-     if((lead['phone']?.toString()??'').isNotEmpty)...[
-      IconButton(tooltip:'Gọi điện',
-       onPressed:()=>launchUrl(Uri(scheme:'tel',path:lead['phone'].toString())),
+     if(hasPhone)
+      IconButton(tooltip:'Gọi điện',constraints:touch,
+       onPressed:()=>launchUrl(Uri(scheme:'tel',path:phone)),
        icon:const Icon(Icons.phone_outlined)),
-      IconButton(tooltip:'Mở Zalo',
-       onPressed:(){
-        final number=lead['phone'].toString().replaceAll(RegExp(r'[^0-9]'),'');
-        if(number.isNotEmpty)launchUrl(Uri.https('zalo.me','/$number'),
-          mode:LaunchMode.externalApplication);
-       },
-       icon:const Icon(Icons.chat_bubble_outline)),
-     ],
      IconButton(tooltip:'Xem chi tiết, lịch sử và ảnh',
+      constraints:touch,
       onPressed:()=>_details(lead),icon:const Icon(Icons.info_outline)),
-     if(isNew)PopupMenuButton<ImageSource>(
-      tooltip:'Chụp hoặc chọn ảnh cửa hàng',
-      icon:const Icon(Icons.add_a_photo_outlined),
-      onSelected:(source)=>unawaited(_photo(lead,source)),
-      itemBuilder:(_)=>const [
-       PopupMenuItem(value:ImageSource.camera,child:Text('Chụp ảnh')),
-       PopupMenuItem(value:ImageSource.gallery,child:Text('Chọn ảnh')),
-      ]),
      if(isNew&&!converted)
-      TextButton(onPressed:blocked?null:()=>_visit(lead),child:const Text('Ghé thăm')),
-     if(isNew&&visits>0&&!pending)
-      FilledButton.tonal(onPressed:()=>_convert(lead),child:const Text('Đưa vào KH')),
+      Flexible(child:TextButton(style:actionStyle,
+       onPressed:blocked?null:()=>_visit(lead),
+       child:const Text('Ghé thăm',maxLines:1,overflow:TextOverflow.ellipsis))),
      if(converted)
-      TextButton.icon(onPressed:()=>_openConvertedCustomer(lead),
-       icon:const Icon(Icons.open_in_new,size:18),label:const Text('Hồ sơ KH')),
-     if(isNew&&!pending&&lead['pending_status']==null)
-      PopupMenuButton<String>(tooltip:'Thao tác khác',
-       onSelected:(v){if(v=='close')unawaited(_close(lead));if(v=='edit')unawaited(_create(edit:lead));},
-       itemBuilder:(_)=>const [
-        PopupMenuItem(value:'edit',child:Text('Sửa điểm bán')),
-        PopupMenuItem(value:'close',child:Text('Không phù hợp')),
-       ]),
+      Flexible(child:TextButton(style:actionStyle,
+       onPressed:()=>_openConvertedCustomer(lead),
+       child:const Text('Hồ sơ KH',maxLines:1,overflow:TextOverflow.ellipsis))),
+     if(hasPhone||isNew)
+      PopupMenuButton<String>(
+       tooltip:'Thao tác khác',
+       onSelected:(action){
+        switch(action){
+         case 'zalo':
+          final number=phone.replaceAll(RegExp(r'[^0-9]'),'');
+          if(number.isNotEmpty){
+           unawaited(launchUrl(Uri.https('zalo.me','/$number'),
+            mode:LaunchMode.externalApplication));
+          }
+         case 'camera':
+          unawaited(_photo(lead,ImageSource.camera));
+         case 'gallery':
+          unawaited(_photo(lead,ImageSource.gallery));
+         case 'convert':
+          unawaited(_convert(lead));
+         case 'edit':
+          unawaited(_create(edit:lead));
+         case 'close':
+          unawaited(_close(lead));
+        }
+       },
+       itemBuilder:(_)=>[
+        if(hasPhone)
+         const PopupMenuItem(value:'zalo',child:Text('Mở Zalo')),
+        if(isNew)...[
+         const PopupMenuItem(value:'camera',child:Text('Chụp ảnh cửa hàng')),
+         const PopupMenuItem(value:'gallery',child:Text('Chọn ảnh từ máy')),
+        ],
+        if(canConvert)
+         const PopupMenuItem(value:'convert',child:Text('Đưa vào Khách hàng')),
+        if(canManage)...[
+         const PopupMenuItem(value:'edit',child:Text('Sửa điểm bán')),
+         const PopupMenuItem(value:'close',child:Text('Không phù hợp')),
+        ],
+       ],
+       child:const SizedBox(width:44,height:44,
+        child:Center(child:Icon(Icons.more_horiz))),
+      ),
     ]),
    ])));
  }
