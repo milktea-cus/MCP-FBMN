@@ -507,23 +507,22 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
       PopupMenuButton<String>(
        tooltip:'Thao tác khác',
        onSelected:(action){
-        switch(action){
-         case 'zalo':
-          final number=phone.replaceAll(RegExp(r'[^0-9]'),'');
-          if(number.isNotEmpty){
-           unawaited(launchUrl(Uri.https('zalo.me','/$number'),
-            mode:LaunchMode.externalApplication));
-          }
-         case 'camera':
-          unawaited(_photo(lead,ImageSource.camera));
-         case 'gallery':
-          unawaited(_photo(lead,ImageSource.gallery));
-         case 'convert':
-          unawaited(_convert(lead));
-         case 'edit':
-          unawaited(_create(edit:lead));
-         case 'close':
-          unawaited(_close(lead));
+        if(action=='zalo'){
+         final number=phone.replaceAll(RegExp(r'[^0-9]'),'');
+         if(number.isNotEmpty){
+          launchUrl(Uri.https('zalo.me','/$number'),
+           mode:LaunchMode.externalApplication);
+         }
+        }else if(action=='camera'){
+         unawaited(_photo(lead,ImageSource.camera));
+        }else if(action=='gallery'){
+         unawaited(_photo(lead,ImageSource.gallery));
+        }else if(action=='convert'){
+         unawaited(_convert(lead));
+        }else if(action=='edit'){
+         unawaited(_create(edit:lead));
+        }else if(action=='close'){
+         unawaited(_close(lead));
         }
        },
        itemBuilder:(_)=>[
