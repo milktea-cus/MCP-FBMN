@@ -155,11 +155,16 @@ export default {
             .map(([p,ds])=>[p,ds.filter(d=>user.scopes.some(s=>s.province===p
               && (s.district===''||s.district===d)))]));
         const metaDb=neon(env.DATABASE_URL);
-        const [configured,visible]=await Promise.all([
+        const [configured,visible,visibleProspects]=await Promise.all([
           metaDb`SELECT t.name,t.level,p.name AS province FROM public.territory_catalog t
             LEFT JOIN public.territory_catalog p ON p.code=t.parent_code WHERE t.active`,
           metaDb`SELECT DISTINCT c.province,c.district FROM public.customers c
-            WHERE public.sales_customer_allowed(${user.sub},c.id,'view')`
+            WHERE public.sales_customer_allowed(${user.sub},c.id,'view')`,
+          // Publicly researched prospects may exist before the first customer
+          // in a territory. Show these locations only when ACL allows access.
+          metaDb`SELECT DISTINCT p.province,p.district FROM public.field_prospects p
+            WHERE p.province IS NOT NULL AND p.research_source_key IS NOT NULL
+              AND public.sales_market_prospect_allowed(${user.sub},p.id)`
         ]);
         for(const t of configured){
           const province=t.level==='province'?String(t.name):String(t.province??'');
@@ -175,7 +180,7 @@ export default {
             allowed[province]=ds;
           }
         }
-        for(const c of visible){
+        for(const c of [...visible,...visibleProspects]){
           const province=String(c.province),district=String(c.district);
           const ds=allowed[province]??[];
           if(district&&!ds.includes(district))ds.push(district);
