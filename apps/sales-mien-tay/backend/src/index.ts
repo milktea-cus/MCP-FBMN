@@ -155,7 +155,7 @@ export default {
             .map(([p,ds])=>[p,ds.filter(d=>user.scopes.some(s=>s.province===p
               && (s.district===''||s.district===d)))]));
         const metaDb=neon(env.DATABASE_URL);
-        const [configured,visible,visibleProspects]=await Promise.all([
+        const [configured,visible,visibleProspects,enabledWards]=await Promise.all([
           metaDb`SELECT t.name,t.level,p.name AS province FROM public.territory_catalog t
             LEFT JOIN public.territory_catalog p ON p.code=t.parent_code WHERE t.active`,
           metaDb`SELECT DISTINCT c.province,c.district FROM public.customers c
@@ -164,7 +164,9 @@ export default {
           // in a territory. Show these locations only when ACL allows access.
           metaDb`SELECT DISTINCT p.province,p.district FROM public.field_prospects p
             WHERE p.province IS NOT NULL AND p.research_source_key IS NOT NULL
-              AND public.sales_market_prospect_allowed(${user.sub},p.id)`
+              AND public.sales_market_prospect_allowed(${user.sub},p.id)`,
+          metaDb`SELECT w.province,w.ward_new,w.legacy_district
+            FROM public.sales_hcm_old_wards w WHERE w.active ORDER BY w.ward_new`
         ]);
         for(const t of configured){
           const province=t.level==='province'?String(t.name):String(t.province??'');
@@ -186,7 +188,13 @@ export default {
           if(district&&!ds.includes(district))ds.push(district);
           allowed[province]=ds;
         }
-        return json({districts:allowed,kinds});
+        const currentWards:Record<string,string[]>={};
+        for(const w of enabledWards){
+          const p=String(w.province),d=String(w.legacy_district);
+          if(!allowed[p]?.includes(d))continue;
+          (currentWards[p]??=[]).push(String(w.ward_new));
+        }
+        return json({districts:allowed,kinds,wards:currentWards});
       }
       if (!env.DATABASE_URL) return bad('DATABASE_URL chưa được cấu hình', 503);
       const schoolsResponse=await schoolRoutes(req,env,user,url);
