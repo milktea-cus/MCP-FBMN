@@ -1,7 +1,16 @@
 # MCP-FBMN — KIỂM KÊ 13 TỈNH CŨ: KẾT THÚC VÒNG 1, BẮT ĐẦU VÒNG 2
 Ngày: **21/11/2026**. Repository `milktea-cus/MCP-FBMN` branch `main`; Neon production project `raspy-bar-51596929`, branch `br-super-mountain-bdije4mj`.
 
-## Cập nhật migration 158 — 22/11/2026 (snapshot hiện hành)
+## Cập nhật migration 159 — Hậu Giang cũ, chỉ 3 huyện (22/11/2026; snapshot hiện hành)
+
+- **Phạm vi cố định:** `Huyện Long Mỹ`, `Huyện Vị Thủy`, `Huyện Phụng Hiệp` thuộc **Hậu Giang cũ**; KHÔNG rà lan tỉnh khác trong lô 159. [Báo cáo chi tiết nguồn, địa giới, trùng và các điểm cần Sales xác minh](OLD13_ROUND02_HAU_GIANG_3_DISTRICTS_BATCH01_2026_11_22.md).
+- **Migration [`159_hau_giang_old_round02_three_districts_2026.sql`](../backend/migrations/159_hau_giang_old_round02_three_districts_2026.sql)**; commit [`9d80b89`](https://github.com/milktea-cus/MCP-FBMN/commit/9d80b893f55befb6999d55d3166cba3e3e997e95). Đã nhập **4 lead nghiên cứu chưa ghé**: Vị Thủy +2 (`Photo - VPP Phương Phương`, `VPP Sáu Cáo`), Phụng Hiệp +2 (`VPP Vân Duyên`, `VPP Việt Chương`); **Huyện Long Mỹ +0** do chưa thấy nguồn điểm bán đủ chuẩn đúng huyện.
+- **Neon production sau migration 159:** **730** lead, phủ **132/134** địa bàn cũ; số địa bàn có 1–2 lead còn **27** (trước 159: 29); số có điện thoại **534**. Toàn bộ 730/730 lead `new`, có HTTPS và source key; GPS/lượt ghé đánh dấu **0**, source key trùng **0**. Chạy lại SQL 159 trả **0** dòng.
+- **Độ phủ riêng 3 huyện đã rà:** `Huyện Long Mỹ: 0 lead`; `Huyện Vị Thủy: 4 lead`; `Huyện Phụng Hiệp: 4 lead`. `NS Thể Minh` khách chính nằm ở DB với gán `Huyện Long Mỹ` nhưng nguồn cho thấy thuộc thị xã cũ; không sửa `customers` trong migration lead và không đếm khách chính thành lead.
+- **Nguồn loại trừ:** `Nhà sách Long Mỹ` số 142K/30-4 nằm ở **Thị xã Long Mỹ cũ** (không phải Huyện Long Mỹ); `VPP Sáu Nên` Kinh Cùng có danh bạ nhưng tên Google Maps khác (`Hương Giang`), không nhập; `Phương Vy` chỉ có hồ sơ bán buôn thiết bị và chi nhánh `Hồng Ân` tại Vĩnh Viễn đã ngừng, không nhập. Điểm từ nhà sách/VPP đã có trong `customers` hoặc `field_prospects` không thêm lại.
+- **Trạng thái:** nghiên cứu nguồn công khai, chưa nghiệm thu cửa hàng đang hoạt động 2026, GPS 100m hoặc thiết bị thật. Chỉ sửa dữ liệu/tài liệu, không deploy lại Worker/Vercel. Đợt tiếp theo tiếp tục Hậu Giang cũ theo nhóm 3 địa bàn mỗi lượt, không trộn tỉnh.
+
+## Cập nhật migration 158 — 22/11/2026 (snapshot lịch sử trước 159)
 
 | Chỉ số | Neon production sau migration 158 |
 |---|---:|
