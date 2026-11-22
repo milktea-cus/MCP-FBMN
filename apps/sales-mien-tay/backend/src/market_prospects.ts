@@ -114,10 +114,12 @@ export async function marketProspectRoutes(req:Request,env:AuthEnv,actor:Actor,u
   const id=b.client_ref;
   const name=clean(b.name,240),address=clean(b.address_line,500);
   const province=clean(b.province,120),district=clean(b.district,120);
+  const wardNew=clean(b.ward_new,120)||null;
   const category=b.category??'khac',phone=clean(b.phone,20),note=clean(b.note,2000)??'';
   const code=tax(b.tax_code),school=b.school_id??null;
   if(typeof id!=='string'||!uuid.test(id)||!name||name.length<2||
    !address||address.length<3||!province||!district||
+   (province==='TP Hồ Chí Minh'?!wardNew:wardNew!==null)||
    !['tap_hoa','sieu_thi','dai_ly','npp','nha_sach','van_phong_pham','cua_hang','khac'].includes(String(category))||
    code===undefined||(b.phone!==null&&b.phone!==undefined&&b.phone!==''&&(!phone||phone.length<8))||
    (school!==null&&(typeof school!=='string'||!uuid.test(school))))return fail('Dữ liệu điểm bán không hợp lệ');
@@ -128,9 +130,15 @@ export async function marketProspectRoutes(req:Request,env:AuthEnv,actor:Actor,u
    if(!valid.length)return fail('Tỉnh huyện không hợp lệ');
   }
   try{
-   const rows=await db`SELECT public.sales_market_prospect_create(
-    ${actor.sub},${id}::uuid,${name},${address},${province},${district},
-    ${String(category)},${phone||null},${code??null},${note},${school}::uuid) AS item`;
+   // The same SQL transaction validates legacy territory ACL and atomically
+   // writes a whitelisted current ward. Other provinces retain old semantics.
+   const rows=province==='TP Hồ Chí Minh'
+    ?await db`SELECT public.sales_market_prospect_create_with_ward(
+     ${actor.sub},${id}::uuid,${name},${address},${province},${district},${wardNew},
+     ${String(category)},${phone||null},${code??null},${note},${school}::uuid) AS item`
+    :await db`SELECT public.sales_market_prospect_create(
+     ${actor.sub},${id}::uuid,${name},${address},${province},${district},
+     ${String(category)},${phone||null},${code??null},${note},${school}::uuid) AS item`;
    return respond({item:rows[0]?.item},201);
   }catch(e){return failure(e);}
  }
