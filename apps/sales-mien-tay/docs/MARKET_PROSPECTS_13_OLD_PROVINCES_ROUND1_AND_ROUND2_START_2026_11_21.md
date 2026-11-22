@@ -1,7 +1,28 @@
 # MCP-FBMN — KIỂM KÊ 13 TỈNH CŨ: KẾT THÚC VÒNG 1, BẮT ĐẦU VÒNG 2
 Ngày: **21/11/2026**. Repository `milktea-cus/MCP-FBMN` branch `main`; Neon production project `raspy-bar-51596929`, branch `br-super-mountain-bdije4mj`.
 
-## Cập nhật migration 157 — 21/11/2026 (snapshot hiện hành)
+## Cập nhật migration 158 — 22/11/2026 (snapshot hiện hành)
+
+| Chỉ số | Neon production sau migration 158 |
+|---|---:|
+| Lead nghiên cứu `field_prospects` | **726** (+2 so với 157) |
+| Địa bàn cũ có lead | **132/134** (không đổi) |
+| Địa bàn còn 1–2 lead | **29** (giảm từ 31) |
+| Lead có source URL HTTPS / source key | **726/726** / **726/726** |
+| Lead trạng thái `new`, chưa ghé | **726/726** |
+| Có lượt ghé / GPS ghé | **0** |
+| Có số điện thoại | **533** |
+| `research_source_key` trùng | **0** |
+
+- SQL migration [`158_old_provinces_round02_an_minh_cu_lao_dung_2026.sql`](../backend/migrations/158_old_provinces_round02_an_minh_cu_lao_dung_2026.sql) đã commit trên `main` trước khi nhập Neon; commit [`af5cdc7`](https://github.com/milktea-cus/MCP-FBMN/commit/af5cdc700c22136c8596f0095c4bf138ab80a678). Chèn **2** bản ghi online chưa ghé:
+  - `Tiệm Sách Huệ Minh` — `JW6V+8V9`, khu Thứ Mười Một/An Minh, **Kiên Giang cũ**, điện thoại `0398694325`, Google Maps ID `ChIJdUYyjWMrpzERzKzmP-i3JYg`, nguồn https://www.google.com/maps/search/?api=1&query=Ti%E1%BB%87m%20S%C3%A1ch%20Hu%E1%BB%87%20Minh%20An%20Minh&query_place_id=ChIJdUYyjWMrpzERzKzmP-i3JYg . **Chỉ là ứng viên**: Maps hiện xếp danh mục `Grocery store` dù tên Tiệm Sách; Sales cần gọi/ghé xác nhận có bán sách/VPP. Không tự suy ra hoạt động năm 2026.
+  - `Cửa hàng văn phòng phẩm Cô Trâm` — `M572+P42`, Đoàn Thế Trung, khu An Thạnh/Cù Lao Dung, **Sóc Trăng cũ**, điện thoại `0939835194`, Google Maps ID `ChIJSUM0MQBJoDERTIfR6fnxeqw`, nguồn https://www.google.com/maps/search/?api=1&query=C%E1%BB%ADa%20h%C3%A0ng%20v%C4%83n%20ph%C3%B2ng%20ph%E1%BA%A9m%20C%C3%B4%20Tr%C3%A2m%20C%C3%B9%20Lao%20Dung&query_place_id=ChIJSUM0MQBJoDERTIfR6fnxeqw . Google Maps xếp `Stationery store`, phản hồi có đề cập mua dụng cụ học tập; vẫn chưa xác minh thực địa.
+- Kiểm tra Neon **chạy lại migration 158 trả 0 dòng thêm**, cả 726 lead `new`, không dấu lượt ghé/GPS, `research_source_key` trùng 0. Không tạo khách chính hay gắn quyền Sales giả.
+- **Cảnh báo nguồn trùng, không nhập:** `Thiệp cưới Nhung – In áo nhóm – Văn phòng phẩm` tại Ngũ Lạc / Huyện Duyên Hải đã tồn tại trong `field_prospects` (Google Maps ID `ChIJ75kfUDQloDERBqB_sVLHRT0`); không thêm lại từ nguồn Sổ Tay Vàng. `Dịch vụ VPP – Photocopy Đào`, `Hết Loan Ấp 10 Biển` (An Minh); `VPP Giang Thành`, `VPP – Hoa kiểng Phú Mỹ` (Giang Thành) đều đã nhập. `Nhà Sách Trí Oanh` số 9 An Dương Vương/Năm Căn đang chờ phân biệt với `Nhà sách Oanh Oanh` số 83 An Dương Vương/Năm Căn, không nhập để tránh trùng mờ; số điện thoại và Map ID khác nhau nhưng có thể cùng chủ/chuyển địa chỉ.
+- **Hai huyện P0 vẫn trắng**: `Huyện Long Mỹ/Hậu Giang cũ` và `Huyện Vĩnh Lợi/Bạc Liêu cũ`. Nguồn rà lại có `Nhà Sách Long Mỹ` ở **thị xã Long Mỹ cũ**, `Công ty TNHH Sách và VPP Hậu Giang` ở **TP Vị Thanh cũ** (không phải huyện Long Mỹ); `Tin học Mực in Nam Phương` và `Tiệm Photo Hoài Nan` tại Vĩnh Lợi chủ yếu được Maps xếp `Print shop`/`Copying supply store`, chưa có chứng cứ bán sách/VPP. Không thêm để đạt chỉ tiêu 134/134.
+- Đối chiếu báo cáo gốc và Neon về `NS Thể Minh`: khách chính đang gán Huyện Long Mỹ nhưng địa chỉ nguồn đặt tại **Thị xã Long Mỹ cũ**; giữ nguyên khách chính chờ đối soát chủ dữ liệu, không sửa phân quyền/tuyến. Không deploy Worker/Vercel vì chỉ bổ sung SQL/tài liệu, không được coi là nghiệm thu UI/API/Android.
+
+## Cập nhật migration 157 — 21/11/2026 (snapshot lịch sử trước 158)
 
 | Chỉ số | Neon production sau khi chạy migration 157 |
 |---|---:|
