@@ -184,6 +184,22 @@ jobs:
       - run: flutter pub get
       - name: Generate brand icons
         run: python3 scripts/generate_app_icons.py
+      - name: Prefer Maven Central for Flutter Gradle composite build
+        # Flutter's included Gradle build may resolve Kotlin from the plugin
+        # portal alone; the artifact is published on Maven Central.
+        # Apply to included builds as well, without changing release signing.
+        shell: bash
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/flutter-plugin-repositories.gradle <<'GRADLE'
+          gradle.beforeSettings { settings ->
+            settings.pluginManagement.repositories {
+              mavenCentral()
+              google()
+              gradlePluginPortal()
+            }
+          }
+          GRADLE
       - name: Compile debug APK
         run: flutter build apk --debug
       - uses: actions/upload-artifact@v4
