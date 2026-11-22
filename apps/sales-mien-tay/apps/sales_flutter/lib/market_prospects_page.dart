@@ -28,7 +28,8 @@ class MarketProspectsPage extends StatefulWidget {
 class _MarketProspectsPageState extends State<MarketProspectsPage>{
  final search=TextEditingController();
  Timer? debounce;
- String province='',district='',status='';
+ String province='',district='',wardNew='',status='';
+ List<String> availableWards=[];
  List<Map<String,dynamic>> items=[];
  int page=0,total=0,generation=0;
  bool loading=false,offline=false,more=false;
@@ -47,10 +48,10 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
   super.dispose();
  }
  void _queueChanged(){if(mounted)setState((){});}
- String _cacheKey(int n)=>'market-prospects:v2:${widget.initialSchool?['id']??''}:$province:$district:$status:$n';
+ String _cacheKey(int n)=>'market-prospects:v3:${widget.initialSchool?['id']??''}:$province:$district:$wardNew:$status:$n';
  Future<void> _load({bool append=false})async{
   final token=++generation,next=append?page+1:1;
-  final p=province,d=district,s=status,q=search.text.trim();
+  final p=province,d=district,w=wardNew,s=status,q=search.text.trim();
   setState((){loading=true;error=null;if(!append){items=[];page=0;total=0;more=false;}});
   bool cached=false;
   if(q.isEmpty&&next<=3)try{
@@ -65,6 +66,7 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
    final uri=Uri(path:'/api/v1/market-prospects',queryParameters:{
     'page':'$next','size':'20',
     if(p.isNotEmpty)'province':p,if(d.isNotEmpty)'district':d,
+    if(w.isNotEmpty)'ward_new':w,
     if(s.isNotEmpty)'status':s,
     if(q.isNotEmpty)'q':q,
     if(widget.initialSchool?['id']!=null)'school_id':widget.initialSchool!['id'].toString(),
@@ -74,6 +76,8 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
    final rows=(data['items'] as List? ?? [])
      .map((v)=>Map<String,dynamic>.from(v as Map)).toList();
    total=(data['total'] as num?)?.toInt()??0;
+   availableWards=(data['wards'] as List? ??const [])
+    .map((v)=>v.toString()).where((v)=>v.isNotEmpty).toSet().toList()..sort();
    _apply(rows,next,append:append,local:false,hasMore:data['hasMore']==true);
    if(q.isEmpty&&next<=3)await widget.queue.cache(_cacheKey(next),rows);
   }on ApiFailure catch(e){
@@ -114,6 +118,7 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
   }).where((r)=>
    (province.isEmpty||r['province']==province)&&
    (district.isEmpty||r['district']==district)&&
+   (wardNew.isEmpty||r['ward_new']==wardNew)&&
    (status.isEmpty||status=='new')&&
    (search.text.trim().isEmpty||r['name'].toString().toLowerCase().contains(search.text.trim().toLowerCase()))&&
    (widget.initialSchool==null||r['school_id']==widget.initialSchool!['id'])
@@ -379,6 +384,14 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
       Text('${item['district']} · ${item['province']}'),
       const SizedBox(height:10),
       Text('Nguồn: ${item['source_kind']??'Chưa xác định'}'),
+       if((item['ward_new']?.toString()??'').isNotEmpty)
+        Text('Phường mới: ${item['ward_new']} · Quận/huyện cũ: ${item['district']}'),
+       if((item['address_legacy']?.toString()??'').isNotEmpty)
+        Text('Địa chỉ cũ: ${item['address_legacy']}'),
+       if((item['research_source_url']?.toString()??'').startsWith('https://'))
+        TextButton.icon(onPressed:()=>launchUrl(Uri.parse(item['research_source_url'].toString()),
+         mode:LaunchMode.externalApplication),
+         icon:const Icon(Icons.open_in_new,size:18),label:const Text('Mở nguồn nghiên cứu')),
       if(item['phone']!=null)Text('Điện thoại: ${item['phone']}'),
       if(item['tax_code']!=null)Text('MST: ${item['tax_code']}'),
       if((item['note']?.toString()??'').isNotEmpty)
@@ -470,7 +483,8 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
        child:Text(statusLabel,style:theme.textTheme.labelMedium))),
     ]),
     const SizedBox(height:8),
-    Text('${lead['district']} · ${lead['province']}',style:theme.textTheme.bodySmall),
+    Text('${(lead['ward_new']?.toString()??'').isNotEmpty?'P. ${lead['ward_new']} · ':''}${lead['district']} · ${lead['province']}',
+      style:theme.textTheme.bodySmall),
     const SizedBox(height:2),
     Text(address,maxLines:2,overflow:TextOverflow.ellipsis),
     if(lead['school_name']!=null)
@@ -547,6 +561,9 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
  }
  @override Widget build(BuildContext context){
   final all=[...pendingNew,...items.where((i)=>!pendingNew.any((p)=>p['id']==i['id']))];
+   final wards=[...availableWards];
+   if(wardNew.isNotEmpty&&!wards.contains(wardNew))wards.add(wardNew);
+   wards.sort();
   return Column(children:[
    Padding(padding:const EdgeInsets.fromLTRB(12,8,12,6),child:Column(
     crossAxisAlignment:CrossAxisAlignment.start,children:[
@@ -614,7 +631,7 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
        for(final p in widget.regions.provinces)DropdownMenuItem(value:p,
         child:Text(p,maxLines:1,overflow:TextOverflow.ellipsis))],
       onChanged:widget.initialSchool!=null?null:(v){
-       setState((){province=v??'';district='';});unawaited(_load());
+       setState((){province=v??'';district='';wardNew='';availableWards=[];});unawaited(_load());
       })),
      const SizedBox(width:6),
      Expanded(child:DropdownButtonFormField<String>(
@@ -632,7 +649,7 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
         DropdownMenuItem(value:d,
          child:Text(d,maxLines:1,overflow:TextOverflow.ellipsis))],
       onChanged:widget.initialSchool!=null||province.isEmpty?null:(v){
-       setState(()=>district=v??'');unawaited(_load());
+       setState((){district=v??'';wardNew='';availableWards=[];});unawaited(_load());
       })),
      const SizedBox(width:6),
      Expanded(child:DropdownButtonFormField<String>(
@@ -654,6 +671,24 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
       ],
       onChanged:(v){setState(()=>status=v??'');unawaited(_load());})),
     ]),
+    if(province=='TP Hồ Chí Minh')...[
+     const SizedBox(height:6),
+     DropdownButtonFormField<String>(
+      key:ValueKey('filter-new-ward:$province:$district:$wardNew'),
+      initialValue:wardNew,isExpanded:true,
+      style:Theme.of(context).textTheme.bodyMedium?.copyWith(
+       fontSize:SalesTheme.controlFontSize,
+       color:Theme.of(context).colorScheme.onSurface),
+      icon:const Icon(Icons.expand_more,size:18),
+      decoration:const InputDecoration(
+       labelText:'Phường mới · TP.HCM cũ',isDense:true,
+       contentPadding:EdgeInsets.symmetric(horizontal:8,vertical:9)),
+      items:[const DropdownMenuItem(value:'',child:Text('Tất cả phường')),
+       for(final w in wards)DropdownMenuItem(value:w,
+        child:Text(w,maxLines:1,overflow:TextOverflow.ellipsis))],
+      onChanged:(v){setState(()=>wardNew=v??'');unawaited(_load());},
+     ),
+    ],
     const SizedBox(height:6),
     Text(offline?'Dữ liệu đã lưu máy · cần mạng để cập nhật':'$total điểm bán phù hợp',
       style:Theme.of(context).textTheme.bodySmall),
