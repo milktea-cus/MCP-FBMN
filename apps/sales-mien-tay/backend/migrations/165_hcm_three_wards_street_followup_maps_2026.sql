@@ -55,5 +55,6 @@ FROM src s
 WHERE p.research_source_key=s.key
  AND p.province='TP Hồ Chí Minh' AND p.ward_new IN ('Sài Gòn','Tân Định','Bến Thành')
  AND (p.google_place_id IS NULL OR p.google_place_id=s.place)
+ AND (p.google_place_id IS DISTINCT FROM s.place OR p.google_maps_url IS NULL)
  AND NOT EXISTS (SELECT 1 FROM public.field_prospects existing
    WHERE existing.google_place_id=s.place AND existing.id<>p.id);
