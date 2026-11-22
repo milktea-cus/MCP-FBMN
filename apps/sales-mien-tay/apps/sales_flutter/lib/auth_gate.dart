@@ -128,6 +128,8 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     try{
      final meta=await session.get('/api/v1/meta');
      regions=RegionCatalog((meta['districts'] as Map<String,dynamic>)
+       .map((k,v)=>MapEntry(k,(v as List).cast<String>())),
+       Map<String,dynamic>.from(meta['wards'] as Map? ??<String,dynamic>{})
        .map((k,v)=>MapEntry(k,(v as List).cast<String>())));
     }catch(_){
      // /me already authenticated the session: /meta permission/transient
