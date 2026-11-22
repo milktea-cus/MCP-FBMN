@@ -1,7 +1,18 @@
 # MCP-FBMN — KIỂM KÊ 13 TỈNH CŨ: KẾT THÚC VÒNG 1, BẮT ĐẦU VÒNG 2
 Ngày: **21/11/2026**. Repository `milktea-cus/MCP-FBMN` branch `main`; Neon production project `raspy-bar-51596929`, branch `br-super-mountain-bdije4mj`.
 
-## Cập nhật migration 159 — Hậu Giang cũ, chỉ 3 huyện (22/11/2026; snapshot hiện hành)
+## Cập nhật migration 160 — Hậu Giang cũ, 3 địa bàn đợt 2 (22/11/2026; snapshot hiện hành)
+
+- **Chỉ rà tỉnh Hậu Giang cũ, đúng 3 địa bàn:** `Huyện Châu Thành A`, `Huyện Châu Thành`, `Thị xã Long Mỹ`. Không gộp tỉnh khác. [Báo cáo riêng, kèm nguồn và điểm loại trừ](OLD13_ROUND02_HAU_GIANG_3_DISTRICTS_BATCH02_2026_11_22.md).
+- **Migration [`160_hau_giang_old_round02_chau_thanh_a_chau_thanh_tx_long_my_2026.sql`](../backend/migrations/160_hau_giang_old_round02_chau_thanh_a_chau_thanh_tx_long_my_2026.sql)**, commit [`9434b04`](https://github.com/milktea-cus/MCP-FBMN/commit/9434b0446be30cd1f591c8fcf4fa7f9b87581ee4): **4 lead nghiên cứu, chưa ghé**. Châu Thành A +2 (Nhà sách Anh Thư, VPP Thái Ngân), Châu Thành +1 (VPP Trường Tín), Thị xã Long Mỹ +1 (VPP Móm).
+- **Neon production sau migration 160:** tổng **734 lead**, **132/134** địa bàn cũ có lead; số địa bàn có 1–2 lead giảm **27 → 24**; lead có số điện thoại **535**. Tất cả **734/734** có HTTPS/source key và trạng thái `new`; **0** được gắn GPS/visit, **0** trùng source key, batch 160 không trùng khách chính theo tên/số điện thoại. Chạy lại SQL 160 **0 dòng thêm**.
+- **Độ phủ 3 địa bàn lần này:** Châu Thành A **4** (trước 2), Châu Thành **3** (trước 2), Thị xã Long Mỹ **3** (trước 2). Tất cả chỉ là đầu mối nghiên cứu, không suy diễn còn hoạt động năm 2026.
+- **Địa giới cần tránh nhầm:** `VPP Trường Tín` được Maps hiển thị gắn `Châu Thành A`, nhưng `xã Đông Thạnh` theo Nghị định 06/2004/NĐ-CP thuộc **Huyện Châu Thành cũ**, nên nghiên cứu xếp Châu Thành và phải kiểm thực địa. `VPP Móm` ở Chiêm Thành Tấn thuộc **Thị xã Long Mỹ cũ**, không phải huyện Long Mỹ.
+- **Điểm không nhập:** VPP Sao Mai/Chợ Bảy Ngàn có nguy cơ trùng `customers.Sao Mai` cùng chợ (không nhân đôi). Cơ sở Ánh Đào và thiết bị VPP Nguyên Phát chỉ có hồ sơ ngành/chưa có bằng chứng cửa hàng thực bán. Điểm `Cửa hàng sách 170 CMT8` của NXB Giáo dục có địa chỉ/số điện thoại nhưng tên riêng không đủ; giữ để tìm tiếp, chưa chèn. Các nhà sách Ngọc Tiến, Minh Thư, Thể Minh và Long Mỹ, VPP Song Di đã có trong DB.
+- **Hậu Giang cũ:** đã xử lý 6/8 địa bàn trong 2 đợt nhóm 3, **đợt 3 còn 2 địa bàn** (`Thành phố Vị Thanh`, `Thành phố Ngã Bảy`). `Huyện Long Mỹ` thuộc đợt 1 vẫn **0 lead** (khác thị xã Long Mỹ); **Huyện Vĩnh Lợi/Bạc Liêu cũ** vẫn 0, không được tự thêm điểm khác huyện để đạt 134/134.
+- **Nghiệm thu:** chỉ SQL và tài liệu; không deploy Worker/Vercel; kiểm CI của commit cuối riêng; chưa nghiệm thu API/Auth/PWA/Android hay GPS trên thiết bị thật.
+
+## Cập nhật migration 159 — Hậu Giang cũ, chỉ 3 huyện (22/11/2026; snapshot lịch sử trước 160)
 
 - **Phạm vi cố định:** `Huyện Long Mỹ`, `Huyện Vị Thủy`, `Huyện Phụng Hiệp` thuộc **Hậu Giang cũ**; KHÔNG rà lan tỉnh khác trong lô 159. [Báo cáo chi tiết nguồn, địa giới, trùng và các điểm cần Sales xác minh](OLD13_ROUND02_HAU_GIANG_3_DISTRICTS_BATCH01_2026_11_22.md).
 - **Migration [`159_hau_giang_old_round02_three_districts_2026.sql`](../backend/migrations/159_hau_giang_old_round02_three_districts_2026.sql)**; commit [`9d80b89`](https://github.com/milktea-cus/MCP-FBMN/commit/9d80b893f55befb6999d55d3166cba3e3e997e95). Đã nhập **4 lead nghiên cứu chưa ghé**: Vị Thủy +2 (`Photo - VPP Phương Phương`, `VPP Sáu Cáo`), Phụng Hiệp +2 (`VPP Vân Duyên`, `VPP Việt Chương`); **Huyện Long Mỹ +0** do chưa thấy nguồn điểm bán đủ chuẩn đúng huyện.
