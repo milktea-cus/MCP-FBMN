@@ -48,17 +48,19 @@ export async function marketProspectRoutes(req:Request,env:AuthEnv,actor:Actor,u
  if(url.pathname===base&&req.method==='GET'){
   const province=(url.searchParams.get('province')??'').trim();
   const district=(url.searchParams.get('district')??'').trim();
+  const wardNew=(url.searchParams.get('ward_new')??'').trim();
   const status=(url.searchParams.get('status')??'').trim();
   const search=(url.searchParams.get('q')??'').trim();
   const schoolId=(url.searchParams.get('school_id')??'').trim();
   const page=numberParam(url.searchParams.get('page'),1,10000);
   const size=numberParam(url.searchParams.get('size'),20,50);
-  if(!page||!size||search.length>120||province.length>120||district.length>120||
-    (district!==''&&province==='')||!['','new','converted','closed'].includes(status)||
+  if(!page||!size||search.length>120||province.length>120||district.length>120||wardNew.length>120||
+    ((district!==''||wardNew!=='')&&province==='')||!['','new','converted','closed'].includes(status)||
     (schoolId!==''&&!uuid.test(schoolId)))return fail('Bộ lọc điểm bán không hợp lệ');
   const result=await db`
    WITH visible AS (
-    SELECT p.id,p.owner_sub,p.name,p.address_line,p.province,p.district,p.category,
+    SELECT p.id,p.owner_sub,p.name,p.address_line,p.province,p.district,p.ward_new,
+      p.address_legacy,p.google_maps_url,p.google_place_id,p.category,
       p.phone,p.tax_code,p.note,p.source_kind,p.school_id,p.status,p.converted_customer_id,
       p.last_visit_at,p.last_visit_latitude,p.last_visit_longitude,p.version,p.created_at,
       s.name AS school_name,
@@ -69,6 +71,7 @@ export async function marketProspectRoutes(req:Request,env:AuthEnv,actor:Actor,u
      public.sales_market_prospect_allowed(${actor.sub},p.id)
      AND (${province}='' OR p.province=${province})
      AND (${district}='' OR p.district=${district})
+     AND (${wardNew}='' OR p.ward_new=${wardNew})
      AND (${status}='' OR p.status=${status})
      AND (${schoolId}='' OR p.school_id=${schoolId||null}::uuid)
      AND (${search}='' OR position(lower(${search}) in lower(p.name))>0)
@@ -78,8 +81,17 @@ export async function marketProspectRoutes(req:Request,env:AuthEnv,actor:Actor,u
      SELECT * FROM visible ORDER BY created_at DESC,id DESC
       LIMIT ${size} OFFSET ${(page-1)*size}
     ) t),'[]'::jsonb) AS items`;
+  // Wards come only from prospects visible under server-side ACL; the
+  // parent province/district are legacy territory scopes, never new wards.
+  const wardRows=province===''?[]:await db`SELECT DISTINCT p.ward_new
+    FROM public.field_prospects p
+    WHERE p.province=${province} AND p.ward_new IS NOT NULL
+      AND (${district}='' OR p.district=${district})
+      AND public.sales_market_prospect_allowed(${actor.sub},p.id)
+    ORDER BY p.ward_new LIMIT 150`;
   return respond({items:result[0]?.items??[],total:result[0]?.total??0,
-   page,size,hasMore:page*size<Number(result[0]?.total??0)});
+   page,size,hasMore:page*size<Number(result[0]?.total??0),
+   wards:wardRows.map(r=>String(r.ward_new))});
  }
  if(url.pathname===base+'/tax-check'&&req.method==='GET'){
   const value=tax(url.searchParams.get('mst'));
