@@ -153,7 +153,8 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
    phone=TextEditingController(),tax=TextEditingController(),note=TextEditingController();
   var category=edit?['category']?.toString()??'van_phong_pham',
    p=edit?['province']?.toString()??(province.isNotEmpty?province:''),
-   d=edit?['district']?.toString()??(district.isNotEmpty?district:'');
+   d=edit?['district']?.toString()??(district.isNotEmpty?district:''),
+   w=edit?['ward_new']?.toString()??(wardNew.isNotEmpty?wardNew:'');
   final regions=widget.regions;
   final school=widget.initialSchool;
   if(school!=null&&edit==null){p=school['province_old'].toString();d=school['district_old'].toString();}
@@ -173,15 +174,24 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
       isExpanded:true,decoration:const InputDecoration(labelText:'Tỉnh cũ *'),
       items:[for(final value in regions.provinces)DropdownMenuItem(value:value,
        child:Text(value,overflow:TextOverflow.ellipsis))],
-      onChanged:school==null&&edit==null?(v)=>refresh((){p=v??'';d='';}):null),
+      onChanged:school==null&&edit==null?(v)=>refresh((){p=v??'';d='';w='';}):null),
      const SizedBox(height:8),
      DropdownButtonFormField<String>(
       key:ValueKey('market-district:$p:$d'),initialValue:d.isEmpty?null:d,
       isExpanded:true,decoration:const InputDecoration(labelText:'Huyện cũ *'),
       items:[for(final value in regions.districts[p]??<String>[])
        DropdownMenuItem(value:value,child:Text(value,overflow:TextOverflow.ellipsis))],
-      onChanged:school==null&&edit==null?(v)=>refresh(()=>d=v??''):null),
+      onChanged:school==null&&edit==null?(v)=>refresh((){d=v??'';w='';}):null),
      const SizedBox(height:8),
+     if(p=='TP Hồ Chí Minh')...[
+      DropdownButtonFormField<String>(
+       key:ValueKey('market-ward:$p:$w'),initialValue:w.isEmpty?null:w,
+       isExpanded:true,decoration:const InputDecoration(labelText:'Phường mới *'),
+       items:[for(final value in regions.currentWards[p]??<String>[])
+        DropdownMenuItem(value:value,child:Text(value,overflow:TextOverflow.ellipsis))],
+       onChanged:school==null&&edit==null?(v)=>refresh(()=>w=v??''):null),
+      const SizedBox(height:8),
+     ],
      TextField(controller:address,maxLength:500,decoration:const InputDecoration(labelText:'Địa chỉ *')),
      const SizedBox(height:8),
      DropdownButtonFormField<String>(initialValue:category,isExpanded:true,
@@ -204,9 +214,517 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
     ]))),
     actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Hủy')),
      FilledButton(onPressed:(){
-      final n=name.text.trim(),a=address.text.trim(),t=tax.text.replaceAll(RegExp(r'[\s.-]'),'');
-      if(n.length<2||a.length<3||p.isEmpty||d.isEmpty||
-        (t.isNotEmpty&&!RegExp(r'^\d{10}(\d{3})?$').hasMatch(t))){
+      final n=name.text.trim(),rawAddress=address.text.trim(),
+       t=tax.text.replaceAll(RegExp(r'[\s.-]'),'');
+      final mentionsWard=rawAddress.toLowerCase().contains('phường ${w.toLowerCase()}');
+      final hasOtherWard=p=='TP Hồ Chí Minh'&&
+       rawAddress.toLowerCase().contains('phường ')&&!mentionsWard;
+      final a=p=='TP Hồ Chí Minh'&&edit==null&&!mentionsWard
+       ?'$rawAddress, phường $w, TP. Hồ Chí Minh':rawAddress;
+      if(n.length<2||a.length<3||a.length>500||p.isEmpty||d.isEmpty||
+        (p=='TP Hồ Chí Minh'&&(w.isEmpty||hasOtherWard))||
+        (t.isNotEmpty&&!RegExp(r'^\d{10}(\d{3})?
+       ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content:Text('Cần tên, địa bàn, địa chỉ; MST nếu có phải đủ 10 hoặc 13 số')));return;
+      }
+      Navigator.pop(ctx,{
+       'client_ref':const Uuid().v4(),'name':n,'address_line':a,
+       if(edit==null)'province':p,
+       if(edit==null)'district':d,
+       if(edit==null&&p=='TP Hồ Chí Minh')'ward_new':w,
+       if(edit!=null)'version':edit['version'],
+       'category':category,'phone':phone.text.trim().isEmpty?null:phone.text.trim(),
+       'tax_code':t.isEmpty?null:t,'note':note.text.trim(),
+       if(school!=null&&edit==null)'school_id':school['id'],
+      });
+     },child:Text(edit==null?'Lưu điểm bán':'Lưu sửa'))],
+   )));
+   if(payload==null||!mounted)return;
+   final mst=payload['tax_code'] as String?;
+   if(mst!=null&&mst!=edit?['tax_code']?.toString()&& !await _confirmTax(mst))return;
+   await widget.queue.enqueue(edit==null?'/api/v1/market-prospects':'/api/v1/market-prospects/${edit['id']}',payload,method:edit==null?'POST':'PATCH');
+   _notice('Đã lưu thông tin trên máy · chờ đồng bộ');
+   if(mounted)setState((){});
+  }catch(e){_notice('Chưa lưu được: $e');}
+  finally{name.dispose();address.dispose();phone.dispose();tax.dispose();note.dispose();}
+ }
+ Future<void> _visit(Map<String,dynamic> lead)async{
+  if(lead['pending_status']=='blocked'){_notice('Điểm bán bị từ chối đồng bộ. Kiểm tra trước khi ghi GPS.');return;}
+  try{
+   final pos=await captureGps(context);
+   if(!mounted)return;
+   if(!pos.accuracy.isFinite||pos.accuracy<0||pos.accuracy>100){
+    _notice('GPS chưa đủ chính xác: yêu cầu sai số ≤100 m');return;
+   }
+   final note=TextEditingController();
+   final ok=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(
+    title:const Text('Xác nhận đã ghé thực tế'),
+    content:Column(mainAxisSize:MainAxisSize.min,children:[
+     Text('Sai số GPS: ${pos.accuracy.toStringAsFixed(0)} m'),
+     TextField(controller:note,maxLines:2,maxLength:2000,
+      decoration:const InputDecoration(labelText:'Kết quả tiếp xúc')),
+    ]),
+    actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('Hủy')),
+     FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('Lưu lượt ghé'))]));
+   if(ok!=true){note.dispose();return;}
+   final text=note.text.trim();note.dispose();
+   await widget.queue.enqueue('/api/v1/market-prospects/${lead['id']}/visits',{
+    'client_ref':const Uuid().v4(),
+    'captured_at':pos.timestamp.toUtc().toIso8601String(),
+    'latitude':pos.latitude,'longitude':pos.longitude,
+    'accuracy_m':pos.accuracy,'location_consent':true,'note':text,
+   },dependsOn:lead['pending_status']!=null?[lead['id'].toString()]:const []);
+   _notice('Đã lưu GPS ghé thăm trên máy · chờ đồng bộ');
+   if(mounted)setState((){});
+  }catch(e){_notice('Không ghi nhận được lượt ghé: $e');}
+ }
+ Future<void> _convert(Map<String,dynamic> lead)async{
+  if(lead['pending_status']!=null){_notice('Chờ đồng bộ điểm bán.');return;}
+  if((lead['visits'] as num?)?.toInt()==0){
+   _notice('Cần ghi nhận lượt ghé thực tế và đồng bộ GPS trước khi chuyển khách');return;
+  }
+  final mode=await showDialog<String>(context:context,builder:(ctx)=>AlertDialog(
+   title:const Text('Đưa vào Khách hàng'),
+   content:const Text('Tạo hồ sơ Khách hàng mới mặc định Chưa bán, hoặc liên kết với khách đã có. Lịch sử điểm bán được giữ nguyên.'),
+   actions:[
+    TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Hủy')),
+    TextButton(onPressed:()=>Navigator.pop(ctx,'link'),child:const Text('Liên kết khách có sẵn')),
+    FilledButton(onPressed:()=>Navigator.pop(ctx,'new'),child:const Text('Tạo khách mới')),
+   ]));
+  if(!mounted||mode==null)return;
+  String? customerId;
+  if(mode=='link'){
+   try{
+    final customers=<Map<String,dynamic>>[];
+    for(var offset=0;offset<1000;offset+=100){
+     final uri=Uri(path:'/api/v1/customers',queryParameters:{
+      'province':lead['province'].toString(),'limit':'100','offset':'$offset'});
+     final result=await widget.session.get(uri.toString());
+     final rows=(result['items'] as List? ?? [])
+      .map((x)=>Map<String,dynamic>.from(x as Map)).toList();
+     customers.addAll(rows.where((x)=>x['district']==lead['district']));
+     if(rows.length<100)break;
+    }
+    if(!mounted)return;
+    if(customers.isEmpty){_notice('Không có khách cùng huyện trong quyền được cấp');return;}
+    customerId=await showDialog<String>(context:context,builder:(ctx)=>SimpleDialog(
+     title:const Text('Chọn hồ sơ Khách hàng có sẵn'),
+     children:[SizedBox(height:360,width:390,child:ListView.builder(
+      itemCount:customers.length,itemBuilder:(_,i)=>ListTile(
+       title:Text(customers[i]['name'].toString()),
+       subtitle:Text(customers[i]['address_line']?.toString()??''),
+       onTap:()=>Navigator.pop(ctx,customers[i]['id'].toString()))))],
+    ));
+    if(customerId==null)return;
+   }catch(e){_notice('Không tìm được khách hàng: $e');return;}
+  }
+  try{
+   await widget.queue.enqueue('/api/v1/market-prospects/${lead['id']}/convert',{
+    'client_ref':const Uuid().v4(),'customer_id':customerId,
+   });
+   _notice('Đã lưu yêu cầu chuyển khách · chờ đồng bộ');
+  }catch(e){_notice('Chưa lưu được yêu cầu chuyển: $e');}
+ }
+ Future<void> _photo(Map<String,dynamic> lead,ImageSource source)async{
+  try{
+   final picked=await ImagePicker().pickImage(source:source);
+   if(picked==null)return;
+   final media=compressSurveyMedia(await picked.readAsBytes());
+   final id=const Uuid().v4(),leadId=lead['id'].toString();
+   await widget.queue.enqueue('/api/v1/market-prospects/${lead['id']}/photos',{
+    'client_ref':id,'kind':'front',
+    'captured_at':DateTime.now().toUtc().toIso8601String(),
+   },photo:media.image,thumbnail:media.thumbnail,
+     sha256:media.hash,thumbnailSha256:media.thumbnailHash,mime:'image/jpeg',
+     dependsOn:lead['pending_status']!=null?[leadId]:const []);
+   _notice('Ảnh đã lưu trên máy · chờ đồng bộ R2');
+  }catch(e){_notice('Không lưu được ảnh: $e');}
+ }
+ Future<void> _close(Map<String,dynamic> lead)async{
+  final accepted=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(
+   title:const Text('Đánh dấu không phù hợp?'),
+   content:const Text('Điểm bán vẫn được giữ lại trong lịch sử, không xóa dữ liệu.'),
+   actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('Hủy')),
+    FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('Xác nhận'))]));
+  if(accepted!=true)return;
+  try{
+   await widget.queue.enqueue('/api/v1/market-prospects/${lead['id']}/close',{
+    'client_ref':const Uuid().v4(),
+   });
+   _notice('Đã lưu trạng thái không phù hợp · chờ đồng bộ');
+  }catch(e){_notice('Chưa lưu được: $e');}
+ }
+
+ Future<void> _openConvertedCustomer(Map<String,dynamic> lead) async {
+  final customerId=lead['converted_customer_id']?.toString()??'';
+  if(customerId.isEmpty){_notice('Chưa có mã Khách hàng sau đồng bộ');return;}
+  try{
+   final response=await widget.session.get('/api/v1/customers/$customerId');
+   if(!mounted)return;
+   final customer=FieldCustomer.fromJson(Map<String,dynamic>.from(response['item'] as Map));
+   final service=CustomerService(salesOrigin,widget.session.cookie,
+    identity:widget.queue.identity,revision:widget.queue.revision);
+   await Navigator.push(context,MaterialPageRoute(builder:(_)=>CustomerDetail(
+    service:service,customer:customer,regions:widget.regions,queue:widget.queue)));
+  }catch(e){_notice('Không mở được hồ sơ Khách hàng: $e');}
+ }
+ Future<Uint8List> _image(String leadId,String imageId) async{
+  final response=await http.get(widget.session.uri(
+   '/api/v1/market-prospects/$leadId/photos/$imageId?thumbnail=1'),
+   headers:sessionHeaders(widget.session.cookie)).timeout(const Duration(seconds:15));
+  if(response.statusCode!=200)throw StateError('Không tải được ảnh');
+  return response.bodyBytes;
+ }
+ Future<void> _details(Map<String,dynamic> current) async {
+  if(current['pending_status']!=null){
+   _notice('Điểm bán chưa đồng bộ; có thể xem và sửa ngay trên card.');return;
+  }
+  final id=current['id'].toString();
+  try {
+   final response=await Future.wait([
+    widget.session.get('/api/v1/market-prospects/$id'),
+    widget.session.get('/api/v1/market-prospects/$id/visits'),
+    widget.session.get('/api/v1/market-prospects/$id/photos')]);
+   if(!mounted)return;
+   final item=Map<String,dynamic>.from(response[0]['item'] as Map);
+   final visits=(response[1]['items'] as List? ?? [])
+    .map((x)=>Map<String,dynamic>.from(x as Map)).toList();
+   final photos=(response[2]['items'] as List? ?? [])
+    .map((x)=>Map<String,dynamic>.from(x as Map)).toList();
+   await showModalBottomSheet<void>(context:context,isScrollControlled:true,
+    showDragHandle:true,builder:(sheetCtx)=>SafeArea(child:DraggableScrollableSheet(
+     expand:false,initialChildSize:.75,minChildSize:.4,maxChildSize:.94,
+     builder:(ctx,scroll)=>ListView(controller:scroll,
+      padding:const EdgeInsets.fromLTRB(16,0,16,26),children:[
+      Text(item['name']?.toString()??'Điểm bán',
+       style:Theme.of(ctx).textTheme.titleLarge),
+      const SizedBox(height:6),
+      Text(item['address_line']?.toString()??''),
+      Text('${item['district']} · ${item['province']}'),
+      const SizedBox(height:10),
+      Text('Nguồn: ${item['source_kind']??'Chưa xác định'}'),
+       if((item['ward_new']?.toString()??'').isNotEmpty)
+        Text('Phường mới: ${item['ward_new']} · Quận/huyện cũ: ${item['district']}'),
+       if((item['address_legacy']?.toString()??'').isNotEmpty)
+        Text('Địa chỉ cũ: ${item['address_legacy']}'),
+       if((item['research_source_url']?.toString()??'').startsWith('https://'))
+        TextButton.icon(onPressed:()=>launchUrl(Uri.parse(item['research_source_url'].toString()),
+         mode:LaunchMode.externalApplication),
+         icon:const Icon(Icons.open_in_new,size:18),label:const Text('Mở nguồn nghiên cứu')),
+      if(item['phone']!=null)Text('Điện thoại: ${item['phone']}'),
+      if(item['tax_code']!=null)Text('MST: ${item['tax_code']}'),
+      if((item['note']?.toString()??'').isNotEmpty)
+       Text('Ghi chú: ${item['note']}'),
+      if(item['status']=='converted')...[
+       const SizedBox(height:12),
+       FilledButton.icon(
+        onPressed:(){
+         Navigator.pop(sheetCtx);
+         unawaited(_openConvertedCustomer(item));
+        },icon:const Icon(Icons.open_in_new),label:const Text('Mở hồ sơ Khách hàng')),
+      ],
+      const SizedBox(height:14),
+      Text('Lịch sử ghé thực tế · ${visits.length}',
+       style:Theme.of(ctx).textTheme.titleMedium),
+      if(visits.isEmpty)const Text('Chưa ghi nhận ghé thực tế'),
+      for(final v in visits)ListTile(
+       dense:true,leading:const Icon(Icons.location_on_outlined),
+       title:Text(v['checked_at']?.toString().replaceFirst('T',' ').split('.').first??''),
+       subtitle:Text('GPS: ${v['latitude']}, ${v['longitude']} · sai số ${v['accuracy_m']} m'
+         '\n${v['note']??''}'),
+       isThreeLine:true,
+       trailing:IconButton(tooltip:'Mở vị trí GPS trên bản đồ',
+        icon:const Icon(Icons.map_outlined),
+        onPressed:()=>launchUrl(Uri.https('www.google.com','/maps/search/',{
+         'api':'1','query':'${v['latitude']},${v['longitude']}'
+        }),mode:LaunchMode.externalApplication)),
+      ),
+      const SizedBox(height:12),
+      Text('Ảnh cửa hàng · ${photos.length}',style:Theme.of(ctx).textTheme.titleMedium),
+      if(photos.isEmpty)const Text('Chưa có ảnh đã đồng bộ'),
+      if(photos.isNotEmpty)Wrap(spacing:8,runSpacing:8,children:[
+       for(final p in photos.take(12))SizedBox(width:110,height:120,
+        child:Column(children:[
+         Expanded(child:ClipRRect(borderRadius:BorderRadius.circular(8),
+          child:FutureBuilder<Uint8List>(
+           future:_image(id,p['id'].toString()),
+           builder:(_,snapshot)=>snapshot.hasData
+            ?Image.memory(snapshot.data!,width:110,fit:BoxFit.cover)
+            :Center(child:Icon(snapshot.hasError
+             ?Icons.broken_image_outlined:Icons.image_outlined))))),
+         Text(p['kind']?.toString()??'Ảnh',maxLines:1,overflow:TextOverflow.ellipsis),
+        ])),
+      ]),
+     ]))));
+  }catch(e){_notice('Không tải được lịch sử điểm bán: $e');}
+ }
+
+ Widget _card(Map<String,dynamic> lead){
+  final isNew=lead['status']=='new',converted=lead['status']=='converted';
+  final visits=(lead['visits'] as num?)?.toInt()??0;
+  final blocked=lead['pending_status']=='blocked';
+  final name=lead['name']?.toString()??'Điểm bán';
+  final address=lead['address_line']?.toString()??'';
+  final phone=lead['phone']?.toString().trim()??'';
+  final hasPhone=phone.isNotEmpty;
+  final pending=widget.queue.pending.any((r)=>
+   r['path']?.toString().startsWith('/api/v1/market-prospects/${lead['id']}/')==true);
+  final canManage=isNew&&!pending&&lead['pending_status']==null;
+  final canConvert=isNew&&visits>0&&!pending;
+  final maps=Uri.https('www.google.com','/maps/search/',{
+   'api':'1','query':'$name, $address, ${lead['district']}, ${lead['province']}, Việt Nam',
+  });
+  final theme=Theme.of(context);
+  final scheme=theme.colorScheme;
+  final statusLabel=converted?'Đã chuyển':lead['status']=='closed'?'Không phù hợp':
+   visits>0?'Đã ghé':'Chưa ghé';
+  // The 44px action targets follow SalesTheme; secondary actions live in the
+  // overflow menu so the row never wraps on 320–390px phones.
+  const touch=BoxConstraints(minWidth:44,minHeight:44);
+  final actionStyle=TextButton.styleFrom(
+   minimumSize:const Size(0,44),
+   padding:const EdgeInsets.symmetric(horizontal:4),
+   textStyle:const TextStyle(fontWeight:FontWeight.w700),
+  );
+  return Card(margin:const EdgeInsets.fromLTRB(10,4,10,4),
+   child:Padding(padding:const EdgeInsets.all(12),child:Column(
+    crossAxisAlignment:CrossAxisAlignment.start,children:[
+    Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
+     Expanded(child:Text(name,
+      style:(theme.textTheme.titleMedium??const TextStyle()).copyWith(
+       fontSize:18,fontWeight:FontWeight.w800,height:1.25,color:scheme.onSurface))),
+     const SizedBox(width:8),
+     DecoratedBox(
+      decoration:BoxDecoration(
+       color:scheme.surfaceContainerHighest,
+       borderRadius:BorderRadius.circular(SalesTheme.controlRadius)),
+      child:Padding(padding:const EdgeInsets.symmetric(horizontal:8,vertical:6),
+       child:Text(statusLabel,style:theme.textTheme.labelMedium))),
+    ]),
+    const SizedBox(height:8),
+    Text('${(lead['ward_new']?.toString()??'').isNotEmpty?'P. ${lead['ward_new']} · ':''}${lead['district']} · ${lead['province']}',
+      style:theme.textTheme.bodySmall),
+    const SizedBox(height:2),
+    Text(address,maxLines:2,overflow:TextOverflow.ellipsis),
+    if(lead['school_name']!=null)
+      Text('Nguồn: ${lead['school_name']}',style:theme.textTheme.labelSmall),
+    if(lead['tax_code']!=null)
+      Text('MST: ${lead['tax_code']}',style:theme.textTheme.labelSmall),
+    if((lead['photo_count'] as num?)?.toInt()!=null)
+      Text('Ảnh thực tế: ${lead['photo_count']}',style:theme.textTheme.labelSmall),
+    if(lead['pending_status']!=null||pending)
+      Text(blocked?'Đồng bộ bị từ chối · xem Chi tiết đồng bộ':'Có thao tác chờ đồng bộ',
+        style:TextStyle(color:scheme.error)),
+    const Divider(height:16),
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+     IconButton(tooltip:'Tìm trên Google Maps (chưa xác minh cổng)',
+      constraints:touch,
+      onPressed:()=>launchUrl(maps,mode:LaunchMode.externalApplication),
+      icon:const Icon(Icons.directions_outlined)),
+     if(hasPhone)
+      IconButton(tooltip:'Gọi điện',constraints:touch,
+       onPressed:()=>launchUrl(Uri(scheme:'tel',path:phone)),
+       icon:const Icon(Icons.phone_outlined)),
+     IconButton(tooltip:'Xem chi tiết, lịch sử và ảnh',
+      constraints:touch,
+      onPressed:()=>_details(lead),icon:const Icon(Icons.info_outline)),
+     if(isNew&&!converted)
+      Flexible(child:TextButton(style:actionStyle,
+       onPressed:blocked?null:()=>_visit(lead),
+       child:const Text('Ghé thăm',maxLines:1,overflow:TextOverflow.ellipsis))),
+     if(converted)
+      Flexible(child:TextButton(style:actionStyle,
+       onPressed:()=>_openConvertedCustomer(lead),
+       child:const Text('Hồ sơ KH',maxLines:1,overflow:TextOverflow.ellipsis))),
+     if(hasPhone||isNew)
+      PopupMenuButton<String>(
+       tooltip:'Thao tác khác',
+       onSelected:(action){
+        if(action=='zalo'){
+         final number=phone.replaceAll(RegExp(r'[^0-9]'),'');
+         if(number.isNotEmpty){
+          launchUrl(Uri.https('zalo.me','/$number'),
+           mode:LaunchMode.externalApplication);
+         }
+        }else if(action=='camera'){
+         unawaited(_photo(lead,ImageSource.camera));
+        }else if(action=='gallery'){
+         unawaited(_photo(lead,ImageSource.gallery));
+        }else if(action=='convert'){
+         unawaited(_convert(lead));
+        }else if(action=='edit'){
+         unawaited(_create(edit:lead));
+        }else if(action=='close'){
+         unawaited(_close(lead));
+        }
+       },
+       itemBuilder:(_)=>[
+        if(hasPhone)
+         const PopupMenuItem(value:'zalo',child:Text('Mở Zalo')),
+        if(isNew)...[
+         const PopupMenuItem(value:'camera',child:Text('Chụp ảnh cửa hàng')),
+         const PopupMenuItem(value:'gallery',child:Text('Chọn ảnh từ máy')),
+        ],
+        if(canConvert)
+         const PopupMenuItem(value:'convert',child:Text('Đưa vào Khách hàng')),
+        if(canManage)...[
+         const PopupMenuItem(value:'edit',child:Text('Sửa điểm bán')),
+         const PopupMenuItem(value:'close',child:Text('Không phù hợp')),
+        ],
+       ],
+       child:const SizedBox(width:44,height:44,
+        child:Center(child:Icon(Icons.more_horiz))),
+      ),
+    ]),
+   ])));
+ }
+ @override Widget build(BuildContext context){
+  final all=[...pendingNew,...items.where((i)=>!pendingNew.any((p)=>p['id']==i['id']))];
+   final wards=[...availableWards];
+   if(wardNew.isNotEmpty&&!wards.contains(wardNew))wards.add(wardNew);
+   wards.sort();
+  return Column(children:[
+   Padding(padding:const EdgeInsets.fromLTRB(12,8,12,6),child:Column(
+    crossAxisAlignment:CrossAxisAlignment.start,children:[
+    // Search and high-contrast actions share one 44px touch row.
+    Row(children:[
+     Expanded(child:SizedBox(height:44,child:TextField(
+      controller:search,
+      onChanged:(_){debounce?.cancel();debounce=Timer(
+       const Duration(milliseconds:350),(){if(mounted)unawaited(_load());});},
+      decoration:const InputDecoration(
+       hintText:'Tìm điểm bán',isDense:true,
+       contentPadding:EdgeInsets.symmetric(horizontal:10,vertical:10),
+       prefixIcon:Icon(Icons.search_outlined,size:20),
+       prefixIconConstraints:BoxConstraints(minWidth:38)),
+     ))),
+     const SizedBox(width:6),
+     // Explicit high-contrast foreground and text glyphs: some iOS WebKit
+     // builds show filled IconButton circles without the rounded icon glyphs.
+     SizedBox(width:44,height:44,child:IconButton(
+      key:const ValueKey('market-prospects-refresh'),
+      tooltip:'Làm mới danh sách',
+      onPressed:loading?null:()=>_load(),
+      style:IconButton.styleFrom(
+       backgroundColor:Theme.of(context).colorScheme.surfaceContainerHighest,
+       foregroundColor:Theme.of(context).colorScheme.onSurface,
+       disabledBackgroundColor:Theme.of(context).colorScheme.surfaceContainerHighest,
+       disabledForegroundColor:Theme.of(context).colorScheme.onSurfaceVariant,
+       padding:EdgeInsets.zero,
+       shape:RoundedRectangleBorder(
+        borderRadius:BorderRadius.circular(SalesTheme.controlRadius))),
+      icon:Text('↻',style:TextStyle(
+       fontSize:30,height:1,fontWeight:FontWeight.w700,
+       color:loading
+        ?Theme.of(context).colorScheme.onSurfaceVariant
+        :Theme.of(context).colorScheme.onSurface)))),
+     const SizedBox(width:6),
+     SizedBox(width:44,height:44,child:IconButton(
+      key:const ValueKey('market-prospects-add'),
+      tooltip:'Thêm điểm bán',
+      onPressed:_create,
+      style:IconButton.styleFrom(
+       backgroundColor:Theme.of(context).colorScheme.primary,
+       foregroundColor:Theme.of(context).colorScheme.onPrimary,
+       padding:EdgeInsets.zero,
+       shape:RoundedRectangleBorder(
+        borderRadius:BorderRadius.circular(SalesTheme.controlRadius))),
+      icon:Text('+',style:TextStyle(
+       fontSize:29,height:1,fontWeight:FontWeight.w700,
+       color:Theme.of(context).colorScheme.onPrimary)))),
+    ]),
+    const SizedBox(height:8),
+    // All three searchable filters remain on one row on narrow phones.
+    Row(children:[
+     Expanded(child:DropdownButtonFormField<String>(
+      key:ValueKey('filter-province:$province'),
+      initialValue:province,isExpanded:true,
+      style:Theme.of(context).textTheme.bodyMedium?.copyWith(
+       fontSize:SalesTheme.controlFontSize,
+       color:Theme.of(context).colorScheme.onSurface),
+      icon:const Icon(Icons.expand_more,size:18),
+      decoration:const InputDecoration(
+       labelText:'Tỉnh cũ',isDense:true,
+       contentPadding:EdgeInsets.symmetric(horizontal:8,vertical:9)),
+      items:[const DropdownMenuItem(value:'',child:Text('Tất cả')),
+       for(final p in widget.regions.provinces)DropdownMenuItem(value:p,
+        child:Text(p,maxLines:1,overflow:TextOverflow.ellipsis))],
+      onChanged:widget.initialSchool!=null?null:(v){
+       setState((){province=v??'';district='';wardNew='';availableWards=[];});unawaited(_load());
+      })),
+     const SizedBox(width:6),
+     Expanded(child:DropdownButtonFormField<String>(
+      key:ValueKey('filter-district:$province:$district'),
+      initialValue:district,isExpanded:true,
+      style:Theme.of(context).textTheme.bodyMedium?.copyWith(
+       fontSize:SalesTheme.controlFontSize,
+       color:Theme.of(context).colorScheme.onSurface),
+      icon:const Icon(Icons.expand_more,size:18),
+      decoration:const InputDecoration(
+       labelText:'Huyện cũ',isDense:true,
+       contentPadding:EdgeInsets.symmetric(horizontal:8,vertical:9)),
+      items:[const DropdownMenuItem(value:'',child:Text('Tất cả')),
+       for(final d in widget.regions.districts[province]??<String>[])
+        DropdownMenuItem(value:d,
+         child:Text(d,maxLines:1,overflow:TextOverflow.ellipsis))],
+      onChanged:widget.initialSchool!=null||province.isEmpty?null:(v){
+       setState((){district=v??'';wardNew='';availableWards=[];});unawaited(_load());
+      })),
+     const SizedBox(width:6),
+     Expanded(child:DropdownButtonFormField<String>(
+      key:ValueKey('filter-status:$status'),
+      initialValue:status,isExpanded:true,
+      style:Theme.of(context).textTheme.bodyMedium?.copyWith(
+       fontSize:SalesTheme.controlFontSize,
+       color:Theme.of(context).colorScheme.onSurface),
+      icon:const Icon(Icons.expand_more,size:18),
+      decoration:const InputDecoration(
+       labelText:'Trạng thái',isDense:true,
+       contentPadding:EdgeInsets.symmetric(horizontal:8,vertical:9)),
+      items:const [
+       DropdownMenuItem(value:'',child:Text('Tất cả',maxLines:1)),
+       DropdownMenuItem(value:'new',child:Text('Đang tìm',maxLines:1)),
+       DropdownMenuItem(value:'converted',child:Text('Đã chuyển',maxLines:1)),
+       DropdownMenuItem(value:'closed',child:Text('Không phù hợp',
+        maxLines:1,overflow:TextOverflow.ellipsis)),
+      ],
+      onChanged:(v){setState(()=>status=v??'');unawaited(_load());})),
+    ]),
+    if(province=='TP Hồ Chí Minh')...[
+     const SizedBox(height:6),
+     DropdownButtonFormField<String>(
+      key:ValueKey('filter-new-ward:$province:$district:$wardNew'),
+      initialValue:wardNew,isExpanded:true,
+      style:Theme.of(context).textTheme.bodyMedium?.copyWith(
+       fontSize:SalesTheme.controlFontSize,
+       color:Theme.of(context).colorScheme.onSurface),
+      icon:const Icon(Icons.expand_more,size:18),
+      decoration:const InputDecoration(
+       labelText:'Phường mới · TP.HCM cũ',isDense:true,
+       contentPadding:EdgeInsets.symmetric(horizontal:8,vertical:9)),
+      items:[const DropdownMenuItem(value:'',child:Text('Tất cả phường')),
+       for(final w in wards)DropdownMenuItem(value:w,
+        child:Text(w,maxLines:1,overflow:TextOverflow.ellipsis))],
+      onChanged:(v){setState(()=>wardNew=v??'');unawaited(_load());},
+     ),
+    ],
+    const SizedBox(height:6),
+    Text(offline?'Dữ liệu đã lưu máy · cần mạng để cập nhật':'$total điểm bán phù hợp',
+      style:Theme.of(context).textTheme.bodySmall),
+    if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
+   ])),
+   if(loading&&items.isEmpty)const LinearProgressIndicator(minHeight:2),
+   Expanded(child:all.isEmpty
+     ?Center(child:Text(loading?'Đang tải...':'Chưa có điểm bán tiềm năng'))
+     :ListView.builder(itemCount:all.length+(more?1:0),itemBuilder:(ctx,i){
+       if(i==all.length)return Padding(padding:const EdgeInsets.all(12),
+        child:OutlinedButton(onPressed:loading?null:()=>_load(append:true),
+         child:Text(loading?'Đang tải...':'Tải thêm')));
+       return _card(all[i]);
+      })),
+  ]);
+ }
+}
+).hasMatch(t))){
        ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content:Text('Cần tên, địa bàn, địa chỉ; MST nếu có phải đủ 10 hoặc 13 số')));return;
       }
       Navigator.pop(ctx,{
