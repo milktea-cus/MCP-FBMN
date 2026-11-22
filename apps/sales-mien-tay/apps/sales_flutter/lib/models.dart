@@ -3,7 +3,8 @@ import 'package:flutter/services.dart';
 
 class RegionCatalog {
   final Map<String, List<String>> districts;
-  const RegionCatalog(this.districts);
+  final Map<String, List<String>> currentWards;
+  const RegionCatalog(this.districts, [this.currentWards=const {}]);
   List<String> get provinces => districts.keys.toList();
   static Future<RegionCatalog> load() async {
     final raw = await rootBundle.loadString('assets/districts_old.json');
