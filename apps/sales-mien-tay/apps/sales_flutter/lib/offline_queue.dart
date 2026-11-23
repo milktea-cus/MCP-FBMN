@@ -220,7 +220,9 @@ class OfflineQueue extends ChangeNotifier {
       'area_visit_id':path.split('/')[4],
     if(RegExp(r'^/api/v1/market-prospects/[a-f0-9-]{36}/photos$').hasMatch(path))
       'market_prospect_id':path.split('/')[4],
-    if(path.endsWith('/photos'))'upload_id':id});
+    // Inline customer photos need an upload UUID too. Old queued rows may
+    // lack this key; sync recovers it from the original immutable client_ref.
+    if(photo!=null||path.endsWith('/photos'))'upload_id':id});
   }
   await tx.completed;
   await reload();
@@ -1021,7 +1023,7 @@ class OfflineQueue extends ChangeNotifier {
      if((row['path'] as String).endsWith('/photos')){
       final bytes=Uint8List.fromList((row['photo'] as List).cast<int>());
       final thumb=row['thumbnail'];final modern=thumb is List;
-      final upload=await (networkClient?.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null||row['market_prospect_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null||row['market_prospect_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)??http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String,if(row['session_id']!=null||row['area_visit_id']!=null||row['market_prospect_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null||row['market_prospect_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)).timeout(const Duration(seconds:30));
+      final upload=await (networkClient?.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':(row['upload_id']??payload['client_ref']) as String,if(row['session_id']!=null||row['area_visit_id']!=null||row['market_prospect_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null||row['market_prospect_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)??http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':(row['upload_id']??payload['client_ref']) as String,if(row['session_id']!=null||row['area_visit_id']!=null||row['market_prospect_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null||row['market_prospect_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)).timeout(const Duration(seconds:30));
       final result=decodeApi(upload);
       if(row['session_id']!=null){await _ackSurvey(row,result['item'] as Map);}else{await _remove(row['key'] as String);}continue;
      }
@@ -1040,11 +1042,11 @@ class OfflineQueue extends ChangeNotifier {
       if(_closed)break;
       final thumb=row['thumbnail'],modern=thumb is List;
        final upload=await (networkClient?.post(session.uri('/api/v1/customers/${item['id']}/photos'),
-        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':(row['upload_id']??payload['client_ref']) as String},
         body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
           'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)??http.post(
         session.uri('/api/v1/customers/${item['id']}/photos'),
-        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':row['upload_id'] as String},
+        headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':(row['upload_id']??payload['client_ref']) as String},
         body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),
           'sha256':row['sha256'],'thumbnail_sha256':row['thumbnail_sha256']}):bytes)
        ).timeout(const Duration(seconds:30));
