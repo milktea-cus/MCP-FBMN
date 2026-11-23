@@ -85,6 +85,8 @@ class FieldCustomer {
   final bool? canPlan;
   /// Explicit selling confirmation, independent of operational status.
   final bool isSelling;
+  /// Transient API result flags, never persisted in the offline customer cache.
+  final bool reconciledProspect, reusedExisting;
   Map<String,dynamic> toJson()=>{'id':id,'owner_sub':owner,'name':name,'code':code,'field_code':fieldCode,'cover_photo_id':coverPhotoId,'address_line':address,'province':province,'district':district,'category':category,'status':status,'is_selling':isSelling,'phone':phone,'contact_name':contact,'note':note,'latitude':latitude,'longitude':longitude,'location_accuracy_m':locationAccuracy,'location_source':locationSource,'location_recorded_by':locationRecordedBy,'location_recorded_at':locationRecordedAt?.toIso8601String(),'version':version,'can_plan':canPlan,'can_edit':canEdit,'can_media':canMedia,
     'vat_tax_code':vatTaxCode,'vat_company_name':vatCompanyName,
     'vat_address':vatAddress,'vat_email':vatEmail};
@@ -93,6 +95,8 @@ class FieldCustomer {
         owner = j['owner_sub'] as String?, code = j['code'] as String?,fieldCode=j['field_code'] as String?,coverPhotoId=j['cover_photo_id'] as String?, address = j['address_line'].toString(), province = j['province'].toString(),
         district = j['district'].toString(), category = j['category'].toString(),
         status = j['status'].toString(), isSelling=j['is_selling']==true,
+        reconciledProspect=j['converted_from_prospect']!=null,
+        reusedExisting=j['reused_existing']==true,
          phone = j['phone'] as String?,
         contact = j['contact_name'] as String?, note = j['note'] as String?,
         vatTaxCode=j['vat_tax_code'] as String?,vatCompanyName=j['vat_company_name'] as String?,
@@ -174,7 +178,12 @@ class CustomerService {
     final url=uri('/api/v1/customers');
     final res=await (client?.post(url, headers:headers, body:jsonEncode(data)) ??
       http.post(url, headers:headers, body:jsonEncode(data))).timeout(const Duration(seconds:30));
-    return FieldCustomer.fromJson(decode(res, 201)['item'] as Map<String, dynamic>);
+    final result=decode(res,201);
+    return FieldCustomer.fromJson({
+      ...Map<String,dynamic>.from(result['item'] as Map),
+      'converted_from_prospect':result['converted_from_prospect'],
+      'reused_existing':result['reused_existing']==true,
+    });
   }
   Future<FieldCustomer> update(FieldCustomer customer, Map<String,dynamic> data) async {
     final url=uri('/api/v1/customers/${customer.id}');
@@ -813,6 +822,13 @@ class _CustomerEditorState extends State<CustomerEditor> {
       final created=widget.customer==null?await widget.service.add(data):await widget.service.update(widget.customer!,data);
       if (photo != null) {try{await widget.service.uploadPhoto(created.id, photo!);}catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Đã lưu điểm bán, nhưng chưa tải được ảnh: $e')));}}
       if(widget.customer==null&&widget.onCreated!=null)await widget.onCreated!(created.id);
+      if(mounted&&widget.customer==null&&(created.reconciledProspect||created.reusedExisting)){
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(
+          created.reusedExisting
+            ?'Điểm bán đã có trong hệ thống, đã dùng lại hồ sơ hiện hữu.'
+            :'Đã tự chuyển điểm bán tiềm năng thành khách hàng, không tạo trùng.'
+        )));
+      }
       if (mounted) Navigator.pop(context, true);
     } catch(e){if(mounted)setState(()=>error='$e');}
     finally {if(mounted)setState(()=>saving=false);}
