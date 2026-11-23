@@ -155,18 +155,35 @@ export async function customerRoutes(req: Request, env: CustomerEnv, actor: Acto
       const consent=data.location_consent===true;
       const hasPoint=lat!==null&&lat!==undefined&&lon!==null&&lon!==undefined;
       const source=hasPoint?(data.location_source??(acc!==null&&acc!==undefined?'gps':null)):null;
-      const rows=await db`INSERT INTO customers(client_ref,owner_sub,created_by_sub,name,code,category,contact_name,phone,
-          address_line,province,district,latitude,longitude,location_accuracy_m,location_consent,
-          location_source,location_recorded_by,location_recorded_at,note,status)
-        SELECT ${String(data.client_ref)}::uuid,${actor.sub},${actor.sub},${name},${code},${data.category??'tap_hoa'},${contact},${phone},
-          ${address},${province},${district},${lat??null},${lon??null},${acc??null},${consent},
-          ${source},${hasPoint?actor.sub:null},${hasPoint?new Date().toISOString():null}::timestamptz,${note},${data.status??'active'}
-        WHERE public.sales_can_access(${actor.sub},${actor.sub},${province},${district})
-        ON CONFLICT(owner_sub,client_ref) DO NOTHING RETURNING *`;
-      const existing=rows.length?rows:await db`SELECT * FROM customers WHERE owner_sub=${actor.sub} AND client_ref=${String(data.client_ref)}::uuid AND public.sales_customer_allowed(${actor.sub},id,'view')`;
-      if(!existing.length) return fail('Không có quyền với bản ghi đã tồn tại',403);
-      if(rows.length) await db`INSERT INTO field_audit_events(actor_sub,action,entity_type,entity_id) VALUES (${actor.sub},'create','customer',${rows[0].id}::uuid)`;
-      return response({item:existing[0],idempotent:rows.length===0},rows.length?201:200);
+      // One database transaction resolves a matching researched prospect before
+      // inserting a customer. A retry or a second sales must not create a clone.
+      // This same endpoint is used by the online form and offline sync queue.
+      const payload={
+        client_ref:String(data.client_ref),name,address_line:address,province,district,
+        code,category:data.category??'tap_hoa',contact_name:contact,phone,note,
+        latitude:lat??null,longitude:lon??null,location_accuracy_m:acc??null,
+        location_consent:consent,location_source:source,
+        status:data.status??'active',vat_tax_code:optional(data.vat_tax_code,20),
+      };
+      try {
+        const resultRows=await db`SELECT public.sales_customer_create_reconcile_prospect(
+          ${actor.sub},${JSON.stringify(payload)}::jsonb) AS result`;
+        const result=resultRows[0]?.result as {
+          item?:unknown;idempotent?:boolean;reused_existing?:boolean;
+          converted_from_prospect?:string|null;
+        }|undefined;
+        if(!result?.item)return fail('Không lưu được điểm bán',503);
+        return response(result,result.idempotent||result.reused_existing?200:201);
+      }catch(e){
+        const reason=String((e as Error)?.message??e);
+        if(reason.includes('customer_reconcile_forbidden'))return fail('Chưa được phân địa bàn này',403);
+        if(reason.includes('customer_reconcile_existing_forbidden'))
+          return fail('Điểm bán đã tồn tại nhưng tài khoản chưa được cấp quyền xem. Liên hệ quản lý.',403);
+        if(reason.includes('customer_reconcile_invalid'))return fail('Thông tin điểm bán không hợp lệ',400);
+        if(reason.includes('customer_reconcile_conflict')||reason.includes('unique')||reason.includes('duplicate'))
+          return fail('Điểm bán đã thay đổi hoặc mã khách đã được sử dụng',409);
+        return fail('Không lưu được điểm bán',503);
+      }
     }
     return fail('Method not allowed',405);
   }
