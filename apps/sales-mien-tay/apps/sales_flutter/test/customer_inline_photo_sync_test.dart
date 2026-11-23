@@ -82,13 +82,13 @@ void main(){
       await queue.sync();
       expect(patchCalls,1);
       expect(photoCalls,1);
-      expect(queue.pending,single);
+      expect(queue.pending,hasLength(1));
       expect(queue.pending.single['status'],'pending');
       // Simulates app re-opening with the same IndexedDB/SQLite queue.
       final restarted=OfflineQueue(session,'photo-sales','12',
         factory:factory,networkClient:network);
       await restarted.reload();
-      expect(restarted.pending,single);
+      expect(restarted.pending,hasLength(1));
       await restarted.sync(manual:true);
       expect(patchCalls,2);
       expect(photoCalls,2);
