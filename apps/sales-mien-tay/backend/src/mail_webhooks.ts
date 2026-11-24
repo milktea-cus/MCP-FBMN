@@ -46,7 +46,7 @@ export async function verifyResendEventWithProvider(
 ):Promise<Record<string,unknown>|null>{
  const id=headers.get('svix-id')??'';
  const stamp=headers.get('svix-timestamp')??'';
- if(!/^msg_[A-Za-z0-9]{12,110}$/.test(id)||!/^\\d{10}$/.test(stamp)||
+ if(!/^msg_[A-Za-z0-9]{12,110}$/.test(id)||!/^\d{10}$/.test(stamp)||
     Math.abs(Number(stamp)-now)>300)return null;
  const response=await fetch('https://api.resend.com/webhooks/'+inboundWebhookId+
   '/events/'+encodeURIComponent(id),{
