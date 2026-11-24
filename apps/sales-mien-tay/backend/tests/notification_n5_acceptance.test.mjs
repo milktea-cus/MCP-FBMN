@@ -79,6 +79,10 @@ test('N5 recipient isolation and revocation gate both queued and delivered pushe
  assert.match(api,/public\.sales_can_access\(/);
  assert.match(dispatch,/String\(scope\.scope_revision\)!==String\(scope\.queued_revision\)/);
  assert.match(dispatch,/if\(!fresh\?\.active\|\|!fresh\?\.identity_valid\|\|!fresh\?\.valid_scope\)/);
+ assert.match(dispatch,/b.expires_at>now\(\)/);
+ assert.match(dispatch,/b.state IN \('pending','processing','done'\)/);
+ assert.match(dispatch,/else if\(!fresh.within_expiry\)\{code='expired';\}/);
+ assert.match(dispatch,/code==='revoked'\|\|code==='expired'\?'cancelled'/);
  assert.match(dispatch,/ON CONFLICT DO NOTHING/);
  assert.match(sql,/pg_advisory_xact_lock/);
  assert.match(sql,/INSERT INTO public\.field_notification_event_recipients\(event_id,recipient_sub\)[\s\S]*?ON CONFLICT DO NOTHING/);
