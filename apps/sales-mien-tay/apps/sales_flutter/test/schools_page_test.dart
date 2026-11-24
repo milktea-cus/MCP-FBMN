@@ -34,16 +34,22 @@ class SchoolSession extends SalesSession {
   }
 }
 
+class EmptySchoolCache extends OfflineQueue {
+ EmptySchoolCache(SalesSession session):super(session,'school-empty','1',factory:newIdbFactoryMemory());
+ @override Future<List<Map<String,dynamic>>> cached(String key)async=>[];
+ @override Future<Map<String,dynamic>?> directoryPage(String key)async=>
+  key=='schools:page:v2:_:_:_:1'?{'items':<Map<String,dynamic>>[],'total':0,'has_more':false}:null;
+}
+
 void main(){
   testWidgets('L3 saved empty school page remains a valid offline result',(tester)async{
    final session=SchoolSession()..offline=true;
-   final queue=OfflineQueue(session,'school-empty','1',factory:newIdbFactoryMemory());
-   // IndexedDB initialization uses real async I/O, not the widget fake clock.
-   await tester.runAsync(()async{
-    await queue.cacheDirectoryPage('schools:page:v2:_:_:_:1',[],total:0,hasMore:false);
-   });
+   // The actual storage transaction is tested in offline_queue_test and
+   // the real Chrome suite; isolate widget rendering from fake-clock DB I/O.
+   final queue=EmptySchoolCache(session);
    await tester.pumpWidget(MaterialApp(home:Scaffold(body:SchoolDirectoryPage(queue:queue,session:session))));
    await tester.pumpAndSettle();
+   expect(session.requests.any((p)=>p.startsWith('/api/v1/schools?')),isTrue);
    expect(find.text('Không có mạng, đang xem dữ liệu đã lưu.'),findsOneWidget);
    expect(find.text('Tải thêm trường'),findsNothing);
    await tester.pumpWidget(const SizedBox.shrink());queue.dispose();
