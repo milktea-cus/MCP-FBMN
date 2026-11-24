@@ -27,6 +27,8 @@ jobs:
           check 401 "$base/api/v1/targets"
           check 401 "$base/api/v1/admin/staff"
           check 401 "$base/api/v1/admin/org"
+          # N2 no-op staff/territory migration did not loosen org controls.
+          check 401 "$base/api/v1/admin/org/territories"
           check 401 "$base/api/v1/scoped-records?kind=support"
           check 401 -X POST -H 'Origin: https://sales-mien-tay.vercel.app' -H 'Content-Type: application/json' --data '{}' "$base/api/v1/orders/lifecycle"
           check 401 "$base/api/v1/notifications?limit=100&before=9223372036854775807"
