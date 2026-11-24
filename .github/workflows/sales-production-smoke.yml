@@ -25,6 +25,9 @@ jobs:
           # N4 navigation is a per-recipient authorization boundary, not a blind URL.
           check 401 "$base/api/v1/notifications/1/open"
           check 401 "$base/api/v1/notifications/diagnostics"
+          # N5: anonymous requests cannot enroll an Android/Web push capability.
+          check 401 -X POST -H 'Content-Type: application/json' --data '{"token":"invalid","binding":"invalid"}' "$base/api/v1/notifications/android/subscription"
+          check 401 -X POST -H 'Content-Type: application/json' --data '{"endpoint":"invalid"}' "$base/api/v1/notifications/subscription"
           # N2 business events use the existing authenticated mutation endpoints.
           check 401 "$base/api/v1/targets"
           check 401 "$base/api/v1/admin/staff"
