@@ -27,5 +27,5 @@ test('N2 resolver remains fail-closed, validates support owner and order custome
  assert.match(migration,/r\.kind='support' AND r\.id::text=p_entity_key AND r\.owner_sub=p_recipient/);
  assert.match(migration,/public\.sales_can_access\(p_actor,o\.owner_sub,c\.province,c\.district\)/);
  assert.match(migration,/public\.sales_can_access\(p_recipient,o\.owner_sub,c\.province,c\.district\)/);
- assert.match(migration,/ELSIF p_category='target'/);
+ assert.match(migration,/IF p_category='target' THEN/);
 });
