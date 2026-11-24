@@ -18,6 +18,7 @@ class _OrgScopePageState extends State<OrgScopePage> {
   final unitName = TextEditingController();
   final provinceName=TextEditingController(),districtName=TextEditingController();
   bool loading = true, busy = false, morePreview = false;
+  int refreshGeneration=0;
   String? error, selectedStaff, selectedCustomer;
   String kind = 'staff', action = 'edit', bindingKind = 'chain', assignmentKind = 'chain';
   String? key, bindingKey, assignmentKey;
@@ -40,12 +41,14 @@ class _OrgScopePageState extends State<OrgScopePage> {
   String label(Map<String,dynamic> row) =>
       (row['full_name']??row['name']??'').toString();
   Future<void> refresh() async {
-    if(mounted)setState(()=>loading=true);
+    if(!mounted)return;
+    final request=++refreshGeneration,query=search.text.trim();
+    setState(()=>loading=true);
     try {
       final result = await widget.session.get('/api/v1/admin/org');
       final found = await widget.session.get('/api/v1/admin/org/customers?q='+
-          Uri.encodeQueryComponent(search.text.trim()));
-      if(!mounted)return;
+          Uri.encodeQueryComponent(query));
+      if(!mounted||request!=refreshGeneration)return;
       setState(() {
         staff=maps(result['staff']); grants=maps(result['grants']);
         teams=maps(result['teams']); chains=maps(result['chains']);
@@ -54,11 +57,15 @@ class _OrgScopePageState extends State<OrgScopePage> {
           selectedStaff=null;
         }
         if(!customers.any((c)=>c['id']==selectedCustomer))selectedCustomer=null;
+        if(kind!='territory'&&!availableKeys.any((row)=>rowKey(row)==key)){key=null;preview=[];morePreview=false;}
+        if(!chains.any((c)=>c['id'].toString()==bindingKey))bindingKey=null;
+        final targets=assignmentKind=='chain'?chains:customers;
+        if(!targets.any((c)=>c['id'].toString()==assignmentKey))assignmentKey=null;
         error=null;
       });
     } catch(e) {
-      if(mounted)setState(()=>error=e.toString());
-    } finally { if(mounted)setState(()=>loading=false); }
+      if(mounted&&request==refreshGeneration)setState(()=>error=e.toString());
+    } finally { if(mounted&&request==refreshGeneration)setState(()=>loading=false); }
   }
 
   List<Map<String,dynamic>> get recipients =>staff.where(
@@ -112,6 +119,7 @@ class _OrgScopePageState extends State<OrgScopePage> {
   }
 
   Future<void> showPreview() async {
+    if(!mounted||busy||loading)return;
     final scope=scopeKey();
     if(scope==null){setState(()=>error='Chọn phạm vi cần xem trước.');return;}
     setState((){busy=true;error=null;});
@@ -125,6 +133,7 @@ class _OrgScopePageState extends State<OrgScopePage> {
 
   Future<void> grant({bool active=true,String? recipient,String? scopeKind,
       String? scope,String? permission}) async {
+    if(!mounted||busy||loading)return;
     final grantee=recipient??selectedStaff,k=scopeKind??kind,
         value=scope??scopeKey(),act=permission??action;
     if(grantee==null||value==null){setState(()=>error='Chọn người và phạm vi.');return;}
@@ -140,6 +149,7 @@ class _OrgScopePageState extends State<OrgScopePage> {
 
   Future<void> binding({required String customerId,required String scopeKind,
       required String scope,required bool active}) async {
+    if(!mounted||busy||loading)return;
     setState((){busy=true;error=null;});
     try {
       await widget.session.post('/api/v1/admin/org/bindings',{
@@ -150,11 +160,13 @@ class _OrgScopePageState extends State<OrgScopePage> {
     finally{if(mounted)setState(()=>busy=false);}
   }
   Future<void> createUnit() async {
+    if(!mounted||busy||loading)return;
     if(unitName.text.trim().length<2){setState(()=>error='Nhập tên đội hoặc chuỗi.');return;}
     setState((){busy=true;error=null;});
     try{
       await widget.session.post('/api/v1/admin/org/units',
           {'kind':unitKind,'name':unitName.text.trim()});
+      if(!mounted)return;
       unitName.clear();
       await refresh();
     }catch(e){if(mounted)setState(()=>error=e.toString());}
@@ -162,6 +174,7 @@ class _OrgScopePageState extends State<OrgScopePage> {
   }
 
   Future<void> teamMember(Map<String,dynamic> team,String userId,bool active) async {
+    if(!mounted||busy||loading)return;
     setState((){busy=true;error=null;});
     try {
       await widget.session.post('/api/v1/admin/org/members',{
@@ -172,6 +185,7 @@ class _OrgScopePageState extends State<OrgScopePage> {
   }
 
   Future<void> createTerritory() async {
+    if(!mounted||busy||loading)return;
     final province=provinceName.text.trim(),district=districtName.text.trim();
     if(province.length<2||(!district.isEmpty&&district.length<2)){
       setState(()=>error='Nhập tên tỉnh và tên huyện (nếu có).');return;
@@ -183,13 +197,14 @@ class _OrgScopePageState extends State<OrgScopePage> {
         'name':district.isEmpty?province:district,
         if(district.isNotEmpty)'province':province,
       });
-      if(mounted){await refresh();ScaffoldMessenger.of(context).showSnackBar(
+      if(mounted){await refresh();if(!mounted)return;ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content:Text('Đã cập nhật địa bàn. Mở lại sửa nhân viên để chọn địa bàn mới.')));}
     }catch(e){if(mounted)setState(()=>error=e.toString());}
     finally{if(mounted)setState(()=>busy=false);}
   }
 
   Future<void> setBusinessAssignment(String staffId,String scopeKind,String scopeKey,bool enabled) async {
+    if(!mounted||busy||loading)return;
     setState(() {busy=true;error=null;});
     try {
       await widget.session.post('/api/v1/admin/org/assignments',{
@@ -228,10 +243,10 @@ class _OrgScopePageState extends State<OrgScopePage> {
 
   Future<void> chooseTerritories() async {
     final staffId=selectedStaff;
-    if(staffId==null||busy)return;
+    if(staffId==null||busy||loading)return;
     final person=staff.where((m)=>m['user_sub']==staffId).firstOrNull;
     if(person==null)return;
-    setState(()=>error=null);
+    setState((){busy=true;error=null;});
     try{
       final catalog=await RegionCatalog.load();
       final territoryData=await widget.session.get('/api/v1/admin/org/territories');
@@ -324,10 +339,10 @@ class _OrgScopePageState extends State<OrgScopePage> {
         ],
       });
       if(!mounted)return;
+      if(result['item']==null)throw const ApiFailure(502,'Phản hồi lưu địa bàn không hợp lệ.');
       await refresh();
       if(mounted)ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content:Text('Đã giao địa bàn. Nhân viên có thể lập lịch khách thuộc phạm vi trực tiếp.')));
-      if(result['item']==null&&mounted)setState(()=>error='Phản hồi lưu địa bàn không hợp lệ.');
     }catch(e){
       if(mounted)setState(()=>error=e.toString());
     }finally{
@@ -363,7 +378,7 @@ class _OrgScopePageState extends State<OrgScopePage> {
           const Text('Ai là cấp trên của ai. Mỗi cấp trên tự thấy dữ liệu của toàn bộ cấp dưới; không cần tạo đội nhóm hoặc cấp quyền Xem từng người.'),
           const SizedBox(height:12),
           for(final m in treeRows)Card(child:ListTile(
-            contentPadding:EdgeInsets.only(left:12.0+16.0*(m['_depth'] as int),right:12),
+            contentPadding:EdgeInsets.only(left:12.0+16.0*(m['_depth'] as int).clamp(0,3),right:12),
             leading:Icon((m['_depth'] as int)==0?Icons.account_circle_outlined:Icons.subdirectory_arrow_right),
             title:Text(label(m)+' · '+(m['job_title']?.toString().isNotEmpty==true?m['job_title'].toString():m['role'].toString())),
             subtitle:Text(m['employee_code'].toString()+' · '+(m['active']==true?'Hoạt động':'Đã khóa')+

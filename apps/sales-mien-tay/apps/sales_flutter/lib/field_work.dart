@@ -21,7 +21,7 @@ class FieldWorkPage extends StatefulWidget{
 class _FieldWorkPageState extends State<FieldWorkPage>{
  DateTime day=DateTime.now().toUtc().add(const Duration(hours:7));bool weekly=false,monthly=false;int period=0;String employee='',district='',status='';List<Map<String,dynamic>> rows=[];bool busy=false,cached=false;String? error;
  String get keyName=>widget.report?'report:${monthKey(day)}:${widget.service.province}':'routes-v2:${monthly?'month':weekly?'week':'day'}:${dayKey(day)}:${widget.service.province}';
- int previousPending=0;
+ int previousPending=0,loadGeneration=0;
  String _queueSignature='';
  String _signature(){
   final pending=widget.queue.pending;
@@ -49,21 +49,32 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
  }
  @override void dispose(){widget.queue.removeListener(queueChanged);super.dispose();}
  Future<void> load()async{
-  if(busy)return;
+  if(!mounted)return;
+  final request=++loadGeneration,key=keyName;
+  final uri=widget.queue.session.uri(widget.report?'/api/v1/reports/monthly':'/api/v1/routes').replace(queryParameters:{widget.report?'month':'day':widget.report?monthKey(day):dayKey(day),'province':widget.service.province,if(!widget.report)'period':monthly?'month':weekly?'week':'day'});
   setState((){busy=true;error=null;});
+  List<Map<String,dynamic>> next=[];
+  bool fromCache=false;
+  String? failure;
   try{
-   final uri=widget.queue.session.uri(widget.report?'/api/v1/reports/monthly':'/api/v1/routes').replace(queryParameters:{widget.report?'month':'day':widget.report?monthKey(day):dayKey(day),'province':widget.service.province,if(!widget.report)'period':monthly?'month':weekly?'week':'day'});
-   final data=decodeApi(await http.get(uri,headers:widget.service.headers).timeout(const Duration(seconds:20)));
-   final list=(data['items'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
-   await widget.queue.cache(keyName,list);
-   if(mounted)setState((){rows=list;cached=false;if(!rows.any((r)=>r['owner_sub']==employee))employee='';if(!rows.any((r)=>r['district']==district))district='';});
+   final data=decodeApi(await (widget.service.client?.get(uri,headers:widget.service.headers)??http.get(uri,headers:widget.service.headers)).timeout(const Duration(seconds:20)));
+   next=(data['items'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
+   if(!mounted||request!=loadGeneration)return;
+   try{await widget.queue.cache(key,next);}catch(_){}
   }catch(e){
-   if(e is ApiFailure&&(e.status==401||e.status==403)){if(mounted)setState(()=>rows=[]);}
-   else{try{final list=await widget.queue.cached(keyName);if(mounted)setState((){rows=list;cached=true;});}catch(_){}}
-   if(mounted)setState(()=>error=e.toString());
-  }finally{if(mounted)setState(()=>busy=false);}
+   failure=e.toString();
+   if(e is! ApiFailure||e.status>=500){
+    try{next=await widget.queue.cached(key);fromCache=true;}catch(_){}
+   }
+  }
+  if(!mounted||request!=loadGeneration)return;
+  setState((){
+   rows=next;cached=fromCache;busy=false;error=failure;
+   if(!rows.any((r)=>r['owner_sub']==employee))employee='';
+   if(!rows.any((r)=>r['district']==district))district='';
+  });
  }
- Future<void> chooseDate()async{final d=await showDatePicker(context:context,initialDate:day,firstDate:DateTime(2020),lastDate:DateTime(2100));if(d!=null&&mounted){setState((){day=d;rows=[];employee='';district='';});await load();}}
+ Future<void> chooseDate()async{final d=await showDatePicker(context:context,initialDate:day,firstDate:DateTime(2020),lastDate:DateTime(2100));if(d!=null&&mounted){setState((){day=d;rows=[];employee='';district='';period=0;});await load();}}
  String get templateKey=>'fixed-route-v1:${widget.service.province}';
  String get startDate=>monthly?dayKey(DateTime(day.year,day.month,1)):weekly?dayKey(monday):dayKey(day);
  String get endDate=>monthly?dayKey(monthEnd(day)):weekly?dayKey(monday.add(const Duration(days:6))):dayKey(day);
@@ -210,9 +221,9 @@ class _FieldWorkPageState extends State<FieldWorkPage>{
     ])),
     if(weekly)Text('${dayKey(monday)} – ${dayKey(monday.add(const Duration(days:6)))}'),
     Padding(padding:const EdgeInsets.all(8),child:Column(children:[
-      if(people.length>1)DropdownButtonFormField<String>(initialValue:people.containsKey(employee)?employee:'',isExpanded:true,decoration:const InputDecoration(labelText:'Nhân viên'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả trong quyền')),for(final e in people.entries)DropdownMenuItem(value:e.key,child:Text(e.value,overflow:TextOverflow.ellipsis))],onChanged:(v)=>setState(()=>employee=v??'')),
+      if(people.length>1)DropdownButtonFormField<String>(key:ValueKey('employee:$employee'),initialValue:people.containsKey(employee)?employee:'',isExpanded:true,decoration:const InputDecoration(labelText:'Nhân viên'),items:[const DropdownMenuItem(value:'',child:Text('Tất cả trong quyền')),for(final e in people.entries)DropdownMenuItem(value:e.key,child:Text(e.value,overflow:TextOverflow.ellipsis))],onChanged:(v)=>setState(()=>employee=v??'')),
       AdaptiveFilterRow(children:[
-        DropdownButtonFormField<String>(key:ValueKey(districts.join('|')),
+        DropdownButtonFormField<String>(key:ValueKey('district:$district'),
           initialValue:districts.contains(district)?district:'',isExpanded:true,
           decoration:const InputDecoration(labelText:'Huyện'),
           items:[const DropdownMenuItem(value:'',child:Text('Tất cả')),

@@ -27,7 +27,8 @@ class _CatalogPageState extends State<CatalogPage>{
  @override void initState(){super.initState();load();}
  @override void dispose(){timer?.cancel();search.dispose();super.dispose();}
  Future<void> load({bool more=false})async{
-  if(more&&(busy||cursor==null||offline))return;
+  if(!mounted||(more&&(busy||cursor==null||offline)))return;
+  timer?.cancel();
   final gen=++generation,q=search.text.trim(),after=more?cursor!:'';
   setState((){busy=true;error=null;if(!more){rows=[];cursor=null;offline=false;}});
   final key='catalog-v1:${widget.admin?'admin':'viewer'}:$q';
@@ -47,8 +48,10 @@ class _CatalogPageState extends State<CatalogPage>{
     // Storage failure must not suppress a fresh server request.
    }
   }
+  if(!mounted||gen!=generation)return;
   try{
-   final data=decodeApi(await http.get(widget.service.uri('/api/v1/catalog/products',{'q':q,'after':after,'limit':'50'}),headers:widget.service.headers).timeout(const Duration(seconds:20)));
+   final uri=widget.service.uri('/api/v1/catalog/products',{'q':q,'after':after,'limit':'50'});
+   final data=decodeApi(await (widget.service.client?.get(uri,headers:widget.service.headers)??http.get(uri,headers:widget.service.headers)).timeout(const Duration(seconds:20)));
    final page=(data['items'] as List).map(map).toList();
    if(!mounted||gen!=generation)return;
    final items=more?[...rows,...page]:page;
@@ -91,11 +94,11 @@ class _CatalogPageState extends State<CatalogPage>{
  @override Widget build(BuildContext context)=>ListView(padding:const EdgeInsets.all(12),children:[
   Row(children:[Expanded(child:Text('Danh mục SKU',style:Theme.of(context).textTheme.titleLarge)),IconButton(tooltip:'Đồng bộ',onPressed:busy?null:()=>load(),icon:const Icon(Icons.sync))]),
   const SizedBox(height:8),
-  TextField(controller:search,decoration:const InputDecoration(prefixIcon:Icon(Icons.search),labelText:'Mã CTY, SKU, tên hoặc nhãn hàng'),onChanged:(_){timer?.cancel();timer=Timer(const Duration(milliseconds:350),()=>load());}),
+  TextField(controller:search,decoration:const InputDecoration(prefixIcon:Icon(Icons.search),labelText:'Mã CTY, SKU, tên hoặc nhãn hàng'),onChanged:(_){++generation;timer?.cancel();setState((){rows=[];cursor=null;busy=true;offline=false;error=null;});timer=Timer(const Duration(milliseconds:350),(){if(mounted)unawaited(load());});}),
   if(widget.admin)Padding(padding:const EdgeInsets.symmetric(vertical:8),child:Wrap(spacing:8,runSpacing:8,children:[FilledButton.icon(onPressed:busy||offline?null:()=>edit(),icon:const Icon(Icons.add),label:const Text('Thêm')),OutlinedButton(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>BrandCatalogPage(service:widget.service,queue:widget.queue,admin:widget.admin))),child:const Text('Nhãn hàng')),OutlinedButton(onPressed:busy||offline?null:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>CustomerMappingPage(service:widget.service))),child:const Text('Mã KH')),OutlinedButton.icon(onPressed:busy||offline?null:()async{await Navigator.push(context,MaterialPageRoute(builder:(_)=>InventoryImportHubPage(service:widget.service)));if(mounted)await load();},icon:const Icon(Icons.upload_file),label:const Text('Nhập')),TextButton(onPressed:busy||offline?null:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>CatalogAuditPage(service:widget.service))),child:const Text('Nhật ký'))])),
   if(busy)const LinearProgressIndicator(),if(error!=null)Padding(padding:const EdgeInsets.all(8),child:Text(error!)),
   if(rows.isEmpty&&!busy)const Padding(padding:EdgeInsets.all(16),child:Text('Không có sản phẩm phù hợp.')),
-  for(final p in rows)Card(child:ListTile(title:Text(p['name'].toString()),subtitle:Text('Mã CTY: ${p['company_code']} · SKU: ${p['sku']??"—"}\n${p['canonical_brand']??p['brand']??"—"} · ${p['category']??"—"} · ĐVT: ${p['unit']??"Chưa xác minh"}${p['active']==false?" · Ngừng sử dụng":""}'),trailing:widget.admin&&!offline?IconButton(tooltip:'Sửa sản phẩm',onPressed:()=>edit(p),icon:const Icon(Icons.edit_outlined)):const Icon(Icons.chevron_right),onTap:()=>showDialog<void>(context:context,builder:(c)=>AlertDialog(title:Text(p['name'].toString()),content:Text('Mã CTY: ${p['company_code']}\nĐVT: ${p['unit']??"Chưa xác minh"}\n${specSummary(map(p['product_spec']??{}))}\nXem số tồn tại Tra tồn'),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng'))])))),
+  for(final p in rows)Card(child:ListTile(title:Text(p['name'].toString()),subtitle:Text('Mã CTY: ${p['company_code']} · SKU: ${p['sku']??"—"}\n${p['canonical_brand']??p['brand']??"—"} · ${p['category']??"—"} · ĐVT: ${p['unit']??"Chưa xác minh"}${p['active']==false?" · Ngừng sử dụng":""}'),trailing:widget.admin&&!offline&&!busy?IconButton(tooltip:'Sửa sản phẩm',onPressed:()=>edit(p),icon:const Icon(Icons.edit_outlined)):const Icon(Icons.chevron_right),onTap:()=>showDialog<void>(context:context,builder:(c)=>AlertDialog(title:Text(p['name'].toString()),content:Text('Mã CTY: ${p['company_code']}\nĐVT: ${p['unit']??"Chưa xác minh"}\n${specSummary(map(p['product_spec']??{}))}\nXem số tồn tại Tra tồn'),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng'))])))),
   if(cursor!=null)OutlinedButton(onPressed:busy?null:()=>load(more:true),child:const Text('Tải thêm')),
  ]);
 }

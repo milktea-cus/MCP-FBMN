@@ -10,7 +10,7 @@ class StaffPage extends StatefulWidget {
 }
 class _StaffPageState extends State<StaffPage>{
  List<Map<String,dynamic>> items=[];
- bool loading=true;
+ bool loading=true,openingEditor=false;
  String? error;
  @override void initState(){super.initState();load();}
  Future<void> load() async{
@@ -20,6 +20,9 @@ class _StaffPageState extends State<StaffPage>{
   finally{if(mounted)setState(()=>loading=false);}
  }
  Future<void> edit([Map<String,dynamic>? row]) async{
+  if(!mounted||loading||openingEditor)return;
+  setState(()=>openingEditor=true);
+  try{
   final catalog=await RegionCatalog.load();
   final territories=await widget.session.get('/api/v1/admin/org/territories');
   final combined=<String,List<String>>{for(final e in catalog.districts.entries)e.key:[...e.value]};
@@ -36,6 +39,8 @@ class _StaffPageState extends State<StaffPage>{
   if(!mounted)return;
   final saved=await showDialog<bool>(context:context,barrierDismissible:false,builder:(_)=>StaffEditor(session:widget.session,catalog:nationwide,staff:row,allStaff:items));
   if(saved==true&&mounted){await load();if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Đã lưu nhân viên và địa bàn.')));}
+  }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Không mở được hồ sơ nhân viên: $e')));}
+  finally{if(mounted)setState(()=>openingEditor=false);}
  }
  List<Map<String,dynamic>> get orderedStaff {
   final rows=<Map<String,dynamic>>[];
@@ -59,7 +64,7 @@ class _StaffPageState extends State<StaffPage>{
   final areas=(m['scopes'] as List).map((s)=>s['province'].toString()+' / '+(s['district']==''?'Toàn tỉnh':s['district'].toString())).join(' • ');
   return m['email'].toString()+' · '+m['role'].toString()+' · '+(m['job_title']?.toString().isNotEmpty==true?m['job_title'].toString()+' · ':'')+(m['active']==true?'Hoạt động':'Đã khóa')+'\n'+areas;
  }
- @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Quản lý nhân viên'),actions:[IconButton(onPressed:loading?null:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>OrgScopePage(session:widget.session))),tooltip:'Cơ cấu & phân công',icon:const Icon(Icons.admin_panel_settings_outlined)),IconButton(onPressed:loading?null:load,tooltip:'Tải lại',icon:const Icon(Icons.refresh)),IconButton(onPressed:loading?null:()=>edit(),tooltip:'Thêm nhân viên',icon:const Icon(Icons.person_add_alt_1))]),body:loading?const Center(child:CircularProgressIndicator()):error!=null?Center(child:Text(error!)):items.isEmpty?Center(child:FilledButton(onPressed:()=>edit(),child:const Text('Thêm nhân viên'))):ListView(padding:const EdgeInsets.all(12),children:[const Padding(padding:EdgeInsets.only(bottom:12),child:Text('Cấp trên → cấp dưới. Chạm nhân viên để sửa cấp trên, chức danh và địa bàn.')),for(final m in orderedStaff)Card(child:ListTile(contentPadding:EdgeInsets.only(left:12.0+16.0*(m['_level'] as int),right:12),leading:Icon((m['_level'] as int)>0?Icons.subdirectory_arrow_right:Icons.account_tree_outlined),title:Text(m['employee_code'].toString()+' · '+m['full_name'].toString()),subtitle:Text(description(m)),isThreeLine:true,trailing:const Icon(Icons.edit_outlined),onTap:()=>edit(m)))]));
+ @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Quản lý nhân viên'),actions:[IconButton(onPressed:loading?null:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>OrgScopePage(session:widget.session))),tooltip:'Cơ cấu & phân công',icon:const Icon(Icons.admin_panel_settings_outlined)),IconButton(onPressed:loading?null:load,tooltip:'Tải lại',icon:const Icon(Icons.refresh)),IconButton(onPressed:loading||openingEditor?null:()=>edit(),tooltip:'Thêm nhân viên',icon:const Icon(Icons.person_add_alt_1))]),body:loading?const Center(child:CircularProgressIndicator()):error!=null?Center(child:Text(error!)):items.isEmpty?Center(child:FilledButton(onPressed:openingEditor?null:()=>edit(),child:const Text('Thêm nhân viên'))):ListView(padding:const EdgeInsets.all(12),children:[const Padding(padding:EdgeInsets.only(bottom:12),child:Text('Cấp trên → cấp dưới. Chạm nhân viên để sửa cấp trên, chức danh và địa bàn.')),for(final m in orderedStaff)Card(child:ListTile(contentPadding:EdgeInsets.only(left:12.0+16.0*(m['_level'] as int).clamp(0,3),right:12),leading:Icon((m['_level'] as int)>0?Icons.subdirectory_arrow_right:Icons.account_tree_outlined),title:Text(m['employee_code'].toString()+' · '+m['full_name'].toString()),subtitle:Text(description(m)),isThreeLine:true,trailing:const Icon(Icons.edit_outlined),onTap:openingEditor?null:()=>edit(m)))]));
 }
 class StaffEditor extends StatefulWidget {
  final SalesSession session;
@@ -242,6 +247,7 @@ class _StaffEditorState extends State<StaffEditor> {
       'email':email.text.trim(),'name':name.text.trim()});
     final id=created['user_sub']?.toString();
     if(id==null||id.isEmpty)throw const ApiFailure(502,'Không nhận được tài khoản xác thực.');
+    if(!mounted)return;
     subject.text=id;
    }
    await widget.session.post('/api/v1/admin/staff',{
