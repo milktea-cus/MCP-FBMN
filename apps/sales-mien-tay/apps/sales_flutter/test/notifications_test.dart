@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:idb_shim/idb_shim.dart';
 import 'package:sales_mien_tay/notifications.dart';
@@ -7,26 +8,55 @@ import 'package:sales_mien_tay/session.dart';
 class FakeInboxSession extends SalesSession {
  bool offline=false;
  bool newer=false;
+ bool paged=false;
+ Completer<void>? readGate;
  final recorded=<String>[];
  @override Future<Map<String,dynamic>> get(String path) async {
   if(offline)throw const ApiFailure(503,'offline');
+  if(path=='/api/v1/notifications?limit=40&before=42')return {'items':[{'id':'41','title':'Cũ','body':'','created_at':'2026-11-10T08:00:00Z','read_at':null}],'unread_count':2};
   if(path=='/api/v1/notifications')return {'items':[
    if(newer){'id':'43','title':'Việc mới','body':'Sau khi offline đọc tất cả',
     'created_at':'2026-11-12T08:00:00Z','read_at':null},
    {'id':'42','title':'Được giao chỉ tiêu','body':'Mở Field Work để xem.',
     'created_at':'2026-11-11T08:00:00Z','read_at':null}
-  ],'unread_count':newer?2:1};
+  ],'unread_count':(newer?2:1)+(paged?1:0),if(paged)'next_cursor':'42'};
   if(path=='/api/v1/notifications/config')return {'supported':false,'public_key':null};
   throw StateError('Unexpected GET: $path');
  }
  @override Future<Map<String,dynamic>> post(String path,Map<String,dynamic> data)async{
   recorded.add(path);
-  if(offline)throw StateError('No network');
+  if(readGate!=null)await readGate!.future;
+  if(offline)throw const ApiFailure(503,'No network');
   return {'item':{'id':'42','read_at':'2026-11-11T08:00:00Z'}};
  }
 }
 
 void main(){
+ test('L2 concurrent read taps decrement once and keep the other unread item',()async{
+  final session=FakeInboxSession()..newer=true;
+  final queue=OfflineQueue(session,'worker','1',factory:newIdbFactoryMemory());
+  final store=FieldNotificationStore(session,queue);await store.start();
+  final item=store.items.last;
+  session.readGate=Completer<void>();
+  final first=store.markRead(item),second=store.markRead(item);
+  await Future<void>.delayed(Duration.zero);
+  session.readGate!.complete();
+  await Future.wait([first,second]);
+  expect(store.unread,1);expect(session.recorded.length,1);
+  store.dispose();queue.dispose();
+ });
+ test('L2 refresh preserves loaded pages and offline 503 receipts',()async{
+  final session=FakeInboxSession()..paged=true;
+  final queue=OfflineQueue(session,'worker','1',factory:newIdbFactoryMemory());
+  final store=FieldNotificationStore(session,queue);await store.start();
+  await store.loadMore();expect(store.items.map((x)=>x.id),['42','41']);
+  session.offline=true;await store.markRead(store.items.last);
+  expect(queue.pending.length,1);expect(store.unread,1);
+  session.offline=false;await store.refresh();
+  expect(store.items.map((x)=>x.id),['42','41']);expect(store.items.last.unread,false);
+  expect(store.unread,1);store.dispose();queue.dispose();
+ });
+
  test('inbox badge follows unread and durable offline read receipt survives app restart',()async{
   final db=newIdbFactoryMemory(),session=FakeInboxSession();
   final queue=OfflineQueue(session,'worker-a','7',factory:db);

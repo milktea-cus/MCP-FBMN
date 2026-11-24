@@ -111,6 +111,22 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
       Navigator.push(context,MaterialPageRoute(builder:(_)=>StaffMailPage(
        key:ValueKey('mail-deep:'+_queue.namespace+':'+thread),
        session:widget.session,initialThreadId:thread)));
+    }else if(screen=='orders'&&target?['entity_id']!=null){
+      final id=target!['entity_id'].toString();
+      final doc=await widget.session.get('/api/v1/orders/$id');
+      final order=Map<String,dynamic>.from(doc['item'] as Map);
+      if(order['id']?.toString()!=id)throw StateError('Đơn không còn khả dụng');
+      if(!mounted)return;
+      Navigator.push(context,MaterialPageRoute(builder:(_)=>Scaffold(
+       appBar:AppBar(title:const Text('Đơn hàng từ thông báo')),
+       body:OrdersPage(queue:_queue,admin:widget.me['role']=='admin',initialOrder:order))));
+    }else if(screen=='support'&&target?['entity_id']!=null){
+      final id=target!['entity_id'].toString();
+      final doc=await widget.session.get('/api/v1/scoped-records/$id?kind=support');
+      final record=SalesRecord.fromJson(Map<String,dynamic>.from(doc['item'] as Map));
+      if(record.id!=id||record.kind!='support')throw StateError('Đề xuất không còn khả dụng');
+      if(!mounted)return;
+      unawaited(_editScopedRecord(record));
     }else if(screen=='profile'){
       if(!mounted)return;
       unawaited(_profile());
@@ -118,8 +134,17 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
       if(!mounted)return;
       Navigator.push(context,MaterialPageRoute(
         builder:(_)=>AppUpdatePage(session:widget.session)));
+    }else if(screen=='updates'&&kIsWeb){
+      if(!mounted)return;
+      Navigator.push(context,MaterialPageRoute(builder:(_)=>const PwaUpdatePage()));
+    }else if(screen=='targets'&&target?['year'] is num){
+      if(!mounted)return;
+      Navigator.push(context,MaterialPageRoute(builder:(_)=>Scaffold(
+       appBar:AppBar(title:const Text('Chỉ tiêu từ thông báo')),
+       body:TargetPage(queue:_queue,initialYear:(target!['year'] as num).toInt()))));
     }else if(idx!=null){
       if(!mounted)return;
+      Navigator.of(context).pop();
       setState(()=>_selectedIndex=idx);
     }else{
       throw StateError('Nghiệp vụ không còn khả dụng');

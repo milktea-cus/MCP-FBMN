@@ -49,6 +49,21 @@ class FieldNotificationStore extends ChangeNotifier {
  String? error,publicKey,pushReport;
  Map<String,dynamic> androidDiagnostics={};
  bool _closed=false;
+ Future<void> _inboxTail=Future.value();
+ bool _refreshQueued=false,_pageQueued=false;
+ int _preferenceRevision=0;
+ Future<void> _serial(Future<void> Function() action){
+  final next=_inboxTail.then((_)async{if(!_closed)await action();});
+  _inboxTail=next.catchError((Object e){error='Không hoàn tất được thao tác thông báo.';changed();});
+  return _inboxTail;
+ }
+ bool _retryable(Object e)=>e is! ApiFailure||e.status>=500||e.status==408||e.status==429;
+ Iterable<Map<String,dynamic>> get _pending=>queue.pending.where((x)=>x['status']!='blocked');
+ Future<void> _saveSafely()async{try{await save();}catch(_){error='Không lưu được thông báo trên máy.';}}
+ Future<void> _savePreferences()async{
+  try{await queue.cache('notifications-settings',[{'categories':categories,'quiet_hours':{'quiet_start':quietStart,'quiet_end':quietEnd}}]);}
+  catch(_){error='Không lưu được thiết lập trên máy.';}
+ }
  bool get isAndroid=>AndroidPushBridge.supported;
  bool androidConfigured=false,pushBusy=false;
  String? _registeredToken,_registeredBinding;
@@ -116,16 +131,28 @@ class FieldNotificationStore extends ChangeNotifier {
   final quiet=doc['quiet_hours'] as Map?;
   quietStart=(quiet?['quiet_start'] as num?)?.toInt()??1260;
   quietEnd=(quiet?['quiet_end'] as num?)?.toInt()??420;
+  for(final op in _pending){
+   final payload=op['payload'];if(payload is! Map)continue;
+   if(op['path']=='/api/v1/notifications/preferences'){
+    for(final c in categories.where((c)=>c['category']==payload['category'])){
+     c['mode']=c['mandatory']==true&&payload['mode']=='off'?'in_app':payload['mode'];
+    }
+   }else if(op['path']=='/api/v1/notifications/quiet-hours'){
+    quietStart=(payload['quiet_start'] as num?)?.toInt()??quietStart;
+    quietEnd=(payload['quiet_end'] as num?)?.toInt()??quietEnd;
+   }
+  }
  }
  Future<void> loadPreferences()async{
+  final rev=_preferenceRevision;
   try{
    final doc=await session.get('/api/v1/notifications/preferences');
-   if(_closed)return;
+   if(_closed||rev!=_preferenceRevision||preferencesBusy)return;
    _applyPreferences(doc);
-   await queue.cache('notifications-settings',[doc]);
+   await _savePreferences();
    changed();
-  }catch(e){if(e is ApiFailure&&(e.status==401||e.status==403)){
-   categories=[];await queue.cache('notifications-settings',[]);
+  }catch(e){if(!_closed&&rev==_preferenceRevision&&!preferencesBusy&&e is ApiFailure&&(e.status==401||e.status==403)){
+   categories=[];try{await queue.cache('notifications-settings',[]);}catch(_){}
    changed();
   }}
  }
@@ -134,125 +161,153 @@ class FieldNotificationStore extends ChangeNotifier {
   final index=categories.indexWhere((x)=>x['category']==category);
   if(index<0)return;
   final previous=categories[index]['mode']?.toString()??'';
+  if(categories[index]['mandatory']==true&&mode=='off')mode='in_app';
   if(previous==mode)return;
-  preferencesBusy=true;categories[index]['mode']=mode;changed();
+  _preferenceRevision++;preferencesBusy=true;categories[index]['mode']=mode;changed();
   final doc={'category':category,'mode':mode};
   try{
-   await session.patch('/api/v1/notifications/preferences',doc);
-   error=null;
-  }catch(e){
-   if(e is ApiFailure&&e.status>=400&&e.status<500){
-    categories[index]['mode']=previous;error=e.message;
+   if(_pending.any((op)=>op['path']=='/api/v1/notifications/preferences'&&(op['payload'] as Map?)?['category']==category)){
+    await queue.enqueue('/api/v1/notifications/preferences',doc,method:'PATCH');
+    error='Thiết lập đã lưu trên máy, chờ đồng bộ.';
    }else{
-    try{await queue.enqueue('/api/v1/notifications/preferences',doc,method:'PATCH');}
+    final result=await session.patch('/api/v1/notifications/preferences',doc);
+    final item=result['item'];if(item is Map&&item['mode'] is String)categories[index]['mode']=item['mode'];
+    error=null;
+   }
+  }catch(e){
+   if(!_retryable(e)){
+    categories[index]['mode']=previous;error=e.toString();
+   }else{
+    try{await queue.enqueue('/api/v1/notifications/preferences',doc,method:'PATCH');error='Thiết lập đã lưu trên máy, chờ đồng bộ.';}
     catch(_){categories[index]['mode']=previous;error='Không lưu được thiết lập trên máy.';}
    }
   }finally{
-   preferencesBusy=false;
-   await queue.cache('notifications-settings',[{'categories':categories,
-     'quiet_hours':{'quiet_start':quietStart,'quiet_end':quietEnd}}]);changed();
+   preferencesBusy=false;await _savePreferences();changed();
   }
  }
  Future<void> setQuietHours(int start,int end)async{
-  if(preferencesBusy)return;
+  if(preferencesBusy||start<0||start>=1440||end<0||end>=1440)return;
+  _preferenceRevision++;
   final oldStart=quietStart,oldEnd=quietEnd;
   quietStart=start;quietEnd=end;preferencesBusy=true;changed();
   try{
-   await session.patch('/api/v1/notifications/quiet-hours',{'quiet_start':start,'quiet_end':end});
-   error=null;
+   final doc={'quiet_start':start,'quiet_end':end};
+   if(_pending.any((op)=>op['path']=='/api/v1/notifications/quiet-hours')){
+    await queue.enqueue('/api/v1/notifications/quiet-hours',doc,method:'PATCH');
+    error='Giờ yên lặng đã lưu trên máy, chờ đồng bộ.';
+   }else{await session.patch('/api/v1/notifications/quiet-hours',doc);error=null;}
   }catch(e){
-   if(e is ApiFailure&&e.status>=400&&e.status<500){quietStart=oldStart;quietEnd=oldEnd;error=e.message;}
+   if(!_retryable(e)){quietStart=oldStart;quietEnd=oldEnd;error=e.toString();}
    else{
     try{await queue.enqueue('/api/v1/notifications/quiet-hours',
-     {'quiet_start':start,'quiet_end':end},method:'PATCH');}
+     {'quiet_start':start,'quiet_end':end},method:'PATCH');error='Giờ yên lặng đã lưu trên máy, chờ đồng bộ.';}
     catch(_){quietStart=oldStart;quietEnd=oldEnd;error='Không lưu được giờ yên lặng.';}
    }
   }finally{
-   preferencesBusy=false;await queue.cache('notifications-settings',[{'categories':categories,
-     'quiet_hours':{'quiet_start':quietStart,'quiet_end':quietEnd}}]);changed();
+   preferencesBusy=false;await _savePreferences();changed();
   }
+ }
+ bool _pendingRead(FieldNotification item){
+  return _pending.any((op){
+   if(op['path']=='/api/v1/notifications/${item.id}/read')return true;
+   final payload=op['payload'];
+   return op['path']=='/api/v1/notifications/read-all'&&payload is Map&&
+     notificationCoveredByWatermark(item.id,BigInt.tryParse(payload['upto']?.toString()??''));
+  });
+ }
+ List<FieldNotification> _parseItems(Map<String,dynamic> doc)=>(doc['items'] as List)
+  .whereType<Map>().map((x)=>FieldNotification.parse(Map<String,dynamic>.from(x))).toList();
+ Future<void> _clearDenied()async{
+  items=[];unreadCount=0;nextCursor=null;categories=[];
+  error='Phiên hết hạn hoặc quyền đã thay đổi.';
+  await _saveSafely();
+  try{await queue.cache('notifications-settings',[]);}catch(_){}
+  if(isAndroid){try{await AndroidPushBridge.disable(queue.identity);}catch(_){}pushEnabled=false;}
  }
  Future<void> loadMore()async{
-  if(loading||paging||nextCursor==null||_closed)return;
-  paging=true;changed();
-  try{
-   final data=await session.get('/api/v1/notifications?limit=40&before=$nextCursor');
-   final received=(data['items'] as List).whereType<Map>().map(
-      (x)=>FieldNotification.parse(Map<String,dynamic>.from(x))).toList();
-   final ids=items.map((x)=>x.id).toSet();
-   items=[...items,...received.where((x)=>!ids.contains(x.id))];
-   nextCursor=data['next_cursor']?.toString();
-   await save();error=null;
-  }catch(e){error='Không tải được trang tiếp theo.';}
-  finally{paging=false;changed();}
+  if(_pageQueued||_closed||nextCursor==null)return;
+  _pageQueued=true;
+  try{await _serial(()async{
+   final before=nextCursor;if(before==null)return;
+   paging=true;changed();
+   try{
+    final data=await session.get('/api/v1/notifications?limit=40&before=$before');
+    final received=_parseItems(data);
+    final ids=items.map((x)=>x.id).toSet();
+    items=[...items,...received.where((x)=>ids.add(x.id)).map((x)=>_pendingRead(x)?x.markRead():x)];
+    final cursor=data['next_cursor']?.toString();
+    nextCursor=cursor==before?null:cursor;error=null;await _saveSafely();
+   }catch(e){
+    if(e is ApiFailure&&(e.status==401||e.status==403))await _clearDenied();
+    else error='Không tải được trang tiếp theo.';
+   }finally{paging=false;changed();}
+  });}finally{_pageQueued=false;}
  }
- Future<void> markAllRead()async{
-  if(readAllBusy||unreadCount==0)return;
+ Future<void> markAllRead()=>_serial(()async{
+  if(unreadCount==0||items.isEmpty)return;
   readAllBusy=true;changed();
-  // Snapshot watermark guarantees offline replay never erases a later event.
-  final watermark=items.isEmpty?null:items.first.id;
-  if(watermark==null){readAllBusy=false;changed();return;}
-  final old=items;final oldCount=unreadCount;
-  items=items.map((x)=>x.unread?x.markRead():x).toList();
-  unreadCount=0;await save();changed();
+  final watermark=items.first.id;
   try{
-   await session.post('/api/v1/notifications/read-all',{'upto':watermark});
-   error=null;
-  }catch(e){
-   if(e is ApiFailure&&e.status>=400&&e.status<500){
-    items=old;unreadCount=oldCount;error=e.message;await save();
-   }else{
-    try{await queue.enqueue('/api/v1/notifications/read-all',
-     {'upto':watermark},method:'POST');}
-    catch(_){items=old;unreadCount=oldCount;error='Không lưu được thao tác đã đọc.';await save();}
+   try{await session.post('/api/v1/notifications/read-all',{'upto':watermark});error=null;}
+   catch(e){
+    if(!_retryable(e)){error=e.toString();return;}
+    await queue.enqueue('/api/v1/notifications/read-all',{'upto':watermark},method:'POST');
+    error='Đã lưu thao tác đọc tất cả trên máy.';
    }
-  }finally{readAllBusy=false;changed();}
- }
-
+   items=items.map((x)=>x.unread?x.markRead():x).toList();
+   unreadCount=0;await _saveSafely();
+  }catch(_){error='Không lưu được thao tác đã đọc.';}
+  finally{readAllBusy=false;changed();}
+ });
  Future<void> refresh()async{
-  if(_closed||loading)return;
-  loading=true;changed();
-  try{
-   final res=await session.get('/api/v1/notifications');
-   final waiting=queue.pending.map((x)=>RegExp(r'/notifications/([0-9]+)/read$')
-       .firstMatch(x['path']?.toString()??'')?.group(1)).whereType<String>().toSet();
-   final cutoffs=queue.pending.where((x)=>x['path']=='/api/v1/notifications/read-all')
-    .map((x)=>BigInt.tryParse((x['payload'] as Map?)?['upto']?.toString()??''))
-    .whereType<BigInt>().toList();
-   final cutoff=cutoffs.isEmpty?null:cutoffs.reduce((a,b)=>a>b?a:b);
-   final serverItems=(res['items'] as List).map((x)=>FieldNotification.parse(
-      Map<String,dynamic>.from(x as Map))).toList();
-   final locallyRead=serverItems.where((item)=>item.unread&&
-    (waiting.contains(item.id)||notificationCoveredByWatermark(item.id,cutoff))).length;
-   items=[for(final item in serverItems)
-    (waiting.contains(item.id)||notificationCoveredByWatermark(item.id,cutoff))
-       ?item.markRead():item];
-   nextCursor=res['next_cursor']?.toString();
-   unreadCount=(((res['unread_count'] as num?)?.toInt()??0)-locallyRead).clamp(0,2147483647);
-   await save();
-   stale=false;error=null;
-   if(isAndroid&&androidConfigured)await _syncAndroid();
-  }catch(e){
-   if(e is ApiFailure&&(e.status==401||e.status==403)){
-    items=[];unreadCount=0;nextCursor=null;categories=[];
-    await save();await queue.cache('notifications-settings',[]);
-    error='Phiên hết hạn hoặc quyền đã thay đổi.';
-    if(isAndroid){try{await AndroidPushBridge.disable(queue.identity);}catch(_){}pushEnabled=false;}
-   }else{stale=true;error='Thông báo đang hiển thị từ bộ nhớ máy.';}
-  }finally{loading=false;changed();}
+  if(_closed||_refreshQueued)return;
+  _refreshQueued=true;
+  try{await _serial(()async{
+   loading=true;changed();
+   try{
+    final res=await session.get('/api/v1/notifications');
+    final serverItems=_parseItems(res);
+    var cursor=res['next_cursor']?.toString();
+    final depth=items.length;
+    // Reload the previously opened depth, not stale cached tail rows.
+    while(cursor!=null&&serverItems.length<depth){
+     final before=cursor;
+     final page=await session.get('/api/v1/notifications?limit=40&before=$before');
+     final ids=serverItems.map((x)=>x.id).toSet();
+     final additional=_parseItems(page).where((x)=>ids.add(x.id)).toList();
+     serverItems.addAll(additional);
+     cursor=page['next_cursor']?.toString();
+     if(additional.isEmpty||cursor==before){cursor=null;break;}
+    }
+    if(_closed)return;
+    final locallyRead=serverItems.where((item)=>item.unread&&_pendingRead(item)).length;
+    items=[for(final item in serverItems)_pendingRead(item)?item.markRead():item];
+    nextCursor=cursor;
+    unreadCount=(((res['unread_count'] as num?)?.toInt()??0)-locallyRead).clamp(0,2147483647);
+    stale=false;error=null;await _saveSafely();
+    if(isAndroid&&androidConfigured)await _syncAndroid();
+   }catch(e){
+    if(e is ApiFailure&&(e.status==401||e.status==403))await _clearDenied();
+    else{stale=true;error='Thông báo đang hiển thị từ bộ nhớ máy.';}
+   }finally{loading=false;changed();}
+  });}finally{_refreshQueued=false;}
  }
- Future<void> markRead(FieldNotification item)async{
-  if(!item.unread)return;
+ Future<void> markRead(FieldNotification item)=>_serial(()async{
+  final current=items.where((x)=>x.id==item.id).firstOrNull;
+  if(current==null||!current.unread)return;
   try{
-   await session.post('/api/v1/notifications/${item.id}/read',{});
-  }catch(e){
-   if(e is ApiFailure){error=e.message;changed();return;}
-   await queue.enqueue('/api/v1/notifications/${item.id}/read',{},method:'POST');
-  }
-  items=[for(final n in items)n.id==item.id?n.markRead():n];
-  unreadCount=(unreadCount-1).clamp(0,2147483647);
-  await save();changed();
- }
+   try{await session.post('/api/v1/notifications/${item.id}/read',{});error=null;}
+   catch(e){
+    if(!_retryable(e)){error=e.toString();return;}
+    if(!_pendingRead(current))await queue.enqueue('/api/v1/notifications/${item.id}/read',{},method:'POST');
+    error='Đã lưu trạng thái đọc trên máy.';
+   }
+   items=[for(final n in items)n.id==item.id?n.markRead():n];
+   unreadCount=(unreadCount-1).clamp(0,2147483647);
+   await _saveSafely();
+  }catch(_){error='Không lưu được thao tác đã đọc.';}
+  finally{changed();}
+ });
  Future<void> sendTest()async{
   try{
    final result=await session.post('/api/v1/notifications/test',{});
@@ -341,7 +396,7 @@ class FieldNotificationStore extends ChangeNotifier {
 String notificationCategoryName(String c)=>const <String,String>{
  'target':'Chỉ tiêu','assignment':'Phân công','security':'Bảo mật',
  'support':'Đề xuất hỗ trợ','order_action':'Đơn cần xử lý','daily_digest':'Tổng hợp công việc',
- 'email':'Email','day_route':'Tuyến ngày','weekly_route':'Tuyến tuần','monthly_route':'Tuyến tháng',
+ 'email':'Email','monthly_plan':'Kế hoạch tháng','school':'Trường học','catalog':'Danh mục','inventory':'Tồn kho','day_route':'Tuyến ngày','weekly_route':'Tuyến tuần','monthly_route':'Tuyến tháng',
  'trip':'Chuyến công tác','survey':'Khảo sát','prospect':'Điểm tiềm năng',
  'actuals':'Doanh số','release':'Bản cập nhật','sync':'Đồng bộ',
  'order_summary':'Đơn hàng','customer':'Khách hàng','competitor':'Đối thủ'
@@ -484,11 +539,11 @@ class FieldNotificationSettingsPage extends StatelessWidget{
    trailing:DropdownButton<String>(
     value:const ['immediate','digest','in_app','off'].contains(choice)?choice:'off',
     onChanged:store.preferencesBusy?null:(v){if(v!=null)unawaited(store.setMode(key,v));},
-    items:const [
-     DropdownMenuItem(value:'immediate',child:Text('Báo ngay')),
-     DropdownMenuItem(value:'digest',child:Text('Tổng hợp')),
-     DropdownMenuItem(value:'in_app',child:Text('Trong app')),
-     DropdownMenuItem(value:'off',child:Text('Tắt'))
+    items:[
+     const DropdownMenuItem(value:'immediate',child:Text('Báo ngay')),
+     const DropdownMenuItem(value:'digest',child:Text('Tổng hợp')),
+     const DropdownMenuItem(value:'in_app',child:Text('Trong app')),
+     DropdownMenuItem(value:'off',enabled:entry['mandatory']!=true,child:const Text('Tắt'))
     ]));
  }
  @override Widget build(BuildContext context)=>Scaffold(

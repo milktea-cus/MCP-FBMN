@@ -31,9 +31,10 @@ class TargetClient {
 }
 
 class TargetPage extends StatefulWidget{
+ final int? initialYear;
  final OfflineQueue queue;
  final TargetClient? client;
- const TargetPage({super.key,required this.queue,this.client});
+ const TargetPage({super.key,required this.queue,this.client,this.initialYear});
  @override State<TargetPage> createState()=>_TargetPageState();
 }
 class _TargetPageState extends State<TargetPage>{
@@ -46,7 +47,7 @@ class _TargetPageState extends State<TargetPage>{
  List<int> get months=>targetMonths(period,month);
  String get path=>Uri(path:'/api/v1/targets',queryParameters:{'year':'$year','owner':owner}).toString();
  String get cacheKey=>'targets-v2:$year:$owner';
- @override void initState(){super.initState();owner=widget.queue.identity;load();}
+ @override void initState(){super.initState();year=widget.initialYear??year;owner=widget.queue.identity;load();}
  Future<void> load()async{
   final generation=++_generation,key=cacheKey,request=path;
   setState((){busy=true;error=null;cached=false;canEdit=false;rows=[];allocations=[];actuals=[];actualBreakdown=[];});

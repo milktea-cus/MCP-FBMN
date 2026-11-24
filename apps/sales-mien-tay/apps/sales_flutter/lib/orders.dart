@@ -75,10 +75,10 @@ class OrdersPage extends StatefulWidget{
  final OfflineQueue queue;
  final bool admin;
  final ActualClient? client;
- final Map<String,dynamic>? initialCustomer;
+ final Map<String,dynamic>? initialCustomer,initialOrder;
  final Future<void> Function(String orderId)? onOrderSaved;
  const OrdersPage({super.key,required this.queue,required this.admin,this.client,
-  this.initialCustomer,this.onOrderSaved});
+  this.initialCustomer,this.initialOrder,this.onOrderSaved});
  @override State<OrdersPage> createState()=>_OrdersPageState();
 }
 class _OrdersPageState extends State<OrdersPage>{
@@ -104,7 +104,7 @@ class _OrdersPageState extends State<OrdersPage>{
  String get draftKey=>'order-drafts-v1';
  @override void initState(){
   super.initState();
-  unawaited(load());
+  if(widget.initialOrder!=null){unawaited(_openInitial());}else{unawaited(load());}
   if(widget.initialCustomer!=null){
    WidgetsBinding.instance.addPostFrameCallback((_){
     if(!mounted)return;
@@ -115,6 +115,10 @@ class _OrdersPageState extends State<OrdersPage>{
     localChanged();
    });
   }
+ }
+ Future<void> _openInitial()async{
+  await load();
+  if(mounted&&widget.initialOrder!=null)await open(widget.initialOrder!);
  }
  @override void dispose(){searchDebounce?.cancel();search.dispose();note.dispose();super.dispose();}
  Map<String,dynamic> snapshot(){
