@@ -29,7 +29,8 @@ class FieldNotificationStore extends ChangeNotifier {
  FieldNotificationStore(this.session,this.queue);
  List<FieldNotification> items=[];
  bool stale=false,loading=false,pushEnabled=false,hasBrowserPush=false;
- String? error,publicKey;
+ String? error,publicKey,pushReport;
+ Map<String,dynamic> androidDiagnostics={};
  bool _closed=false;
  bool get isAndroid=>AndroidPushBridge.supported;
  bool androidConfigured=false,pushBusy=false;
@@ -68,6 +69,7 @@ class FieldNotificationStore extends ChangeNotifier {
   if(!isAndroid||!androidConfigured||pushBusy||_closed)return;
   pushBusy=true;
   try{
+   androidDiagnostics=await AndroidPushBridge.diagnostics(queue.identity);
    final data=await AndroidPushBridge.status(queue.identity);
    if(_closed)return;
    if(data==null){pushEnabled=false;_registeredToken=null;_registeredBinding=null;return;}
@@ -113,8 +115,29 @@ class FieldNotificationStore extends ChangeNotifier {
   await save();changed();
  }
  Future<void> sendTest()async{
-  try{await session.post('/api/v1/notifications/test',{});await refresh();}
-  catch(e){error=e.toString();changed();}
+  try{
+   final result=await session.post('/api/v1/notifications/test',{});
+   await refresh();
+   if(isAndroid){
+    final report=result['android'];
+    if(report is Map){
+     final accepted=report['accepted'];
+     final reason=report['reason']?.toString();
+     pushReport=accepted is num&&accepted>0
+       ?'Google FCM đã nhận yêu cầu gửi. Kiểm tra banner/âm thanh trên máy.'
+       :'Đã tạo thông báo trong hộp thư nhưng FCM chưa gửi được (${reason??'unknown'}).';
+    }else{pushReport='Máy chủ chưa trả kết quả gửi FCM.';}
+    androidDiagnostics=await AndroidPushBridge.diagnostics(queue.identity);
+   }
+   changed();
+  }catch(e){error=e.toString();changed();}
+ }
+ Future<void> localAndroidTest()async{
+  try{await AndroidPushBridge.localTest(queue.identity);pushReport='Đã yêu cầu Android hiển thị thông báo thử tại máy.';changed();}
+  catch(_){error='Không hiển thị được thông báo thử. Kiểm tra quyền Android.';changed();}
+ }
+ Future<void> androidSettings()async{
+  try{await AndroidPushBridge.settings();}catch(_){error='Không mở được cài đặt Android.';changed();}
  }
  Future<void> enablePush()async{
   if(isAndroid){await _enableAndroid();return;}
@@ -197,6 +220,12 @@ class FieldNotificationInbox extends StatelessWidget {
           else{unawaited(store.disablePush());}
         },
       )),
+      if(store.isAndroid)Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+        if(store.androidDiagnostics['sound']==false||((store.androidDiagnostics['importance'] as int?)??4)<4)const Text('Kênh thông báo đang im lặng hoặc không bật banner. Mở cài đặt để chọn âm thanh và hiển thị nổi.'),
+        if(store.pushReport!=null)Text(store.pushReport!),
+        if((store.androidDiagnostics['receivedAt'] as int? ?? 0)>0)Text('FCM gần nhất: ${DateTime.fromMillisecondsSinceEpoch(store.androidDiagnostics['receivedAt'] as int).toLocal().toString().substring(0,19)}'),
+        Wrap(spacing:8,children:[TextButton(onPressed:store.pushEnabled?()=>unawaited(store.localAndroidTest()):null,child:const Text('Thử âm thanh máy')),TextButton(onPressed:()=>unawaited(store.androidSettings()),child:const Text('Cài đặt âm thanh'))]),
+      ]))),
       if(!store.hasBrowserPush&&!store.isAndroid)const Card(child:ListTile(
         leading:Icon(Icons.info_outline),title:Text('Push khóa màn hình'),
         subtitle:Text('Thiết bị hoặc trình duyệt hiện không hỗ trợ Push.'),

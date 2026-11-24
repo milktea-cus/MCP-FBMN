@@ -1,6 +1,6 @@
 import {neon} from '@neondatabase/serverless';
 import type {userFromRequest} from './auth';
-import {fcmConfigured,registerFcm,unregisterFcm,sendFcm,validFcmToken,validBinding} from './fcm';
+import {fcmConfigured,registerFcm,unregisterFcm,sendFcm,validFcmToken,validBinding,type FcmReport} from './fcm';
 
 type Actor=Awaited<ReturnType<typeof userFromRequest>>;
 type PushEnv={DATABASE_URL:string;FCM_SERVICE_ACCOUNT_JSON?:string;VAPID_PUBLIC_KEY?:string;VAPID_PRIVATE_JWK?:string;VAPID_SUBJECT?:string};
@@ -71,13 +71,18 @@ async function fanOutWeb(env:PushEnv,recipient:string):Promise<void>{
  }));
 }
 export async function publishNotification(env:PushEnv,recipient:string,eventKey:string,title:string,description:string):Promise<void>{
- if(!recipient||eventKey.length>160)return;
+ await publishWithReport(env,recipient,eventKey,title,description);
+}
+async function publishWithReport(env:PushEnv,recipient:string,eventKey:string,title:string,description:string):Promise<FcmReport>{
+ if(!recipient||eventKey.length>160)return {accepted:0,failed:0,reason:'invalid_event'};
  const sql=neon(env.DATABASE_URL);
  const inserted=await sql`INSERT INTO field_notifications(recipient_sub,event_key,title,body)
   SELECT s.user_sub,${eventKey},${title},${description}
   FROM staff_members s WHERE s.user_sub=${recipient} AND s.active
   ON CONFLICT(recipient_sub,event_key) DO NOTHING RETURNING id`;
- if(inserted.length)await Promise.allSettled([fanOutWeb(env,recipient),sendFcm(env,recipient)]);
+ if(!inserted.length)return {accepted:0,failed:0,reason:'not_inserted'};
+ const [,android]=await Promise.allSettled([fanOutWeb(env,recipient),sendFcm(env,recipient)]);
+ return android.status==='fulfilled'?android.value:{accepted:0,failed:0,reason:'server_error'};
 }
 export async function notificationRoutes(req:Request,env:PushEnv,u:Actor,url:URL):Promise<Response|null>{
  const path=url.pathname;
@@ -138,10 +143,10 @@ export async function notificationRoutes(req:Request,env:PushEnv,u:Actor,url:URL
   const last=await sql`SELECT id FROM field_notifications WHERE recipient_sub=${u.sub}
    AND event_key LIKE 'test:%' AND created_at>now()-interval '60 seconds' LIMIT 1`;
   if(last.length)return fail('Chỉ gửi thử mỗi 60 giây',429);
-  try{await publishNotification(env,u.sub,'test:'+crypto.randomUUID(),
-    'Thử thông báo Field Work','Thông báo đã đến hộp thư của bạn.');}
+  try{const android=await publishWithReport(env,u.sub,'test:'+crypto.randomUUID(),
+    'Thử thông báo Field Work','Thông báo đã đến hộp thư của bạn.');
+    return reply({ok:true,android},201);}
   catch{return fail('Không gửi được thông báo thử',503);}
-  return reply({ok:true},201);
  }
  return fail('Endpoint không tồn tại',404);
 }

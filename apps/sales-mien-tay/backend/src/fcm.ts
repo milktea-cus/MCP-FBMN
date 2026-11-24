@@ -49,31 +49,34 @@ export async function unregisterFcm(env:FcmEnv,sub:string,binding:string){
  await neon(env.DATABASE_URL)`DELETE FROM public.field_android_push_devices
  WHERE recipient_sub=${sub} AND binding_id=${binding}::uuid`;
 }
-export async function sendFcm(env:FcmEnv,sub:string):Promise<{accepted:number;failed:number}>{
- if(!fcmConfigured(env))return {accepted:0,failed:0};
+export type FcmReport={accepted:number;failed:number;reason?:string};
+export async function sendFcm(env:FcmEnv,sub:string):Promise<FcmReport>{
+ if(!fcmConfigured(env))return {accepted:0,failed:0,reason:'not_configured'};
  const sql=neon(env.DATABASE_URL);
  const devices=await sql`SELECT d.token,d.binding_id::text AS binding_id
  FROM public.field_android_push_devices d JOIN public.staff_members s ON s.user_sub=d.recipient_sub
  WHERE d.recipient_sub=${sub} AND s.active AND public.sales_identity_exists(s.user_sub)
  ORDER BY d.updated_at DESC LIMIT 5`;
- if(!devices.length)return {accepted:0,failed:0};
- let access:string;try{access=await accessToken(env);}catch{return {accepted:0,failed:devices.length};}
+ if(!devices.length)return {accepted:0,failed:0,reason:'no_device'};
+ let access:string;try{access=await accessToken(env);}catch{return {accepted:0,failed:devices.length,reason:'oauth_failed'};}
  const delivered=await Promise.all(devices.map(async d=>{
-  if(!validFcmToken(d.token)||!validBinding(d.binding_id))return false;
+  if(!validFcmToken(d.token)||!validBinding(d.binding_id))return 'invalid_device';
   try{
    const r=await fetch('https://fcm.googleapis.com/v1/projects/'+project+'/messages:send',{
     method:'POST',redirect:'error',headers:{Authorization:'Bearer '+access,'Content-Type':'application/json'},
     body:JSON.stringify({message:{token:d.token,data:{kind:'field_notification',binding:d.binding_id},
      android:{priority:'HIGH',ttl:'3600s'}}}),signal:AbortSignal.timeout(8000)});
-   if(r.ok)return true;
+   if(r.ok)return 'accepted';
    const error=await r.json().catch(()=>null) as {error?:{details?:Array<{errorCode?:string}>}}|null;
    if(error?.error?.details?.some(x=>x.errorCode==='UNREGISTERED')){
     await sql`DELETE FROM public.field_android_push_devices WHERE token=${d.token}
     AND recipient_sub=${sub} AND binding_id=${d.binding_id}::uuid`;
    }
-  }catch{/* Do not expose credentials, tokens or Google response bodies. */}
-  return false;
+   const code=error?.error?.details?.find(x=>typeof x.errorCode==='string')?.errorCode;
+   if(code==='UNREGISTERED'||code==='SENDER_ID_MISMATCH'||code==='INVALID_ARGUMENT'||code==='QUOTA_EXCEEDED')return code;
+   return 'http_'+r.status;
+  }catch{return 'network_error';}
  }));
- const accepted=delivered.filter(Boolean).length;
- return {accepted,failed:devices.length-accepted};
+ const accepted=delivered.filter(x=>x==='accepted').length;
+ return {accepted,failed:devices.length-accepted,...(accepted===devices.length?{}:{reason:delivered.find(x=>x!=='accepted')})};
 }
