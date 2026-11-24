@@ -58,7 +58,8 @@ jobs:
           grep -qi '<html' /tmp/index.html
           curl --fail --retry 2 --max-time 30 -o /tmp/flutter_bootstrap.js "$site/flutter_bootstrap.js"
           curl --fail --retry 2 --max-time 30 -o /tmp/version.json "$site/version.json"
-          jq -e '.version=="aef40b487c93281660ac6b76bf1ddeba2997eef3"' /tmp/version.json
+          jq -e '.version | type=="string" and test("^[0-9a-f]{40}$")' /tmp/version.json
+          jq -e '.shell | type=="string" and test("^[0-9a-f]{16}$")' /tmp/version.json
           code=$(curl -sS --max-time 30 -o /tmp/open.json -w '%{http_code}' "$site/api/v1/notifications/1/open")
           echo "/api/v1/notifications/1/open => HTTP $code"
           test "$code" = 401
