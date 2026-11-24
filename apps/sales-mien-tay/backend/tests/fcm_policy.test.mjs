@@ -29,10 +29,13 @@ test('FCM OAuth JWT carries the service key ID and verifies using RSA SHA-256',a
  assert.equal(await crypto.subtle.verify('RSASSA-PKCS1-v1_5',key.publicKey,Buffer.from(s,'base64url'),new TextEncoder().encode(h+'.'+p)),true);
  const token=await accessToken(env,async(url,options)=>{
   assert.equal(url,'https://oauth2.googleapis.com/token');
+  assert.equal(options.redirect,'manual');
+  assert.equal(options.method,'POST');
   assert.equal(new URLSearchParams(options.body).get('grant_type'),'urn:ietf:params:oauth:grant-type:jwt-bearer');
   return Response.json({access_token:'synthetic-test'});
  });
  assert.equal(token,'synthetic-test');
+ await assert.rejects(accessToken(env,async()=>new Response(null,{status:302,headers:{Location:'https://example.invalid'}})),{message:'oauth_redirect_blocked'});
  await assert.rejects(accessToken(env,async()=>Response.json({error:'invalid_grant',error_description:'Invalid JWT Signature.'},{status:400})),{message:'oauth_invalid_signature'});
  await assert.rejects(accessToken(env,async()=>{throw Error('secret test detail');}),{message:'oauth_network_failed'});
 });
@@ -42,4 +45,12 @@ test('OAuth failures distinguish key, time, account and network without raw prov
  assert.equal(oauthErrorCode(400,{error:'invalid_grant',error_description:'Account not found'}),'oauth_account_invalid');
  assert.equal(oauthErrorCode(401,{error:'invalid_client'}),'oauth_invalid_client');
  assert.equal(oauthErrorCode(500,{error_description:'secret'}),'oauth_http_500');
+});
+
+test('both Google calls use Workers-compatible manual redirect without forwarding credentials',async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const source=await readFile(new URL('../src/fcm.ts',import.meta.url),'utf8');
+ assert.equal((source.match(/redirect:'manual'/g)||[]).length,2);
+ assert.ok(!source.includes("redirect:'error',"));
+ assert.ok(source.includes("return 'fcm_redirect_blocked'"));
 });

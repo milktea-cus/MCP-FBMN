@@ -53,15 +53,17 @@ export async function createFcmAssertion(env:FcmEnv,now=Math.floor(Date.now()/10
   return message+'.'+b64url(new Uint8Array(signature));
  }catch{throw new OAuthFailure('oauth_sign_failed');}
 }
-export async function accessToken(env:FcmEnv,request:typeof fetch=fetch){
+export async function accessToken(env:FcmEnv,request:typeof fetch=(input,init)=>globalThis.fetch(input,init)){
  const assertion=await createFcmAssertion(env);
  let res:Response;
  try{
-  res=await request(oauth,{method:'POST',redirect:'error',
+  res=await request(oauth,{method:'POST',redirect:'manual',
    headers:{'Content-Type':'application/x-www-form-urlencoded'},
    body:new URLSearchParams({grant_type:'urn:ietf:params:oauth:grant-type:jwt-bearer',assertion}).toString(),
    signal:AbortSignal.timeout(12000)});
  }catch{throw new OAuthFailure('oauth_network_failed');}
+ // Workers does not implement redirect:'error'. Never follow a redirect carrying a signed assertion.
+ if(res.status>=300&&res.status<400)throw new OAuthFailure('oauth_redirect_blocked');
  const result=await res.json().catch(()=>null) as {access_token?:unknown}|null;
  if(!res.ok)throw new OAuthFailure(oauthErrorCode(res.status,result));
  if(typeof result?.access_token!=='string'||!result.access_token)throw new OAuthFailure('oauth_response_invalid');
@@ -96,9 +98,10 @@ export async function sendFcm(env:FcmEnv,sub:string):Promise<FcmReport>{
   if(!validFcmToken(d.token)||!validBinding(d.binding_id))return 'invalid_device';
   try{
    const r=await fetch('https://fcm.googleapis.com/v1/projects/'+project+'/messages:send',{
-    method:'POST',redirect:'error',headers:{Authorization:'Bearer '+access,'Content-Type':'application/json'},
+    method:'POST',redirect:'manual',headers:{Authorization:'Bearer '+access,'Content-Type':'application/json'},
     body:JSON.stringify({message:{token:d.token,data:{kind:'field_notification',binding:d.binding_id},
      android:{priority:'HIGH',ttl:'3600s'}}}),signal:AbortSignal.timeout(8000)});
+   if(r.status>=300&&r.status<400)return 'fcm_redirect_blocked';
    if(r.ok)return 'accepted';
    const error=await r.json().catch(()=>null) as {error?:{details?:Array<{errorCode?:string}>}}|null;
    if(error?.error?.details?.some(x=>x.errorCode==='UNREGISTERED')){
