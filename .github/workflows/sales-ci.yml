@@ -7,6 +7,7 @@ on:
       - ".github/workflows/sales-ci.yml"
       - ".github/workflows/sales-production-comment.yml"
       - ".github/workflows/sales-android-release.yml"
+      - ".github/workflows/sales-production-smoke.yml"
   push:
     branches: [main]
     paths:
@@ -14,6 +15,7 @@ on:
       - ".github/workflows/sales-ci.yml"
       - ".github/workflows/sales-production-comment.yml"
       - ".github/workflows/sales-android-release.yml"
+      - ".github/workflows/sales-production-smoke.yml"
   workflow_dispatch:
 
 permissions:
