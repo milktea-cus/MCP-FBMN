@@ -116,3 +116,10 @@ test('L2 receipt projection is read-only and Android retries share a bounded opa
  assert.match(native,/seen.contains\(notice\)/);
  assert.match(native,/takeLast\(100\)/);
 });
+
+test('L2 exact navigation is scoped to the still-open inbox route',async()=>{
+ const main=await readFile(new URL('../../apps/sales_flutter/lib/main.dart',import.meta.url),'utf8');
+ assert.match(main,/inboxContext.mounted&&ModalRoute.of\(inboxContext\)\?\.isCurrent==true/);
+ assert.match(main,/Navigator.of\(inboxContext\).pop\(\)/);
+ assert.match(main,/initialOrder:order/);
+});

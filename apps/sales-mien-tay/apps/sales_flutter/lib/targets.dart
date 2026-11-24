@@ -47,7 +47,7 @@ class _TargetPageState extends State<TargetPage>{
  List<int> get months=>targetMonths(period,month);
  String get path=>Uri(path:'/api/v1/targets',queryParameters:{'year':'$year','owner':owner}).toString();
  String get cacheKey=>'targets-v2:$year:$owner';
- @override void initState(){super.initState();year=widget.initialYear??year;owner=widget.queue.identity;load();}
+ @override void initState(){super.initState();year=widget.initialYear??year;if(widget.initialYear!=null)period='year';owner=widget.queue.identity;load();}
  Future<void> load()async{
   final generation=++_generation,key=cacheKey,request=path;
   setState((){busy=true;error=null;cached=false;canEdit=false;rows=[];allocations=[];actuals=[];actualBreakdown=[];});

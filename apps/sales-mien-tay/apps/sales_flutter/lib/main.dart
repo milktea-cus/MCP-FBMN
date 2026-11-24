@@ -98,8 +98,10 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
     _notifications.dispose();
     _queue.removeListener(_queueChanged);_queue.dispose();super.dispose();
   }
-  Future<void> _openFromNotification(FieldNotification item)async{
+  Future<void> _openFromNotification(FieldNotification item,BuildContext inboxContext)async{
+    bool stillOpen()=>mounted&&inboxContext.mounted&&ModalRoute.of(inboxContext)?.isCurrent==true;
     final result=await widget.session.get('/api/v1/notifications/'+item.id+'/open');
+    if(!stillOpen())return;
     final target=result['destination'] as Map?;
     final screen=target?['screen']?.toString()??'';
     final idx=const {'targets':3,'customers':1,'work':5,'reports':9,
@@ -107,7 +109,7 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
     if(screen=='mail'){
       final thread=target?['entity_id']?.toString();
       if(thread==null||thread.isEmpty)throw StateError('Hội thoại đã bị thu hồi');
-      if(!mounted)return;
+      if(!stillOpen())return;
       Navigator.push(context,MaterialPageRoute(builder:(_)=>StaffMailPage(
        key:ValueKey('mail-deep:'+_queue.namespace+':'+thread),
        session:widget.session,initialThreadId:thread)));
@@ -116,7 +118,7 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
       final doc=await widget.session.get('/api/v1/orders/$id');
       final order=Map<String,dynamic>.from(doc['item'] as Map);
       if(order['id']?.toString()!=id)throw StateError('Đơn không còn khả dụng');
-      if(!mounted)return;
+      if(!stillOpen())return;
       Navigator.push(context,MaterialPageRoute(builder:(_)=>Scaffold(
        appBar:AppBar(title:const Text('Đơn hàng từ thông báo')),
        body:OrdersPage(queue:_queue,admin:widget.me['role']=='admin',initialOrder:order))));
@@ -125,26 +127,26 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
       final doc=await widget.session.get('/api/v1/scoped-records/$id?kind=support');
       final record=SalesRecord.fromJson(Map<String,dynamic>.from(doc['item'] as Map));
       if(record.id!=id||record.kind!='support')throw StateError('Đề xuất không còn khả dụng');
-      if(!mounted)return;
+      if(!stillOpen())return;
       unawaited(_editScopedRecord(record));
     }else if(screen=='profile'){
-      if(!mounted)return;
+      if(!stillOpen())return;
       unawaited(_profile());
     }else if(screen=='updates'&&!kIsWeb&&defaultTargetPlatform==TargetPlatform.android){
-      if(!mounted)return;
+      if(!stillOpen())return;
       Navigator.push(context,MaterialPageRoute(
         builder:(_)=>AppUpdatePage(session:widget.session)));
     }else if(screen=='updates'&&kIsWeb){
-      if(!mounted)return;
+      if(!stillOpen())return;
       Navigator.push(context,MaterialPageRoute(builder:(_)=>const PwaUpdatePage()));
     }else if(screen=='targets'&&target?['year'] is num){
-      if(!mounted)return;
+      if(!stillOpen())return;
       Navigator.push(context,MaterialPageRoute(builder:(_)=>Scaffold(
        appBar:AppBar(title:const Text('Chỉ tiêu từ thông báo')),
        body:TargetPage(queue:_queue,initialYear:(target!['year'] as num).toInt()))));
     }else if(idx!=null){
-      if(!mounted)return;
-      Navigator.of(context).pop();
+      if(!stillOpen())return;
+      Navigator.of(inboxContext).pop();
       setState(()=>_selectedIndex=idx);
     }else{
       throw StateError('Nghiệp vụ không còn khả dụng');
@@ -493,7 +495,7 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
         loading:_loading,
         store:_notifications,
         onNotifications:()=>Navigator.push(context,MaterialPageRoute(
-          builder:(_)=>FieldNotificationInbox(store:_notifications,onOpen:_openFromNotification))),
+          builder:(inboxContext)=>FieldNotificationInbox(store:_notifications,onOpen:(item)=>_openFromNotification(item,inboxContext)))),
       ),
       bottomNavigationBar: narrow ? NavigationBar(
         selectedIndex: const [0,1,5,9].contains(_selectedIndex)?const [0,1,5,9].indexOf(_selectedIndex):0,
