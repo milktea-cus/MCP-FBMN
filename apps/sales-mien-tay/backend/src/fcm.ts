@@ -20,7 +20,8 @@ function credentials(env:FcmEnv){
 }
 export const fcmConfigured=(env:FcmEnv)=>credentials(env)!==null;
 class OAuthFailure extends Error {
- constructor(readonly code:string){super(code);}
+ readonly code:string;
+ constructor(code:string){super(code);this.code=code;}
 }
 const b64url=(bytes:Uint8Array)=>btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 const encode=(value:unknown)=>b64url(new TextEncoder().encode(JSON.stringify(value)));
