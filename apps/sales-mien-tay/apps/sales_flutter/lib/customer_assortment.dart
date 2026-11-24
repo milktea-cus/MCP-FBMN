@@ -153,29 +153,32 @@ class _CustomerAssortmentSectionState extends State<CustomerAssortmentSection>{
   previousPending=count;
  }
  Future<void> _open()async{
+  final request=generation;
   if(widget.queue!=null){
    try{
     final rows=await widget.queue!.cached(cacheKey);
-    if(mounted)setState(()=>items=rows);
+    if(mounted&&generation==request)setState(()=>items=rows);
    }catch(_){}
   }
-  if(mounted)unawaited(refresh());
+  if(mounted&&generation==request)unawaited(refresh());
  }
  Future<void> refresh()async{
   final request=++generation;
+  final query=search.text.trim(), selectedStatus=status, key=cacheKey;
+  final queue=widget.queue;
   final previous=List<Map<String,dynamic>>.from(items);
   if(mounted)setState((){loading=true;error=null;});
   try{
    final data=await widget.api.products(widget.customerId,
-    search:search.text,status:status,
+    search:query,status:selectedStatus,
     onPage:(partial){
      if(mounted&&generation==request)setState(()=>items=partial);
     });
    if(!mounted||generation!=request)return;
    setState((){items=data;offline=false;error=null;});
    // Persist complete account-scoped snapshots only, not a search subset.
-   if(widget.queue!=null&&search.text.trim().isEmpty&&status.isEmpty){
-    try{await widget.queue!.cache(cacheKey,data);}catch(_){}
+   if(queue!=null&&query.isEmpty&&selectedStatus.isEmpty){
+    try{await queue.cache(key,data);}catch(_){}
    }
   }catch(e){
    if(!mounted||generation!=request)return;
@@ -196,7 +199,8 @@ class _CustomerAssortmentSectionState extends State<CustomerAssortmentSection>{
   }
  }
  void searchChanged(String text){
-  setState((){});
+  ++generation;
+  setState((){loading=true;visibleLimit=24;error=null;});
   debounce?.cancel();
   debounce=Timer(const Duration(milliseconds:300),(){
    if(mounted)unawaited(refresh());
@@ -276,9 +280,9 @@ class _CustomerAssortmentSectionState extends State<CustomerAssortmentSection>{
  }
  @override Widget build(BuildContext context){
   final q=search.text.trim().toLowerCase();
-  final display=items.where((x)=>q.isEmpty||[
+  final display=items.where((x)=>(status.isEmpty||x['status']==status)&&(q.isEmpty||[
    x['company_code'],x['name'],x['sku'],x['brand']
-  ].any((t)=>(t?.toString()??'').toLowerCase().contains(q))).toList();
+  ].any((t)=>(t?.toString()??'').toLowerCase().contains(q)))).toList();
   return Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
    _CustomerBrandsPanel(customerId:widget.customerId,api:widget.api,
     queue:widget.queue,editable:widget.editable),
@@ -307,7 +311,7 @@ class _CustomerAssortmentSectionState extends State<CustomerAssortmentSection>{
       ('','Tất cả'),('ordered','Đã đặt'),
       ('imported','Đã nhập hàng'),('trading','Đang kinh doanh'),
      ])ChoiceChip(label:Text(entry.$2),selected:status==entry.$1,
-      onSelected:(_){setState(()=>status=entry.$1);unawaited(refresh());}),
+      onSelected:(_){debounce?.cancel();setState((){status=entry.$1;visibleLimit=24;});unawaited(refresh());}),
     ]),
     if(loading)const LinearProgressIndicator(minHeight:2),
     if(error!=null)Text(error!,style:Theme.of(context).textTheme.bodySmall),
@@ -365,7 +369,7 @@ class _CustomerBrandsPanelState extends State<_CustomerBrandsPanel>{
   setState((){loading=true;error=null;});
   try{
    final items=await widget.api.marketBrands(widget.customerId);
-   if(widget.queue!=null)await widget.queue!.cache(cacheKey,items);
+   if(widget.queue!=null){try{await widget.queue!.cache(cacheKey,items);}catch(_){}}
    if(mounted)setState((){sightings=items;offline=false;});
   }catch(e){
    if(!mounted)return;
@@ -471,13 +475,16 @@ class _AssortmentProductPickerState extends State<_AssortmentProductPicker>{
  @override void dispose(){search.dispose();debounce?.cancel();super.dispose();}
  Future<void> load()async{
   final id=++generation;
+  final query=search.text.trim(),key='customer-product-catalog:${widget.customerId}';
+  final queue=widget.queue;
   setState(()=>loading=true);
   try{
-   final result=await widget.api.catalog(widget.customerId,search:search.text);
-   if(mounted&&id==generation)setState(()=>items=result);
-   if(widget.queue!=null&&search.text.trim().isEmpty){
+   final result=await widget.api.catalog(widget.customerId,search:query);
+   if(!mounted||id!=generation)return;
+   setState(()=>items=result);
+   if(queue!=null&&query.isEmpty){
     try{
-     await widget.queue!.cache('customer-product-catalog:${widget.customerId}',result);
+     await queue.cache(key,result);
     }catch(_){}
    }
   }catch(e){
@@ -491,7 +498,7 @@ class _AssortmentProductPickerState extends State<_AssortmentProductPicker>{
    TextField(controller:search,autofocus:true,
     decoration:const InputDecoration(isDense:true,labelText:'Mã CTY / tên SKU',
      prefixIcon:Icon(Icons.search)),
-    onChanged:(_){debounce?.cancel();debounce=Timer(
+    onChanged:(_){++generation;setState(()=>loading=true);debounce?.cancel();debounce=Timer(
       const Duration(milliseconds:250),(){if(mounted)unawaited(load());});}),
    if(loading)const LinearProgressIndicator(minHeight:2),
    Expanded(child:ListView.builder(

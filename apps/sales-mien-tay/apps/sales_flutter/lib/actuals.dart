@@ -48,11 +48,11 @@ class _ActualsPageState extends State<ActualsPage>{
  Future<void> load()async{
   final g=++generation,key=cacheKey,path=saleParam('/api/v1/actuals',{'month':ym,'owner':owner});
   setState((){busy=true;offline=false;error=null;entries=[];summary={};canImport=false;});
-  Map<String,dynamic>? doc;String? failure;
+  Map<String,dynamic>? doc;String? failure;bool isOffline=false;
   try{doc=await client.get(path);try{await widget.queue.cache(key,[doc]);}catch(_){}}
-  catch(e){failure=e.toString();if(e is! ApiFailure||e.status>=500){try{doc=(await widget.queue.cached(key)).firstOrNull;offline=doc!=null;}catch(_){}}}
+  catch(e){failure=e.toString();if(e is! ApiFailure||e.status>=500){try{doc=(await widget.queue.cached(key)).firstOrNull;isOffline=doc!=null;}catch(_){}}}
   if(!mounted||g!=generation)return;
-  setState((){busy=false;error=doc==null?failure:null;if(doc!=null){entries=saleRows(doc['items']);summary=Map<String,dynamic>.from(doc['summary'] as Map? ?? {});canImport=!offline&&doc['can_import']==true;}});
+  setState((){busy=false;offline=isOffline;error=doc==null?failure:null;if(doc!=null){entries=saleRows(doc['items']);summary=Map<String,dynamic>.from(doc['summary'] as Map? ?? {});canImport=!offline&&doc['can_import']==true;}});
  }
  Future<void> loadStaff()async{
   try{final r=await client.get('/api/v1/actuals/options?type=staff');if(mounted)setState(()=>staff=saleRows(r['items']));}catch(_){}
@@ -169,6 +169,7 @@ class _ActualEditorState extends State<_ActualEditor>{
   if(selected!=null&&mounted)setState(()=>day=selected);
  }
  Future<void> save()async{
+  if(busy)return;
   final q=int.tryParse(quantity.text),v=int.tryParse(amount.text);
   if(customer.isEmpty||product.isEmpty||q==null||q<1||q>1000000000||v==null||v<0||v>1000000000000){setState(()=>error='Chọn khách hàng, mã CTY và nhập số nguyên hợp lệ.');return;}
   final item={'owner_sub':owner,'customer_id':customer,'product_id':product,

@@ -45,10 +45,17 @@ class _PerformancePageState extends State<PerformancePage> {
  Future<void> loadStaff()async{
   try{
    final r=await client.get('/api/v1/reports/performance/options?kind=employee');
-   if(mounted)setState((){
-    staff=_rows(r['items']);canViewTeam=r['can_view_team']==true;
-    if(owner!='all'&&!staff.any((s)=>s['id']==owner))owner=widget.queue.identity;
+   if(!mounted)return;
+   final nextStaff=_rows(r['items']),team=r['can_view_team']==true;
+   final ids=nextStaff.map((s)=>s['id'].toString()).toSet();
+   final valid=owner=='all'?team:ids.contains(owner);
+   final nextOwner=valid?owner:(ids.contains(widget.queue.identity)||ids.isEmpty?widget.queue.identity:ids.first);
+   final ownerChanged=owner!=nextOwner;
+   setState((){
+    staff=nextStaff;canViewTeam=team;
+    if(ownerChanged){owner=nextOwner;province='';customer='';provinceName='';customerName='';}
    });
+   if(ownerChanged)await load();
   }catch(_){}
  }
  Future<void> load()async{
@@ -85,13 +92,14 @@ class _PerformancePageState extends State<PerformancePage> {
  }
  Future<void> exportXlsx()async{
   if(busy||cached||report==null||exporting)return;
+  final request=generation,selectedFilters=filters,selectedReport=report!;
+  final filename='filed-work-report-$year-${period=='month'?month:period=='quarter'?'Q$quarter':'full'}-${group}.xlsx';
   setState(()=>exporting=true);
   try{
-   final data=await client.get(Uri(path:'/api/v1/reports/performance/export',queryParameters:filters).toString());
+   final data=await client.get(Uri(path:'/api/v1/reports/performance/export',queryParameters:selectedFilters).toString());
    if(data['exact']!=true)throw StateError('Server chưa xác nhận danh sách đầy đủ');
-   if(!mounted)return;
-   final bytes=buildPerformanceXlsx(report!,_rows(data['items']));
-   final filename='filed-work-report-$year-${period=='month'?month:period=='quarter'?'Q$quarter':'full'}-${group}.xlsx';
+   if(!mounted||request!=generation)return;
+   final bytes=buildPerformanceXlsx(selectedReport,_rows(data['items']));
    await FilePicker.platform.saveFile(dialogTitle:'Lưu báo cáo Excel',fileName:filename,
     type:FileType.custom,allowedExtensions:['xlsx'],bytes:bytes);
   }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Chưa xuất được báo cáo: $e')));}
@@ -121,7 +129,7 @@ class _PerformancePageState extends State<PerformancePage> {
   return ListView(padding:const EdgeInsets.all(12),children:[
    Row(children:[Expanded(child:Text('Báo cáo kinh doanh',style:Theme.of(context).textTheme.titleLarge)),
     IconButton(onPressed:busy?null:load,tooltip:'Làm mới báo cáo',icon:const Icon(Icons.refresh))]),
-   if(staff.isNotEmpty)DropdownButtonFormField<String>(key:ValueKey('owner:$owner'),initialValue:owner,
+   if(staff.isNotEmpty)DropdownButtonFormField<String>(key:ValueKey('owner:$owner'),initialValue:((owner=='all'&&canViewTeam)||staff.any((s)=>s['id'].toString()==owner))?owner:null,
     decoration:const InputDecoration(labelText:'Nhân viên / đội Sales'),isExpanded:true,
     items:[if(canViewTeam)const DropdownMenuItem(value:'all',child:Text('Tất cả trong quyền quản lý')),
      for(final s in staff)DropdownMenuItem(value:s['id'].toString(),

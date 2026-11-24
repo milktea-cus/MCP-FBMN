@@ -27,8 +27,8 @@ bool stockIsStale(dynamic v,DateTime now){
  final d=DateTime.tryParse(v?.toString()??'');return d==null||now.toUtc().difference(d.toUtc())>=const Duration(hours:24);
 }
 class StockPage extends StatefulWidget{
- final OfflineQueue queue;final CustomerService service;
- const StockPage({super.key,required this.queue,required this.service});
+ final OfflineQueue queue;final CustomerService service;final http.Client? client;
+ const StockPage({super.key,required this.queue,required this.service,this.client});
  @override State<StockPage> createState()=>_StockPageState();
 }
 class _StockPageState extends State<StockPage>{
@@ -36,16 +36,23 @@ class _StockPageState extends State<StockPage>{
  List<Map<String,dynamic>> rows=[],serverRows=[];
  String? syncedAt,error,serverCursor,serverToken,serverQuery;
  bool busy=false,offline=false,partial=false,denied=false,hasCache=false,searching=false;
- String filter='all';int visibleCount=50;Timer? timer;
+ String filter='all';int visibleCount=50,searchGeneration=0;Timer? timer;
  @override void initState(){super.initState();unawaited(refresh());}
  @override void dispose(){timer?.cancel();search.dispose();super.dispose();}
- Future<Map<String,dynamic>> page(String after,String token,{String q='',int limit=500})async=>decodeApi(await http.get(widget.service.uri('/api/v1/inventory/stock',{'after':after,'snapshot':token,'q':q,'limit':'$limit'}),headers:widget.service.headers).timeout(const Duration(seconds:25)));
+ Future<Map<String,dynamic>> page(String after,String token,{String q='',int limit=500})async{
+   final uri=widget.service.uri('/api/v1/inventory/stock',{'after':after,'snapshot':token,'q':q,'limit':'$limit'});
+   final headers=widget.service.headers;
+   return decodeApi(await (widget.client?.get(uri,headers:headers)??http.get(uri,headers:headers)).timeout(const Duration(seconds:25)));
+  }
  void reject(){if(mounted)setState((){denied=true;rows=[];serverRows=[];hasCache=false;error='Không còn quyền truy cập. Vui lòng đăng nhập lại.';});}
  Future<void> refresh()async{
   if(busy||denied)return;
-  setState((){busy=true;error=null;serverQuery=null;serverRows=[];serverCursor=null;visibleCount=50;});
+  timer?.cancel();++searchGeneration;
+  setState((){busy=true;searching=false;error=null;serverQuery=null;serverRows=[];serverCursor=null;serverToken=null;visibleCount=50;});
   try{
-   final cached=await widget.queue.cached(stockCacheKey);
+   List<Map<String,dynamic>> cached=[];
+   try{cached=await widget.queue.cached(stockCacheKey);}catch(_){}
+   if(!mounted)return;
    if(cached.isNotEmpty&&mounted){final c=cached.first;setState((){rows=(c['items'] as List).map(_map).toList();syncedAt=c['synced_at']?.toString();partial=c['partial']==true;hasCache=true;offline=true;});}
    final items=<Map<String,dynamic>>[];String after='',token='',stamp='';bool truncated=false;
    while(true){
@@ -58,25 +65,27 @@ class _StockPageState extends State<StockPage>{
     if(next==after)throw StateError('Phân trang không tiến');
     after=next;
    }
-   await widget.queue.cache(stockCacheKey,[{'items':items,'synced_at':stamp,'partial':truncated,'snapshot':token}]);
+   try{await widget.queue.cache(stockCacheKey,[{'items':items,'synced_at':stamp,'partial':truncated,'snapshot':token}]);}catch(_){}
    if(mounted)setState((){rows=items;syncedAt=stamp;partial=truncated;offline=false;hasCache=true;});
   }catch(e){
    if(e is ApiFailure&&(e.status==401||e.status==403)){reject();}
    else if(mounted)setState((){offline=true;error=hasCache?'Chưa đồng bộ được · đang dùng dữ liệu lưu máy.':'Chưa tải được tồn kho; chưa có bản lưu máy.';});
-  }finally{if(mounted)setState(()=>busy=false);}
+  }finally{if(mounted){setState(()=>busy=false);if(partial&&!offline&&!denied&&search.text.trim().isNotEmpty)unawaited(onlineSearch());}}
  }
  Future<void> onlineSearch({bool more=false})async{
   if(searching||busy||denied)return;
   final q=search.text.trim();if(q.isEmpty||q.length>120)return;
+  if(more&&(serverQuery!=q||serverCursor==null))return;
+  final request=++searchGeneration;
   setState(()=>searching=true);
   try{
    final d=await page(more?serverCursor??'':'',more?serverToken??'':'',q:q,limit:100);
-   if(!mounted||search.text.trim()!=q)return;
+   if(!mounted||request!=searchGeneration||search.text.trim()!=q)return;
    setState((){serverQuery=q;serverRows=[if(more)...serverRows,...(d['items'] as List).map(_map)];serverCursor=d['next_cursor']?.toString();serverToken=d['snapshot'].toString();visibleCount=50;error=null;});
-  }catch(e){if(e is ApiFailure&&(e.status==401||e.status==403)){reject();}else if(mounted)setState(()=>error='Tìm trên server chưa thành công. Thử đồng bộ lại.');}
-  finally{if(mounted)setState(()=>searching=false);}
+  }catch(e){if(!mounted||request!=searchGeneration)return;if(e is ApiFailure&&(e.status==401||e.status==403)){reject();}else setState(()=>error='Tìm trên server chưa thành công. Thử đồng bộ lại.');}
+  finally{if(mounted&&request==searchGeneration)setState(()=>searching=false);}
  }
- void changed(String v){setState((){serverQuery=null;serverRows=[];serverCursor=null;visibleCount=50;});timer?.cancel();if(partial&&!offline&&v.trim().isNotEmpty)timer=Timer(const Duration(milliseconds:400),()=>onlineSearch());}
+ void changed(String v){++searchGeneration;setState((){searching=false;serverQuery=null;serverRows=[];serverCursor=null;serverToken=null;visibleCount=50;error=null;});timer?.cancel();if(partial&&!offline&&v.trim().isNotEmpty)timer=Timer(const Duration(milliseconds:400),(){if(mounted)unawaited(onlineSearch());});}
  void detail(Map<String,dynamic> r){
   final spec=_map(r['product_spec']??{});
   final summary=specSummary(spec);
