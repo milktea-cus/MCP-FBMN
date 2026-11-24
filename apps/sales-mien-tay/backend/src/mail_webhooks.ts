@@ -17,7 +17,9 @@ export async function verifyResendSignature(
  try{key=Uint8Array.from(atob(secret.slice(6)),c=>c.charCodeAt(0));}catch{return false;}
  if(key.length<16)return false;
  const signed=id+'.'+timestamp+'.'+raw;
- const cryptoKey=await crypto.subtle.importKey('raw',key,{name:'HMAC',hash:'SHA-256'},false,['sign']);
+ const keyBuffer=new ArrayBuffer(key.length);
+ new Uint8Array(keyBuffer).set(key);
+ const cryptoKey=await crypto.subtle.importKey('raw',keyBuffer,{name:'HMAC',hash:'SHA-256'},false,['sign']);
  const digest=new Uint8Array(await crypto.subtle.sign('HMAC',cryptoKey,new TextEncoder().encode(signed)));
  for(const candidate of sig.split(/\s+/)){
   if(!candidate.startsWith('v1,'))continue;
