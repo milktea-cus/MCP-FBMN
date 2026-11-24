@@ -154,9 +154,63 @@ export async function notificationRoutes(req:Request,env:PushEnv,u:Actor,url:URL
   const page=items.slice(0,limit);
   return reply({items:page,unread_count:count[0]?.unread??0,next_cursor:items.length>limit?page[page.length-1].id:null});
  }
+ // Server resolves the navigation target on every tap; stale or revoked
+ // notifications never expose a route or another owner's business identifier.
+ const open=/^\\/api\\/v1\\/notifications\\/([0-9]{1,19})\\/open$/.exec(path);
+ if(open&&req.method==='GET'){
+  if(!validCursor(open[1]))return fail('Thông báo không tồn tại',404);
+  const rows=await sql`SELECT category,entity_key FROM public.field_notifications
+   WHERE id=${open[1]}::bigint AND recipient_sub=${u.sub}
+     AND (scope_revision IS NULL OR scope_revision=${String(u.staff.scope_revision)}::bigint)`;
+  if(!rows.length)return fail('Thông báo không tồn tại',404);
+  const category=String(rows[0].category??'');
+  const key=String(rows[0].entity_key??'');
+  if(category==='email'){
+   const id=/^mail:([a-f0-9-]{36})$/i.exec(key);
+   if(!id)return fail('Hội thoại không còn khả dụng',404);
+   const ok=await sql`SELECT 1 FROM public.field_mail_inbound_events e
+    JOIN public.staff_mailboxes b ON b.user_sub=e.recipient_sub AND b.mailbox=e.mailbox
+    WHERE e.recipient_sub=${u.sub} AND e.thread_id=${id[1]}::uuid LIMIT 1`;
+   return ok.length?reply({destination:{screen:'mail',entity_id:id[1]}}):
+    fail('Hội thoại không còn khả dụng',404);
+  }
+  if(category==='order_action'){
+   const id=/^[a-f0-9-]{36}$/i.test(key)?key:'';
+   if(!id)return fail('Đơn hàng không tồn tại',404);
+   const ok=await sql`SELECT 1 FROM public.field_orders o JOIN public.customers c
+      ON c.id=o.customer_id AND c.owner_sub=o.owner_sub
+    WHERE o.id=${id}::uuid AND o.owner_sub=${u.sub}
+      AND public.sales_can_access(${u.sub},o.owner_sub,c.province,c.district) LIMIT 1`;
+   return ok.length?reply({destination:{screen:'orders',entity_id:id}}):
+      fail('Đơn hàng không còn trong phạm vi',404);
+  }
+  if(category==='support'){
+   const id=/^[a-f0-9-]{36}$/i.test(key)?key:'';
+   if(!id)return fail('Đề xuất không tồn tại',404);
+   const ok=await sql`SELECT 1 FROM public.sales_records r
+     WHERE r.id=${id}::uuid AND r.kind='support' AND r.owner_sub=${u.sub} LIMIT 1`;
+   return ok.length?reply({destination:{screen:'support',entity_id:id}}):
+    fail('Đề xuất không còn trong phạm vi',404);
+  }
+  const known:Record<string,string>={
+   target:'targets',assignment:'profile',security:'profile',
+   daily_digest:key.endsWith(':morning')?'work':'reports',
+   monthly_plan:'work',day_route:'work',weekly_route:'work',monthly_route:'work',
+   trip:'work',actuals:'reports',order_summary:'orders',
+   survey:'work',prospect:'prospects',competitor:'competitor',customer:'customers',
+   release:'updates',sync:'sync'
+  };
+  const screen=known[category];
+  if(!screen)return fail('Không có trang tương ứng',404);
+  return reply({destination:{screen}});
+ }
  if(path==='/api/v1/notifications/read-all'&&req.method==='POST'){
+  let doc:Record<string,unknown>={};try{doc=await body(req);}catch{return fail('Dữ liệu không hợp lệ');}
+  const upto=doc.upto===undefined?null:doc.upto;
+  if(upto!==null&&(typeof upto!=='string'||!validCursor(upto)))return fail('Mốc thông báo không hợp lệ');
   const rows=await sql`WITH changed AS (UPDATE field_notifications SET read_at=now()
     WHERE recipient_sub=${u.sub} AND read_at IS NULL
+    AND (${upto}::bigint IS NULL OR id<=${upto}::bigint)
     AND (scope_revision IS NULL OR scope_revision=${String(u.staff.scope_revision)}::bigint) RETURNING id)
     SELECT count(*)::int AS updated FROM changed`;
   return reply({updated:rows[0]?.updated??0});
