@@ -7,20 +7,27 @@ import 'android_push_bridge.dart';
 import 'push_bridge_stub.dart' if (dart.library.html) 'push_bridge_web.dart' as push;
 
 class FieldNotification {
- final String id,title,body;
+ final String id,title,body,category;
  final DateTime created;
  final DateTime? readAt;
- const FieldNotification(this.id,this.title,this.body,this.created,this.readAt);
+ final int groupCount;
+ const FieldNotification(this.id,this.title,this.body,this.created,this.readAt,
+  {this.category='',this.groupCount=1});
  bool get unread=>readAt==null;
+ bool get actionable=>const {'target','assignment','security','support','order_action'}
+  .contains(category);
  factory FieldNotification.parse(Map<String,dynamic> json)=>FieldNotification(
   json['id'].toString(),json['title']?.toString()??'Thông báo',
   json['body']?.toString()??'',DateTime.tryParse(json['created_at']?.toString()??'')??DateTime.now(),
-  DateTime.tryParse(json['read_at']?.toString()??''));
+  DateTime.tryParse(json['read_at']?.toString()??''),
+  category:json['category']?.toString()??'',
+  groupCount:(json['group_count'] as num?)?.toInt()??1);
  Map<String,dynamic> toJson()=>{'id':id,'title':title,'body':body,
+  'category':category,'group_count':groupCount,
   'created_at':created.toIso8601String(),'read_at':readAt?.toIso8601String()};
- FieldNotification markRead()=>FieldNotification(id,title,body,created,DateTime.now());
+ FieldNotification markRead()=>FieldNotification(id,title,body,created,DateTime.now(),
+  category:category,groupCount:groupCount);
 }
-
 /// The inbox is scoped by the existing per-account offline namespace.
 /// Cached notifications are never interpreted as permission to access the server.
 class FieldNotificationStore extends ChangeNotifier {
@@ -28,6 +35,11 @@ class FieldNotificationStore extends ChangeNotifier {
  final OfflineQueue queue;
  FieldNotificationStore(this.session,this.queue);
  List<FieldNotification> items=[];
+ int unreadCount=0;
+ String? nextCursor;
+ bool paging=false,preferencesBusy=false,readAllBusy=false;
+ List<Map<String,dynamic>> categories=[];
+ int quietStart=1260,quietEnd=420;
  bool stale=false,loading=false,pushEnabled=false,hasBrowserPush=false;
  String? error,publicKey,pushReport;
  Map<String,dynamic> androidDiagnostics={};
@@ -36,15 +48,21 @@ class FieldNotificationStore extends ChangeNotifier {
  bool androidConfigured=false,pushBusy=false;
  String? _registeredToken,_registeredBinding;
  DateTime? _registeredAt;
- int get unread=>items.where((i)=>i.unread).length;
+ int get unread=>unreadCount;
  void changed(){if(!_closed){push.badge(unread);notifyListeners();}}
  Future<void> start()async{
   hasBrowserPush=push.supported();
   try{
    items=(await queue.cached('notifications')).map(FieldNotification.parse).toList();
+   final meta=await queue.cached('notifications-meta');
+   unreadCount=meta.isEmpty?items.where((x)=>x.unread).length:(meta.first['unread_count'] as num?)?.toInt()??0;
+   nextCursor=meta.isEmpty?null:meta.first['next_cursor']?.toString();
+   final saved=await queue.cached('notifications-settings');
+   if(saved.isNotEmpty)_applyPreferences(saved.first);
    stale=true;changed();
   }catch(_){}
   await refresh();
+  unawaited(loadPreferences());
   if(isAndroid){
    try{
     final config=await session.get('/api/v1/notifications/config');
@@ -83,7 +101,109 @@ class FieldNotificationStore extends ChangeNotifier {
   }catch(_){pushEnabled=false;}
   finally{pushBusy=false;changed();}
  }
- Future<void> save()async=>queue.cache('notifications',items.map((x)=>x.toJson()).toList());
+ Future<void> save()async{
+  await queue.cache('notifications',items.map((x)=>x.toJson()).toList());
+  await queue.cache('notifications-meta',[{'unread_count':unreadCount,'next_cursor':nextCursor}]);
+ }
+ void _applyPreferences(Map<String,dynamic> doc){
+  categories=(doc['categories'] as List? ??[]).whereType<Map>()
+    .map((x)=>Map<String,dynamic>.from(x)).toList();
+  final quiet=doc['quiet_hours'] as Map?;
+  quietStart=(quiet?['quiet_start'] as num?)?.toInt()??1260;
+  quietEnd=(quiet?['quiet_end'] as num?)?.toInt()??420;
+ }
+ Future<void> loadPreferences()async{
+  try{
+   final doc=await session.get('/api/v1/notifications/preferences');
+   if(_closed)return;
+   _applyPreferences(doc);
+   await queue.cache('notifications-settings',[doc]);
+   changed();
+  }catch(e){if(e is ApiFailure&&(e.status==401||e.status==403)){
+   categories=[];await queue.cache('notifications-settings',[]);
+   changed();
+  }}
+ }
+ Future<void> setMode(String category,String mode)async{
+  if(preferencesBusy)return;
+  final index=categories.indexWhere((x)=>x['category']==category);
+  if(index<0)return;
+  final previous=categories[index]['mode']?.toString()??'';
+  if(previous==mode)return;
+  preferencesBusy=true;categories[index]['mode']=mode;changed();
+  final doc={'category':category,'mode':mode};
+  try{
+   await session.patch('/api/v1/notifications/preferences',doc);
+   error=null;
+  }catch(e){
+   if(e is ApiFailure&&e.status>=400&&e.status<500){
+    categories[index]['mode']=previous;error=e.message;
+   }else{
+    try{await queue.enqueue('/api/v1/notifications/preferences',doc,method:'PATCH');}
+    catch(_){categories[index]['mode']=previous;error='Không lưu được thiết lập trên máy.';}
+   }
+  }finally{
+   preferencesBusy=false;
+   await queue.cache('notifications-settings',[{'categories':categories,
+     'quiet_hours':{'quiet_start':quietStart,'quiet_end':quietEnd}}]);changed();
+  }
+ }
+ Future<void> setQuietHours(int start,int end)async{
+  if(preferencesBusy)return;
+  final oldStart=quietStart,oldEnd=quietEnd;
+  quietStart=start;quietEnd=end;preferencesBusy=true;changed();
+  try{
+   await session.patch('/api/v1/notifications/quiet-hours',{'quiet_start':start,'quiet_end':end});
+   error=null;
+  }catch(e){
+   if(e is ApiFailure&&e.status>=400&&e.status<500){quietStart=oldStart;quietEnd=oldEnd;error=e.message;}
+   else{
+    try{await queue.enqueue('/api/v1/notifications/quiet-hours',
+     {'quiet_start':start,'quiet_end':end},method:'PATCH');}
+    catch(_){quietStart=oldStart;quietEnd=oldEnd;error='Không lưu được giờ yên lặng.';}
+   }
+  }finally{
+   preferencesBusy=false;await queue.cache('notifications-settings',[{'categories':categories,
+     'quiet_hours':{'quiet_start':quietStart,'quiet_end':quietEnd}}]);changed();
+  }
+ }
+ Future<void> loadMore()async{
+  if(loading||paging||nextCursor==null||_closed)return;
+  paging=true;changed();
+  try{
+   final data=await session.get('/api/v1/notifications?limit=40&before=$nextCursor');
+   final received=(data['items'] as List).whereType<Map>().map(
+      (x)=>FieldNotification.parse(Map<String,dynamic>.from(x))).toList();
+   final ids=items.map((x)=>x.id).toSet();
+   items=[...items,...received.where((x)=>!ids.contains(x.id))];
+   nextCursor=data['next_cursor']?.toString();
+   await save();error=null;
+  }catch(e){error='Không tải được trang tiếp theo.';}
+  finally{paging=false;changed();}
+ }
+ Future<void> markAllRead()async{
+  if(readAllBusy||unreadCount==0)return;
+  readAllBusy=true;changed();
+  // Snapshot watermark guarantees offline replay never erases a later event.
+  final watermark=items.isEmpty?null:items.first.id;
+  if(watermark==null){readAllBusy=false;changed();return;}
+  final old=items;final oldCount=unreadCount;
+  items=items.map((x)=>x.unread?x.markRead():x).toList();
+  unreadCount=0;await save();changed();
+  try{
+   await session.post('/api/v1/notifications/read-all',{'upto':watermark});
+   error=null;
+  }catch(e){
+   if(e is ApiFailure&&e.status>=400&&e.status<500){
+    items=old;unreadCount=oldCount;error=e.message;await save();
+   }else{
+    try{await queue.enqueue('/api/v1/notifications/read-all',
+     {'upto':watermark},method:'POST');}
+    catch(_){items=old;unreadCount=oldCount;error='Không lưu được thao tác đã đọc.';await save();}
+   }
+  }finally{readAllBusy=false;changed();}
+ }
+
  Future<void> refresh()async{
   if(_closed||loading)return;
   loading=true;changed();
@@ -91,14 +211,20 @@ class FieldNotificationStore extends ChangeNotifier {
    final res=await session.get('/api/v1/notifications');
    final waiting=queue.pending.map((x)=>RegExp(r'/notifications/([0-9]+)/read$')
        .firstMatch(x['path']?.toString()??'')?.group(1)).whereType<String>().toSet();
+   final pendingAll=queue.pending.any((x)=>x['path']=='/api/v1/notifications/read-all');
    items=[for(final item in (res['items'] as List).map((x)=>FieldNotification.parse(
-      Map<String,dynamic>.from(x as Map))))waiting.contains(item.id)?item.markRead():item];
+      Map<String,dynamic>.from(x as Map))))(pendingAll||waiting.contains(item.id))?item.markRead():item];
+   nextCursor=res['next_cursor']?.toString();
+   unreadCount=pendingAll?0:((res['unread_count'] as num?)?.toInt()??0);
+   if(!pendingAll)unreadCount=(unreadCount-waiting.length).clamp(0,2147483647);
    await save();
    stale=false;error=null;
    if(isAndroid&&androidConfigured)await _syncAndroid();
   }catch(e){
    if(e is ApiFailure&&(e.status==401||e.status==403)){
-    items=[];error='Phiên hết hạn hoặc quyền đã thay đổi.';
+    items=[];unreadCount=0;nextCursor=null;categories=[];
+    await save();await queue.cache('notifications-settings',[]);
+    error='Phiên hết hạn hoặc quyền đã thay đổi.';
     if(isAndroid){try{await AndroidPushBridge.disable(queue.identity);}catch(_){}pushEnabled=false;}
    }else{stale=true;error='Thông báo đang hiển thị từ bộ nhớ máy.';}
   }finally{loading=false;changed();}
@@ -112,6 +238,7 @@ class FieldNotificationStore extends ChangeNotifier {
    await queue.enqueue('/api/v1/notifications/${item.id}/read',{},method:'POST');
   }
   items=[for(final n in items)n.id==item.id?n.markRead():n];
+  unreadCount=(unreadCount-1).clamp(0,2147483647);
   await save();changed();
  }
  Future<void> sendTest()async{

@@ -115,7 +115,7 @@ export async function notificationRoutes(req:Request,env:PushEnv,u:Actor,url:URL
  }
  if(path==='/api/v1/notifications/preferences'&&req.method==='GET'){
   const [categories,settings]=await Promise.all([
-   sql`SELECT c.category,c.default_mode,c.mandatory,
+   sql`SELECT c.category,c.default_mode,c.mandatory,c.producer_enabled,
      CASE WHEN c.mandatory AND p.mode='off' THEN 'in_app' ELSE coalesce(p.mode,c.default_mode) END AS mode
      FROM public.field_notification_categories c LEFT JOIN public.field_notification_preferences p
      ON p.category=c.category AND p.recipient_sub=${u.sub} ORDER BY c.category`,
