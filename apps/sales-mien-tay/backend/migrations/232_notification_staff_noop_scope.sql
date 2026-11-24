@@ -52,5 +52,4 @@ BEGIN
  INSERT INTO public.staff_permission_events(actor_sub,target_sub,action,before_state,after_state) VALUES(actor,subject,'save',before_json,after_json);
  RETURN after_json;
 END;
-$function$
-
+$function$;
