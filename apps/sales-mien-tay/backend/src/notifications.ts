@@ -93,6 +93,24 @@ export async function notificationRoutes(req:Request,env:PushEnv,u:Actor,url:URL
  if(path==='/api/v1/notifications/config'&&req.method==='GET')
   return reply({supported:!!(env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_JWK&&env.VAPID_SUBJECT),
    public_key:env.VAPID_PUBLIC_KEY??null,android_supported:fcmConfigured(env)});
+ if(path==='/api/v1/notifications/diagnostics'&&req.method==='GET'){
+  const [web,android,last,delivery,probe]=await Promise.all([
+   sql`SELECT count(*)::int AS n FROM public.field_push_subscriptions WHERE recipient_sub=${u.sub}`,
+   sql`SELECT count(*)::int AS n FROM public.field_android_push_devices WHERE recipient_sub=${u.sub}`,
+   sql`SELECT last_reason,last_accepted,last_failed,last_tested_at FROM public.field_notification_test_gate
+     WHERE recipient_sub=${u.sub}`,
+   sql`SELECT d.channel,d.state,count(*)::int AS n FROM public.field_notification_delivery d
+    JOIN public.field_notifications n ON n.id=d.notification_id WHERE n.recipient_sub=${u.sub}
+     AND (n.scope_revision IS NULL OR n.scope_revision=${String(u.staff.scope_revision)}::bigint)
+    GROUP BY d.channel,d.state`,
+   u.admin?sql`SELECT status,reason,checked_at FROM public.field_notification_runtime_checks
+    WHERE check_key='n1_fcm_oauth_rc16' LIMIT 1`:Promise.resolve([])
+  ]);
+  return reply({web_devices:web[0]?.n??0,android_devices:android[0]?.n??0,
+    web_configured:!!(env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_JWK&&env.VAPID_SUBJECT),
+    android_configured:fcmConfigured(env),last_test:last[0]??null,delivery,
+    ...(u.admin?{fcm_oauth_probe:probe[0]??null}:{})});
+ }
  if(path==='/api/v1/notifications/preferences'&&req.method==='GET'){
   const [categories,settings]=await Promise.all([
    sql`SELECT c.category,c.default_mode,c.mandatory,
@@ -195,6 +213,9 @@ export async function notificationRoutes(req:Request,env:PushEnv,u:Actor,url:URL
   if(!gate.length)return fail('Chỉ gửi thử mỗi 60 giây',429);
   try{const android=await publishWithReport(env,u.sub,'test:'+crypto.randomUUID(),
     'Thử thông báo Field Work','Thông báo đã đến hộp thư của bạn.');
+    const reason=android.reason&&/^[A-Za-z0-9_]{1,80}$/.test(android.reason)?android.reason:null;
+    await sql`UPDATE public.field_notification_test_gate SET last_reason=${reason},last_accepted=${android.accepted},
+      last_failed=${android.failed},last_tested_at=now() WHERE recipient_sub=${u.sub}`;
     return reply({ok:true,android},201);}
   catch{return fail('Không gửi được thông báo thử',503);}
  }
