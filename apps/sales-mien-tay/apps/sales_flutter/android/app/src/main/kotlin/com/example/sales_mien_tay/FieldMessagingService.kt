@@ -211,9 +211,18 @@ class FieldMessagingService : FirebaseMessagingService() {
         if (!p.getBoolean("enabled", false) || message.data["kind"] != "field_notification" ||
             message.data["binding"] != binding) return
         p.edit().putLong("last_received", System.currentTimeMillis()).commit()
-        val id = (message.messageId ?: message.sentTime.toString()).hashCode().let { if (it == 1) 2 else it }
+        // The opaque notice key is stable across provider retries. Keep a bounded
+        // installation-local list (cleared with the binding on account switch).
+        val notice = message.data["notice_key"]?.takeIf { it.matches(Regex("[a-f0-9]{64}")) }
+        val seen = p.getString("recent_notice_keys", "")!!.split(",").filter { it.isNotEmpty() }
+        if (notice != null && seen.contains(notice)) return
+        val id = (notice ?: message.messageId ?: message.sentTime.toString()).hashCode().let { if (it == 1) 2 else it }
         if (p.getBoolean("enabled", false) && p.getString("binding", null) == binding &&
-            FieldPushDisplay.show(this, id, "Bạn có thông báo mới."))
-            p.edit().putLong("last_displayed", System.currentTimeMillis()).apply()
+            FieldPushDisplay.show(this, id, "Bạn có thông báo mới.")) {
+            if (p.getString("binding", null) != binding) return
+            val edit = p.edit().putLong("last_displayed", System.currentTimeMillis())
+            if (notice != null) edit.putString("recent_notice_keys", (seen + notice).takeLast(100).joinToString(","))
+            edit.commit()
+        }
     }
 }

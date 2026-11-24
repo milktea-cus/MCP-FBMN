@@ -161,9 +161,10 @@ class FieldNotificationStore extends ChangeNotifier {
   final index=categories.indexWhere((x)=>x['category']==category);
   if(index<0)return;
   final previous=categories[index]['mode']?.toString()??'';
-  if(categories[index]['mandatory']==true&&mode=='off')mode='in_app';
+  final entry=categories[index];
+  if(entry['mandatory']==true&&mode=='off')mode='in_app';
   if(previous==mode)return;
-  _preferenceRevision++;preferencesBusy=true;categories[index]['mode']=mode;changed();
+  _preferenceRevision++;preferencesBusy=true;entry['mode']=mode;changed();
   final doc={'category':category,'mode':mode};
   try{
    if(_pending.any((op)=>op['path']=='/api/v1/notifications/preferences'&&(op['payload'] as Map?)?['category']==category)){
@@ -171,15 +172,15 @@ class FieldNotificationStore extends ChangeNotifier {
     error='Thiết lập đã lưu trên máy, chờ đồng bộ.';
    }else{
     final result=await session.patch('/api/v1/notifications/preferences',doc);
-    final item=result['item'];if(item is Map&&item['mode'] is String)categories[index]['mode']=item['mode'];
+    final item=result['item'];if(item is Map&&item['mode'] is String)entry['mode']=item['mode'];
     error=null;
    }
   }catch(e){
    if(!_retryable(e)){
-    categories[index]['mode']=previous;error=e.toString();
+    entry['mode']=previous;error=e.toString();
    }else{
     try{await queue.enqueue('/api/v1/notifications/preferences',doc,method:'PATCH');error='Thiết lập đã lưu trên máy, chờ đồng bộ.';}
-    catch(_){categories[index]['mode']=previous;error='Không lưu được thiết lập trên máy.';}
+    catch(_){entry['mode']=previous;error='Không lưu được thiết lập trên máy.';}
    }
   }finally{
    preferencesBusy=false;await _savePreferences();changed();
@@ -218,6 +219,7 @@ class FieldNotificationStore extends ChangeNotifier {
  List<FieldNotification> _parseItems(Map<String,dynamic> doc)=>(doc['items'] as List)
   .whereType<Map>().map((x)=>FieldNotification.parse(Map<String,dynamic>.from(x))).toList();
  Future<void> _clearDenied()async{
+  _preferenceRevision++;
   items=[];unreadCount=0;nextCursor=null;categories=[];
   error='Phiên hết hạn hoặc quyền đã thay đổi.';
   await _saveSafely();
@@ -248,14 +250,16 @@ class FieldNotificationStore extends ChangeNotifier {
   readAllBusy=true;changed();
   final watermark=items.first.id;
   try{
-   try{await session.post('/api/v1/notifications/read-all',{'upto':watermark});error=null;}
+   int? serverUnread;
+   try{final result=await session.post('/api/v1/notifications/read-all',{'upto':watermark});
+    serverUnread=(result['unread_count'] as num?)?.toInt();error=null;}
    catch(e){
     if(!_retryable(e)){error=e.toString();return;}
     await queue.enqueue('/api/v1/notifications/read-all',{'upto':watermark},method:'POST');
     error='Đã lưu thao tác đọc tất cả trên máy.';
    }
    items=items.map((x)=>x.unread?x.markRead():x).toList();
-   unreadCount=0;await _saveSafely();
+   unreadCount=serverUnread??0;await _saveSafely();
   }catch(_){error='Không lưu được thao tác đã đọc.';}
   finally{readAllBusy=false;changed();}
  });
@@ -265,7 +269,23 @@ class FieldNotificationStore extends ChangeNotifier {
   try{await _serial(()async{
    loading=true;changed();
    try{
-    final res=await session.get('/api/v1/notifications');
+    final receipts=_pending.toList();
+    BigInt? cutoff;
+    final ids=<String>{};
+    for(final op in receipts){
+     final path=op['path']?.toString()??'';
+     final match=RegExp(r'^/api/v1/notifications/([0-9]{1,19})/read$').firstMatch(path);
+     if(match!=null)ids.add(match.group(1)!);
+     if(path=='/api/v1/notifications/read-all'){
+      final value=BigInt.tryParse((op['payload'] as Map?)?['upto']?.toString()??'');
+      if(value!=null&&(cutoff==null||value>cutoff))cutoff=value;
+     }
+    }
+    final sentIds=ids.where((id)=>!notificationCoveredByWatermark(id,cutoff)).take(200).toSet();
+    final params=<String,String>{if(cutoff!=null)'read_upto':cutoff.toString(),
+     if(sentIds.isNotEmpty)'read_ids':sentIds.join(',')};
+    final res=await session.get(params.isEmpty?'/api/v1/notifications':
+     Uri(path:'/api/v1/notifications',queryParameters:params).toString());
     final serverItems=_parseItems(res);
     var cursor=res['next_cursor']?.toString();
     final depth=items.length;
@@ -280,8 +300,12 @@ class FieldNotificationStore extends ChangeNotifier {
      if(additional.isEmpty||cursor==before){cursor=null;break;}
     }
     if(_closed)return;
-    final locallyRead=serverItems.where((item)=>item.unread&&_pendingRead(item)).length;
-    items=[for(final item in serverItems)_pendingRead(item)?item.markRead():item];
+    bool projected(FieldNotification item)=>ids.contains(item.id)||notificationCoveredByWatermark(item.id,cutoff);
+    final serverProjected=res['projected_read_count']==true;
+    final locallyRead=serverItems.where((item)=>item.unread&&
+     (projected(item)||_pendingRead(item))&&
+     (!serverProjected||!sentIds.contains(item.id)&&!notificationCoveredByWatermark(item.id,cutoff))).length;
+    items=[for(final item in serverItems)(projected(item)||_pendingRead(item))?item.markRead():item];
     nextCursor=cursor;
     unreadCount=(((res['unread_count'] as num?)?.toInt()??0)-locallyRead).clamp(0,2147483647);
     stale=false;error=null;await _saveSafely();

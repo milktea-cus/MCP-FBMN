@@ -105,3 +105,14 @@ test('L2 dispatch rechecks quiet hours at both boundaries and reserves budget at
  assert.match(source,/attempts=greatest\(0,attempts-1\)/);
  assert.match(source,/WITH locked AS \([\s\S]*?budget AS \([\s\S]*?SET budget_reserved=true/);
 });
+
+test('L2 receipt projection is read-only and Android retries share a bounded opaque notice key',async()=>{
+ const api=await readFile(new URL('../src/notifications.ts',import.meta.url),'utf8');
+ const fcm=await readFile(new URL('../src/fcm.ts',import.meta.url),'utf8');
+ const native=await readFile(new URL('../../apps/sales_flutter/android/app/src/main/kotlin/com/example/sales_mien_tay/FieldMessagingService.kt',import.meta.url),'utf8');
+ assert.match(api,/readIds.length>200/);
+ assert.match(api,/projected_read_count/);
+ assert.match(fcm,/notice_key:noticeKey/);
+ assert.match(native,/seen.contains\(notice\)/);
+ assert.match(native,/takeLast\(100\)/);
+});

@@ -144,15 +144,24 @@ export async function notificationRoutes(req:Request,env:PushEnv,u:Actor,url:URL
  if(path==='/api/v1/notifications'&&req.method==='GET'){
   const limit=pageSize(url.searchParams.get('limit')),before=url.searchParams.get('before');
   if(limit===null||(before!==null&&!validCursor(before)))return fail('Phân trang không hợp lệ');
+  // Optional local receipt projection affects the count only, not database state.
+  // This keeps a read-all watermark accurate even if older pages were never loaded.
+  const readUpto=url.searchParams.get('read_upto');
+  const readIds=(url.searchParams.get('read_ids')??'').split(',').filter(Boolean);
+  if((readUpto!==null&&!validCursor(readUpto))||readIds.length>200||readIds.some(x=>!validCursor(x)))
+   return fail('Mốc đã đọc không hợp lệ');
   const [items,count]=await Promise.all([
    sql`SELECT id::text AS id,title,body,created_at,read_at,category,group_count,updated_at FROM field_notifications
       WHERE recipient_sub=${u.sub} AND (scope_revision IS NULL OR scope_revision=${String(u.staff.scope_revision)}::bigint)
       AND (${before}::bigint IS NULL OR id<${before}::bigint) ORDER BY id DESC LIMIT ${limit+1}`,
    sql`SELECT count(*)::int AS unread FROM field_notifications WHERE recipient_sub=${u.sub} AND read_at IS NULL
-      AND (scope_revision IS NULL OR scope_revision=${String(u.staff.scope_revision)}::bigint)`
+      AND (scope_revision IS NULL OR scope_revision=${String(u.staff.scope_revision)}::bigint)
+      AND (${readUpto}::bigint IS NULL OR id>${readUpto}::bigint)
+      AND id NOT IN (SELECT value::bigint FROM jsonb_array_elements_text(${JSON.stringify(readIds)}::jsonb))`
   ]);
   const page=items.slice(0,limit);
-  return reply({items:page,unread_count:count[0]?.unread??0,next_cursor:items.length>limit?page[page.length-1].id:null});
+  return reply({items:page,unread_count:count[0]?.unread??0,next_cursor:items.length>limit?page[page.length-1].id:null,
+   projected_read_count:readUpto!==null||readIds.length>0});
  }
  // Server resolves the navigation target on every tap; stale or revoked
  // notifications never expose a route or another owner's business identifier.
@@ -220,7 +229,9 @@ export async function notificationRoutes(req:Request,env:PushEnv,u:Actor,url:URL
     AND (${upto}::bigint IS NULL OR id<=${upto}::bigint)
     AND (scope_revision IS NULL OR scope_revision=${String(u.staff.scope_revision)}::bigint) RETURNING id)
     SELECT count(*)::int AS updated FROM changed`;
-  return reply({updated:rows[0]?.updated??0});
+  const count=await sql`SELECT count(*)::int AS unread FROM field_notifications WHERE recipient_sub=${u.sub} AND read_at IS NULL
+   AND (scope_revision IS NULL OR scope_revision=${String(u.staff.scope_revision)}::bigint)`;
+  return reply({updated:rows[0]?.updated??0,unread_count:count[0]?.unread??0});
  }
  const read=/^\/api\/v1\/notifications\/([0-9]{1,19})\/read$/.exec(path);
  if(read&&req.method==='POST'){

@@ -118,7 +118,7 @@ export async function sendFcm(env:FcmEnv,sub:string):Promise<FcmReport>{
 }
 
 // N1 per-device delivery. Existing sendFcm remains unchanged for legacy test push.
-export async function sendFcmDevice(env:FcmEnv,token:string,binding:string):Promise<{accepted:boolean;code:string}> {
+export async function sendFcmDevice(env:FcmEnv,token:string,binding:string,noticeKey?:string):Promise<{accepted:boolean;code:string}> {
  if(!validFcmToken(token)||!validBinding(binding))return {accepted:false,code:'invalid_device'};
  if(!fcmConfigured(env))return {accepted:false,code:'not_configured'};
  let access:string;try{access=await accessToken(env);}catch(e){
@@ -127,7 +127,7 @@ export async function sendFcmDevice(env:FcmEnv,token:string,binding:string):Prom
  try{
   const r=await fetch('https://fcm.googleapis.com/v1/projects/'+project+'/messages:send',{
    method:'POST',redirect:'manual',headers:{Authorization:'Bearer '+access,'Content-Type':'application/json'},
-   body:JSON.stringify({message:{token,data:{kind:'field_notification',binding},
+   body:JSON.stringify({message:{token,data:{kind:'field_notification',binding,...(noticeKey&&/^[a-f0-9]{64}$/.test(noticeKey)?{notice_key:noticeKey}:{})},
     android:{priority:'HIGH',ttl:'3600s'}}}),signal:AbortSignal.timeout(8000)});
   if(r.status>=300&&r.status<400)return {accepted:false,code:'fcm_redirect_blocked'};
   if(r.ok)return {accepted:true,code:'accepted'};

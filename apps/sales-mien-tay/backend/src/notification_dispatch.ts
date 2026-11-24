@@ -194,7 +194,8 @@ export async function dispatchNotifications(env:Env):Promise<{claimed:number;sen
    }
    if(found){
     if(row.channel==='android'){
-     const result=await sendFcmDevice(env,found.address,found.binding??'');
+     const result=await sendFcmDevice(env,found.address,found.binding??'',
+      await deviceDigest('notification:'+String(row.notification_id)+':'+String(row.recipient_sub)));
      ok=result.accepted;code=result.code;
     }else{
      const status=await sendWebPush(env,found.address);
