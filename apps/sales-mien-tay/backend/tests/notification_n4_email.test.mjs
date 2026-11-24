@@ -20,3 +20,15 @@ test('N4 inbox webhook is at-most-once per message and at-most-one push per thre
  assert.match(sql,/v_mode='digest'/);
  assert.match(sql,/p_received<now\(\)-interval '24 hours'/);
 });
+
+
+test('N4 signed-provider fallback ignores forged payload when secret unavailable',()=>{
+ assert.match(js,/verifyResendEventWithProvider/);
+ assert.match(js,/webhooks\/'\+inboundWebhookId\+/);
+ assert.match(js,/event.id!==id\|\|event.type!=='inbox.email.received'/);
+ assert.match(js,/payload=verified/);
+ assert.match(js,/if\(!verified\)return ok\(401\)/);
+ assert.match(js,/redirect:'manual'/);
+ assert.match(js,/Math.abs\(Number\(stamp\)-now\)>300/);
+ assert.match(js,/if\(env.RESEND_INBOUND_WEBHOOK_SECRET\)/);
+});

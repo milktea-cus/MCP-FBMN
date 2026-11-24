@@ -34,16 +34,62 @@ export async function verifyResendSignature(
  return false;
 }
 
+
+// Resend Headless Webhook API provides authoritative event payloads. When a
+// signing secret cannot be installed cross-account, treat each callback solely
+// as a hint: look up the Svix message ID with the already-bound Resend API key
+// and ignore all unverified data in the callback body.
+const inboundWebhookId='6256051c-8bf0-4f74-ab41-711c17e35bba';
+
+export async function verifyResendEventWithProvider(
+ headers:Headers,apiKey:string,now=Math.floor(Date.now()/1000),
+):Promise<Record<string,unknown>|null>{
+ const id=headers.get('svix-id')??'';
+ const stamp=headers.get('svix-timestamp')??'';
+ if(!/^msg_[A-Za-z0-9]{12,110}$/.test(id)||!/^\\d{10}$/.test(stamp)||
+    Math.abs(Number(stamp)-now)>300)return null;
+ const response=await fetch('https://api.resend.com/webhooks/'+inboundWebhookId+
+  '/events/'+encodeURIComponent(id),{
+  headers:{Authorization:'Bearer '+apiKey,Accept:'application/json'},
+  redirect:'manual',signal:AbortSignal.timeout(8000)
+ });
+ if(response.status===404||response.status===403||response.status===401)return null;
+ if(!response.ok)throw Error('Provider event verification unavailable');
+ const body=await response.text();
+ if(body.length>32000)throw Error('Provider event too large');
+ const event=JSON.parse(body) as Record<string,unknown>;
+ if(event.id!==id||event.type!=='inbox.email.received')return null;
+ const created=Date.parse(String(event.created_at??''));
+ if(!Number.isFinite(created)||Math.abs(Date.now()-created)>24*3600000)return null;
+ const content=typeof event.payload==='string'?JSON.parse(event.payload):event.payload;
+ if(content===null||typeof content!=='object'||Array.isArray(content))return null;
+ const verified=content as Record<string,unknown>;
+ if(verified.type!=='inbox.email.received')return null;
+ return verified;
+}
+
 export async function resendInboundWebhook(req:Request,env:Env):Promise<Response>{
  if(req.method!=='POST')return ok(405);
- if(!env.RESEND_INBOUND_WEBHOOK_SECRET||!env.RESEND_API_KEY)return ok(503);
+ if(!env.RESEND_API_KEY)return ok(503);
  if(Number(req.headers.get('content-length')??0)>32000)return ok(413);
  let raw:string;
  try{raw=await req.text();if(raw.length>32000)return ok(413);}catch{return ok(400);}
- if(!await verifyResendSignature(raw,req.headers,env.RESEND_INBOUND_WEBHOOK_SECRET))return ok(401);
  let payload:Record<string,unknown>;
- try{const d=JSON.parse(raw);if(!d||typeof d!=='object'||Array.isArray(d))return ok(400);
-   payload=d as Record<string,unknown>;}catch{return ok(400);}
+ if(env.RESEND_INBOUND_WEBHOOK_SECRET){
+  if(!await verifyResendSignature(raw,req.headers,env.RESEND_INBOUND_WEBHOOK_SECRET))
+    return ok(401);
+  try{const data=JSON.parse(raw);if(!data||typeof data!=='object'||Array.isArray(data))
+    return ok(400);payload=data as Record<string,unknown>;}catch{return ok(400);}
+ }else{
+  // No signing key available: refuse the callback unless Resend verifies its
+  // exact message ID and supplies the canonical payload over an authorized GET.
+  // A forged body is never consumed, even when it contains a plausible ID.
+  let verified:Record<string,unknown>|null;
+  try{verified=await verifyResendEventWithProvider(req.headers,env.RESEND_API_KEY);}
+  catch{return ok(503);}
+  if(!verified)return ok(401);
+  payload=verified;
+ }
  if(payload.type!=='inbox.email.received')return ok();
  const data=payload.data as Record<string,unknown>|null;
  if(!data||typeof data!=='object'||!uuid.test(String(data.inbox_id??''))||
