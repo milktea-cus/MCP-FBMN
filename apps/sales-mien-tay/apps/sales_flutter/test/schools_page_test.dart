@@ -7,8 +7,10 @@ import 'package:sales_mien_tay/session.dart';
 
 class SchoolSession extends SalesSession {
   final requests=<String>[];
+  bool offline=false;
   @override Future<Map<String,dynamic>> get(String path)async{
     requests.add(path);
+    if(offline)throw const ApiFailure(503,'offline');
     if(path=='/api/v1/schools/areas')return {'items':[
       {'province':'Long An','districts':['TP Tân An','Huyện Bến Lức']},
     ]};
@@ -33,6 +35,16 @@ class SchoolSession extends SalesSession {
 }
 
 void main(){
+  testWidgets('L3 saved empty school page remains a valid offline result',(tester)async{
+   final session=SchoolSession()..offline=true;
+   final queue=OfflineQueue(session,'school-empty','1',factory:newIdbFactoryMemory());
+   await queue.cacheDirectoryPage('schools:page:v2:_:_:_:1',[],total:0,hasMore:false);
+   await tester.pumpWidget(MaterialApp(home:Scaffold(body:SchoolDirectoryPage(queue:queue,session:session))));
+   await tester.pumpAndSettle();
+   expect(find.text('Không có mạng, đang xem dữ liệu đã lưu.'),findsOneWidget);
+   expect(find.text('Tải thêm trường'),findsNothing);
+   await tester.pumpWidget(const SizedBox.shrink());queue.dispose();
+  });
   testWidgets('Trường Học shows old-geography cards, unverified Maps and search',
     (tester)async{
       final session=SchoolSession();

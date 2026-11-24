@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -25,6 +26,54 @@ class CountedFailure extends SalesSession{
  }
 }
 void main(){
+ test('L3 two queue instances cannot send the same operation concurrently',()async{
+  final factory=newIdbFactoryMemory(),session=ReadyForSync();
+  final entered=Completer<void>(),release=Completer<void>();
+  var sends=0;
+  final network=MockClient((req)async{
+   sends++;if(!entered.isCompleted)entered.complete();await release.future;
+   return http.Response('{"ok":true}',200,headers:{'content-type':'application/json'});
+  });
+  final a=OfflineQueue(session,'retry-user','8',factory:factory,networkClient:network);
+  final b=OfflineQueue(session,'retry-user','8',factory:factory,networkClient:network);
+  await a.enqueue('/api/v1/notifications/42/read',{});
+  final first=a.sync();await entered.future;
+  await b.sync();expect(sends,1);
+  release.complete();await first;await b.sync();
+  expect(sends,1);expect(b.pending,isEmpty);
+  a.dispose();b.dispose();network.close();
+ });
+ test('L3 directory cache retains metadata and revokes only read-only rows',()async{
+  final factory=newIdbFactoryMemory(),session=Disconnected();
+  final q=OfflineQueue(session,'owner','7',factory:factory);
+  final other=OfflineQueue(session,'other','7',factory:factory);
+  const key='market-prospects:v3::::::1';
+  await q.enqueue('/api/v1/customers',{'name':'Draft'});
+  await q.cacheDirectoryPage(key,[],total:0,hasMore:false,wards:['Phường A']);
+  await other.cacheDirectoryPage(key,[{'id':'other'}],total:1,hasMore:false);
+  final snapshot=await q.directoryPage(key);
+  expect(snapshot!['items'],isEmpty);expect(snapshot['has_more'],false);expect(snapshot['wards'],['Phường A']);
+  await q.revokeDirectory('market-prospects');
+  expect(await q.directoryPage(key),isNull);expect(await other.directoryPage(key),isNotNull);
+  await q.reload();expect(q.pending.length,1);q.dispose();other.dispose();
+ });
+ test('L3 reused operation UUID cannot replace pending photo bytes',()async{
+  final q=OfflineQueue(Disconnected(),'owner','1',factory:newIdbFactoryMemory());
+  const id='11111111-1111-4111-8111-111111111111';
+  final data={'client_ref':id,'name':'Draft'};
+  await q.enqueue('/api/v1/customers',data,photo:Uint8List.fromList([1,2]),mime:'image/jpeg');
+  await expectLater(q.enqueue('/api/v1/customers',data,photo:Uint8List.fromList([1,3]),mime:'image/jpeg'),throwsStateError);
+  await q.reload();expect(q.pending.single['photo'],[1,2]);q.dispose();
+ });
+ test('L3 batch conflict never writes earlier rows or replaces existing operation',()async{
+  final q=OfflineQueue(Disconnected(),'owner','1',factory:newIdbFactoryMemory());
+  final old={'client_ref':'11111111-1111-4111-8111-111111111111','title':'Old'};
+  final fresh={'client_ref':'22222222-2222-4222-8222-222222222222','title':'New'};
+  await q.enqueueRouteBatch([old]);
+  await expectLater(q.enqueueRouteBatch([fresh,{...old,'title':'Different'}]),throwsStateError);
+  await q.reload();expect(q.pending.length,1);expect(q.pending.single['payload']['title'],'Old');q.dispose();
+ });
+
  test('server success without item clears outbox once, never replays receipt',()async{
   final factory=newIdbFactoryMemory(),session=ReadyForSync();
   var sends=0;

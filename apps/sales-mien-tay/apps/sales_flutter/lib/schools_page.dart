@@ -50,11 +50,12 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
       final data=await widget.session.get('/api/v1/schools/areas');
       final rows=(data['items'] as List? ?? [])
           .map((row)=>Map<String,dynamic>.from(row as Map)).toList();
-      await widget.queue.cache('schools:areas:v1',rows);
       _setAreas(rows);
+      try{await widget.queue.cache('schools:areas:v1',rows);}catch(_){}
     }on ApiFailure catch(e){
       if(e.status==401||e.status==403){
-        if(mounted)setState((){areas={};schools.clear();error=e.message;});
+        if(mounted)setState((){areas={};schools.clear();more=false;total=0;loading=false;error=e.message;});
+        try{await widget.queue.revokeDirectory('schools');}catch(_){}
         return;
       }
     }catch(_){}
@@ -101,15 +102,18 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
       if(!loadMore){schools.clear();page=0;total=0;more=false;}
     });
     final key=_cacheKey(next);
+    final base=loadMore?List<Map<String,dynamic>>.of(schools):<Map<String,dynamic>>[];
     var hasCached=false;
     if(chosenSearch.isEmpty && next<=3){
       try{
-        final saved=await widget.queue.cached(key);
+        final saved=await widget.queue.directoryPage(key);
         if(!mounted||request!=generation)return;
-        if(saved.isNotEmpty){
+        if(saved!=null){
+          final rows=(saved['items'] as List).whereType<Map>().map((v)=>Map<String,dynamic>.from(v)).toList();
           hasCached=true;
-          _apply(saved,next,loadMore:loadMore,isOffline:true,
-            reportedTotal:null,hasMore:saved.length==pageSize);
+          _apply(rows,next,base:base,isOffline:true,
+            reportedTotal:(saved['total'] as num?)?.toInt(),
+            hasMore:next<3&&(saved['has_more'] as bool? ??rows.length==pageSize));
         }
       }catch(_){}
     }
@@ -126,22 +130,23 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
           .map((row)=>Map<String,dynamic>.from(row as Map)).toList();
       if(!mounted||request!=generation)return;
       final count=(data['total'] as num?)?.toInt()??0;
-      _apply(rows,next,loadMore:loadMore,isOffline:false,
+      _apply(rows,next,base:base,isOffline:false,
         reportedTotal:count,hasMore:data['hasMore']==true);
       if(chosenSearch.isEmpty&&next<=3){
         // Search terms are not persisted; only three pages per territory
         // are cached, preventing unbounded cache growth.
-        try{await widget.queue.cache(key,rows);}catch(_){}
+        try{await widget.queue.cacheDirectoryPage(key,rows,total:count,hasMore:data['hasMore']==true);}catch(_){}
       }
     }on ApiFailure catch(e){
       if(!mounted||request!=generation)return;
       setState((){
         loading=false;offline=true;
         if(e.status==401||e.status==403){
-          schools.clear();more=false;total=0;hasCached=false;
+          schools.clear();areas={};more=false;total=0;hasCached=false;
         }
         error=hasCached?'Không có mạng, đang xem dữ liệu đã lưu.':e.message;
       });
+      if(e.status==401||e.status==403){try{await widget.queue.revokeDirectory('schools');}catch(_){}}
     }catch(_){
       if(!mounted||request!=generation)return;
       setState((){
@@ -153,16 +158,17 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
   }
 
   void _apply(List<Map<String,dynamic>> rows,int current,{
-    required bool loadMore,required bool isOffline,
+    required List<Map<String,dynamic>> base,required bool isOffline,
     required int? reportedTotal,required bool hasMore,
   }){
     if(!mounted)return;
     setState((){
-      if(!loadMore)schools.clear();
-      final seen=schools.map((r)=>r['source_ref'].toString()).toSet();
-      for(final school in rows){
-        if(seen.add(school['source_ref'].toString()))schools.add(school);
+      // Replace the cached page with the authoritative page, including deletions.
+      final merged=<String,Map<String,dynamic>>{};
+      for(final school in [...base,...rows]){
+        final id=school['source_ref']??school['id'];if(id!=null)merged[id.toString()]=school;
       }
+      schools..clear()..addAll(merged.values);
       page=current;
       if(reportedTotal!=null)total=reportedTotal;
       more=hasMore;
@@ -174,9 +180,10 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
 
   void _onSearch(String value){
     debounce?.cancel();
+    generation++;
+    search=value.trim();
     debounce=Timer(const Duration(milliseconds:350),(){
       if(!mounted)return;
-      search=value.trim();
       unawaited(_load());
     });
   }

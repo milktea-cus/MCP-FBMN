@@ -40,6 +40,11 @@ bool sameSavedStop(Map stop,Map local,String owner,String routeId,{bool isUnplan
  return false;
 }
 
+bool sameOfflineBytes(Object? stored,Uint8List? incoming){
+ if(stored==null||incoming==null)return stored==null&&incoming==null;
+ return stored is List&&listEquals(stored,incoming);
+}
+
 /// A draft and its outbox operation are the same durable row. No credentials
 /// are stored. Every queue read/write is scoped to identity + scope revision.
 Future<Database>? _sharedDatabase;
@@ -122,7 +127,75 @@ class OfflineQueue extends ChangeNotifier {
  int quarantined=0;
  Timer? _timer;
  String get namespace=>'$identity:$revision';
- Future<Database> get db=>_opening??=openOfflineDatabase(factory);
+ Future<Database> get db=>_opening??=openOfflineDatabase(factory).catchError((Object error,StackTrace stack){
+  _opening=null;
+  Error.throwWithStackTrace(error,stack);
+ });
+ // Use the existing cache store, no schema migration or clearing drafts.
+ // The lease is shared by all tabs/queue instances of this account + revision.
+ final String _syncOwner=const Uuid().v4();
+ String get _syncLeaseKey=>'$namespace:sync-lease:v1';
+ Future<bool> _claimSyncLease()async{
+  final d=await db,t=d.transaction('cache',idbModeReadWrite),store=t.objectStore('cache');
+  final raw=await store.getObject(_syncLeaseKey);
+  final now=DateTime.now().millisecondsSinceEpoch;
+  final held=raw is Map&&raw['owner']!=_syncOwner&&
+   ((raw['expires'] as num?)?.toInt()??0)>now;
+  if(!held)await store.put({'key':_syncLeaseKey,'owner':_syncOwner,'expires':now+120000});
+  await t.completed;return !held;
+ }
+ Future<void> _releaseSyncLease()async{
+  final d=await db,t=d.transaction('cache',idbModeReadWrite),store=t.objectStore('cache');
+  final raw=await store.getObject(_syncLeaseKey);
+  if(raw is Map&&raw['owner']==_syncOwner)await store.delete(_syncLeaseKey);
+  await t.completed;
+ }
+ Future<Map<String,dynamic>?> _currentOperation(String key)async{
+  final d=await db,t=d.transaction('outbox',idbModeReadOnly);
+  final raw=await t.objectStore('outbox').getObject(key);await t.completed;
+  return raw is Map&&raw['namespace']==namespace&&raw['status']=='pending'
+   ?Map<String,dynamic>.from(raw):null;
+ }
+ // Directory page metadata and data are one atomic cache row; legacy rows
+ // with only items still work. Eviction affects only these read-only pages.
+ Future<Map<String,dynamic>?> directoryPage(String key)async{
+  final d=await db,t=d.transaction('cache',idbModeReadOnly);
+  final raw=await t.objectStore('cache').getObject('$namespace:$key');await t.completed;
+  if(raw is! Map||raw['items'] is! List)return null;
+  return Map<String,dynamic>.from(raw);
+ }
+ Future<void> cacheDirectoryPage(String key,List<Map<String,dynamic>> items,{
+  required int total,required bool hasMore,List<String> wards=const [],
+ })async{
+  if(_closed)return;
+  final family=key.startsWith('schools:page:')?'schools':key.startsWith('market-prospects:')?'market-prospects':null;
+  if(family==null)throw ArgumentError('Not a read-only directory page');
+  final d=await db,t=d.transaction('cache',idbModeReadWrite),store=t.objectStore('cache');
+  final indexKey='$namespace:directory-index:$family';
+  final raw=await store.getObject(indexKey);
+  final keys=(raw is Map&&raw['keys'] is List?(raw['keys'] as List).whereType<String>().toList():<String>[]);
+  final full='$namespace:$key';
+  keys.remove(full);keys.add(full);
+  await store.put({'key':full,'items':items,'total':total,'has_more':hasMore,'wards':wards});
+  while(keys.length>180){
+   final expired=keys.removeAt(0);
+   if(expired.startsWith('$namespace:${family=='schools'?'schools:page:':'market-prospects:'}'))await store.delete(expired);
+  }
+  await store.put({'key':indexKey,'keys':keys});
+  await t.completed;
+ }
+ Future<void> revokeDirectory(String family)async{
+  if(!['schools','market-prospects'].contains(family))throw ArgumentError('Unknown directory');
+  final d=await db,t=d.transaction('cache',idbModeReadWrite),store=t.objectStore('cache');
+  final rows=await store.getAll();
+  for(final row in rows){
+   if(row is! Map||row['key'] is! String)continue;
+   final key=row['key'] as String;
+   if(key.startsWith('$namespace:$family:')||key=='$namespace:directory-index:$family')await store.delete(key);
+  }
+  await t.completed;
+ }
+
  Future<void> cache(String key,List<Map<String,dynamic>> items) async{
   final d=await db;final t=d.transaction('cache',idbModeReadWrite);
   await t.objectStore('cache').put({'key':'$namespace:$key','items':items});await t.completed;
@@ -140,11 +213,19 @@ class OfflineQueue extends ChangeNotifier {
   await t.completed;
   return list.map((v)=>Map<String,dynamic>.from(v as Map)).toList();
  }
+ int _reloadGeneration=0;
  Future<void> reload() async{
+  final generation=++_reloadGeneration;
   final all=await rows();
-  pending=all.where((r)=>r['namespace']==namespace).toList()..sort((a,b)=>(a['created'] as int).compareTo(b['created'] as int));
+  List<Map<String,dynamic>>? recovery;
+  try{recovery=await cached('sync-rescued-operations');}catch(_){}
+  if(_closed||generation!=_reloadGeneration)return;
+  pending=all.where((r)=>r['namespace']==namespace).toList()..sort((a,b){
+   final time=(a['created'] as int).compareTo(b['created'] as int);
+   return time!=0?time:a['key'].toString().compareTo(b['key'].toString());
+  });
   quarantined=all.length-pending.length;
-  try{rescued=await cached('sync-rescued-operations');}catch(_){}
+  if(recovery!=null)rescued=recovery;
   // Once every durable operation has been acknowledged, an old HTTP error
   // cannot leave a permanent purple banner on the next screen.
   if(pending.isEmpty&&quarantined==0)error=null;
@@ -195,6 +276,7 @@ class OfflineQueue extends ChangeNotifier {
   if(photo!=null&&(photo.isEmpty||photo.length>5*1024*1024))throw StateError('Ảnh phải nhỏ hơn 5 MB');
   if(thumbnail!=null&&(photo==null||thumbnail.isEmpty||thumbnail.length>153600||sha256==null||thumbnailSha256==null))throw StateError('Thumbnail/checksum không hợp lệ');
   final d=await db;
+  if(_closed)throw StateError('Phiên đã đóng');
   final tx=d.transaction('outbox',idbModeReadWrite),store=tx.objectStore('outbox');
   final key='$namespace:$id';
   final old=await store.getObject(key);
@@ -203,7 +285,9 @@ class OfflineQueue extends ChangeNotifier {
    final existing=Map<String,dynamic>.from(old);
    if(existing['path']!=path||existing['method']!=method||
      jsonEncode(existing['payload'])!=jsonEncode({...data,'client_ref':id})||
-     jsonEncode(existing['depends_on'])!=jsonEncode(dependsOn)){
+     jsonEncode(existing['depends_on'])!=jsonEncode(dependsOn)||
+     !sameOfflineBytes(existing['photo'],photo)||!sameOfflineBytes(existing['thumbnail'],thumbnail)||
+     existing['mime']!=mime||existing['sha256']!=sha256||existing['thumbnail_sha256']!=thumbnailSha256){
     await tx.completed;
     throw StateError('UUID thao tác đã có dữ liệu khác; giữ bản lưu cũ.');
    }
@@ -379,8 +463,19 @@ class OfflineQueue extends ChangeNotifier {
   if(_closed)throw StateError('Phiên đã đóng');
   final t=d.transaction('outbox',idbModeReadWrite),store=t.objectStore('outbox');
   final now=DateTime.now().millisecondsSinceEpoch;
+  final ids=<String>{};
+  for(final record in records){
+   final id=record['client_ref'] as String;
+   if(!ids.add(id)){await t.completed;throw StateError('UUID bị trùng trong lô');}
+   final old=await store.getObject('$namespace:$id');
+   if(old is Map&&(old['namespace']!=namespace||old['path']!='/api/v1/records'||
+      old['method']!='POST'||jsonEncode(old['payload'])!=jsonEncode(record))){
+    await t.completed;throw StateError('UUID đã có dữ liệu khác; giữ bản lưu cũ');
+   }
+  }
   for(var i=0;i<records.length;i++){
    final record=records[i],id=record['client_ref'] as String;
+   if(await store.getObject('$namespace:$id')!=null)continue;
    await store.put({'key':'$namespace:$id','namespace':namespace,'account':identity,'created':now+i,
     'path':'/api/v1/records','method':'POST','payload':record,'status':'pending','attempts':0,'upload_id':const Uuid().v4()});
   }
@@ -396,6 +491,16 @@ class OfflineQueue extends ChangeNotifier {
   final d=await db;if(_closed)throw StateError('Phiên đã đóng');
   final t=d.transactionList(['cache','outbox'],idbModeReadWrite),cache=t.objectStore('cache');
   final key='$namespace:survey-drafts';
+  final out=t.objectStore('outbox');
+  final operation=path==null?null:payload!['client_ref'] as String;
+  final previous=operation==null?null:await out.getObject('$namespace:$operation');
+  if(previous is Map&&(previous['namespace']!=namespace||previous['session_id']!=id||
+    previous['path']!=path||previous['method']!=method||
+    jsonEncode(previous['payload'])!=jsonEncode(payload)||
+    jsonEncode(previous['depends_on'])!=jsonEncode(dependsOn)||
+    !sameOfflineBytes(previous['photo'],photo)||!sameOfflineBytes(previous['thumbnail'],thumbnail)||previous['mime']!=mime)){
+   await t.completed;throw StateError('UUID khảo sát đã có dữ liệu khác; giữ nháp cũ');
+  }
   final existing=await cache.getObject(key);
   final items=existing==null?<Map<String,dynamic>>[]:((existing as Map)['items'] as List).map((r)=>Map<String,dynamic>.from(r as Map)).toList();
   final old=items.where((r)=>r['id']==id).firstOrNull;
@@ -405,9 +510,9 @@ class OfflineQueue extends ChangeNotifier {
   if(next['photos'] is List)next['photos']=(next['photos'] as List).map((p){final prior=known.where((r)=>(r as Map)['id']==(p as Map)['id']).firstOrNull;return {...Map<String,dynamic>.from(p as Map),if(prior is Map&&prior['sync_status']=='ready')'sync_status':'ready'};}).toList();
   items.removeWhere((r)=>r['id']==id);items.add(next);
   await cache.put({'key':key,'items':items});
-  if(path!=null){
+  if(path!=null&&previous==null){
    final data=payload!;final op=data['client_ref'] as String;
-   await t.objectStore('outbox').put({'key':'$namespace:$op','namespace':namespace,'account':identity,'created':DateTime.now().millisecondsSinceEpoch,'session_id':id,'depends_on':dependsOn,
+   await out.put({'key':'$namespace:$op','namespace':namespace,'account':identity,'created':DateTime.now().millisecondsSinceEpoch,'session_id':id,'depends_on':dependsOn,
     'path':path,'method':method,'payload':data,'status':'pending','attempts':0,'upload_id':op,if(photo!=null)'photo':photo,if(thumbnail!=null)'thumbnail':thumbnail,if(mime!=null)'mime':mime});
   }
   await t.completed;await reload();if(path!=null&&_timer!=null)unawaited(sync());
@@ -964,6 +1069,9 @@ class OfflineQueue extends ChangeNotifier {
   await t.completed;await reload();await retryNow();
  }
  Future<void> start() async{
+  if(_closed||_timer!=null)return;
+  // Install the periodic retry even if the first DB open fails.
+  _timer=Timer.periodic(const Duration(seconds:30),(_)=>unawaited(sync()));
   try{
    await reload();
    final acknowledged=await cached('sync-blocked-banner-dismiss');
@@ -971,7 +1079,6 @@ class OfflineQueue extends ChangeNotifier {
    _notify();
   }catch(e){error='Không mở được bộ nhớ máy: $e';_notify();return;}
   if(_closed)return;
-  _timer=Timer.periodic(const Duration(seconds:30),(_)=>unawaited(sync()));
   unawaited(reconcileBlockedRoutes().then((_)=>sync()).catchError((Object e){
    error='Không đối chiếu được hàng đợi: '+describeFailure(e);_notify();
   }));
@@ -991,14 +1098,12 @@ class OfflineQueue extends ChangeNotifier {
   final now=DateTime.now();
   if(!manual&&nextRetryAt!=null&&now.isBefore(nextRetryAt!))return;
   if(manual){nextRetryAt=null;transientFailures=0;}
-  // 4xx rejects stay on disk for the user, without retrying endlessly.
-  if(pending.isNotEmpty&&readyCount==0){
-   error='Có $blockedCount thao tác bị từ chối. Nhấn vào thanh đồng bộ để xem lỗi.';
-   _notify();return;
-  }
+  // Reload durable state before deciding whether any operation can be sent.
   syncing=true;error=null;activePath=null;lastAttemptAt=now;_notify();
-  var matchedDuplicate=false;
+  var matchedDuplicate=false,leaseHeld=false;
   try{
+   leaseHeld=await _claimSyncLease();
+   if(!leaseHeld){await reload();return;}
    await reload();
    if(pending.isEmpty){nextRetryAt=null;transientFailures=0;return;}
    if(readyCount==0){
@@ -1011,9 +1116,10 @@ class OfflineQueue extends ChangeNotifier {
     nextRetryAt=DateTime.now().add(const Duration(minutes:5));return;
    }
    var waitingDependencies=0;
-   for(final row in List.of(pending)){
-    if(_closed)break;
-    if(row['status']=='blocked')continue;
+   for(final snapshot in List.of(pending)){
+    if(_closed||!await _claimSyncLease())break;
+    final row=await _currentOperation(snapshot['key'] as String);
+    if(row==null)continue;
     if(await _dependencyPending(row)){waitingDependencies++;continue;}
     activePath=describe(row);_notify();
     try{
@@ -1025,7 +1131,8 @@ class OfflineQueue extends ChangeNotifier {
       final thumb=row['thumbnail'];final modern=thumb is List;
       final upload=await (networkClient?.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':(row['upload_id']??payload['client_ref']) as String,if(row['session_id']!=null||row['area_visit_id']!=null||row['market_prospect_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null||row['market_prospect_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)??http.post(uri,headers:{...headers,'Content-Type':modern?'application/json':row['mime'] as String,'X-Upload-Id':(row['upload_id']??payload['client_ref']) as String,if(row['session_id']!=null||row['area_visit_id']!=null||row['market_prospect_id']!=null)'X-Photo-Kind':payload['kind'] as String,if(row['session_id']!=null||row['area_visit_id']!=null||row['market_prospect_id']!=null)'X-Captured-At':payload['captured_at'] as String},body:modern?jsonEncode({'image':base64Encode(bytes),'thumbnail':base64Encode(thumb.cast<int>()),'sha256':row['sha256']??payload['sha256'],'thumbnail_sha256':row['thumbnail_sha256']??payload['thumbnail_sha256']}):bytes)).timeout(const Duration(seconds:30));
       final result=decodeApi(upload);
-      if(row['session_id']!=null){await _ackSurvey(row,result['item'] as Map);}else{await _remove(row['key'] as String);}continue;
+      if(row['session_id']!=null){await _ackSurvey(row,result['item'] as Map);}else{await _remove(row['key'] as String);}
+      lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;continue;
      }
      final response=await (row['method']=='PATCH'
        ?(networkClient?.patch(uri,headers:headers,body:jsonEncode(payload))??
@@ -1141,6 +1248,7 @@ class OfflineQueue extends ChangeNotifier {
   }
   finally{
    activePath=null;
+   if(leaseHeld){try{await _releaseSyncLease();}catch(e){error='Không giải phóng được khóa đồng bộ; khóa sẽ tự hết hạn.';}}
    try{await reload();}catch(e){error='Không đọc được hàng đợi lưu máy: $e';}
    syncing=false;_notify();
    if(matchedDuplicate&&!_closed&&readyCount>0)unawaited(sync(manual:true));

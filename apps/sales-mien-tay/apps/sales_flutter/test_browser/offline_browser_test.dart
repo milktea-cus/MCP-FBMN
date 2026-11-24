@@ -5,6 +5,21 @@ import 'package:sales_mien_tay/offline_factory.dart';
 import 'package:sales_mien_tay/session.dart';
 
 void main(){
+ test('L3 real IndexedDB retains empty page metadata without deleting outbox on revocation',()async{
+  final owner=const Uuid().v4(),factory=offlineFactory();
+  final a=OfflineQueue(SalesSession(),owner,'1',factory:factory);
+  const key='schools:page:v2:_:_:_:1';
+  await a.enqueue('/api/v1/customers',{'name':'Draft'});
+  await a.cacheDirectoryPage(key,[],total:0,hasMore:false);
+  (await a.db).close();a.dispose();
+  final reopened=OfflineQueue(SalesSession(),owner,'1',factory:factory);
+  final saved=await reopened.directoryPage(key);
+  expect(saved!['items'],isEmpty);expect(saved['total'],0);
+  await reopened.revokeDirectory('schools');await reopened.reload();
+  expect(await reopened.directoryPage(key),isNull);expect(reopened.pending.length,1);
+  (await reopened.db).close();reopened.dispose();
+ });
+
  test('stock snapshot persists across reopen and is scoped to account and revision',()async{
   final owner=const Uuid().v4(),factory=offlineFactory(),a=OfflineQueue(SalesSession(),owner,'1',factory:factory);
   await a.cache('stock-snapshot-v1',[{'items':[{'company_code':'000123','quantity':0},{'company_code':'000124','quantity':null}],'synced_at':'2026-11-10T00:00:00Z'}]);

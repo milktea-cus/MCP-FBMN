@@ -38,6 +38,7 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
   super.initState();
   province=widget.initialSchool?['province_old']?.toString()??'';
   district=widget.initialSchool?['district_old']?.toString()??'';
+  _lastPending=widget.queue.pending.where((r)=>r['path'].toString().startsWith('/api/v1/market-prospects')).length;
   widget.queue.addListener(_queueChanged);
   unawaited(_load());
  }
@@ -47,19 +48,31 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
   debounce?.cancel();search.dispose();
   super.dispose();
  }
- void _queueChanged(){if(mounted)setState((){});}
+ int _lastPending=0;
+ void _queueChanged(){
+  if(!mounted)return;
+  final count=widget.queue.pending.where((r)=>r['path'].toString().startsWith('/api/v1/market-prospects')).length;
+  final acknowledged=count<_lastPending;_lastPending=count;
+  setState((){});
+  if(acknowledged)unawaited(_load());
+ }
  String _cacheKey(int n)=>'market-prospects:v3:${widget.initialSchool?['id']??''}:$province:$district:$wardNew:$status:$n';
  Future<void> _load({bool append=false})async{
+  if(!mounted||(loading&&append))return;
   final token=++generation,next=append?page+1:1;
-  final p=province,d=district,w=wardNew,s=status,q=search.text.trim();
+  final p=province,d=district,w=wardNew,s=status,q=search.text.trim(),key=_cacheKey(next);
+  final base=append?List<Map<String,dynamic>>.of(items):<Map<String,dynamic>>[];
   setState((){loading=true;error=null;if(!append){items=[];page=0;total=0;more=false;}});
   bool cached=false;
   if(q.isEmpty&&next<=3)try{
-   final rows=await widget.queue.cached(_cacheKey(next));
+   final saved=await widget.queue.directoryPage(key);
    if(!mounted||generation!=token)return;
-   if(rows.isNotEmpty){
+   if(saved!=null){
+    final rows=(saved['items'] as List).whereType<Map>().map((v)=>Map<String,dynamic>.from(v)).toList();
     cached=true;
-    _apply(rows,next,append:append,local:true,hasMore:rows.length==20);
+    total=(saved['total'] as num?)?.toInt()??0;
+    availableWards=(saved['wards'] as List? ??[]).whereType<String>().toList();
+    _apply(rows,next,base:base,local:true,hasMore:next<3&&(saved['has_more'] as bool? ??rows.length==20));
    }
   }catch(_){}
   try{
@@ -78,15 +91,16 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
    total=(data['total'] as num?)?.toInt()??0;
    availableWards=(data['wards'] as List? ??const [])
     .map((v)=>v.toString()).where((v)=>v.isNotEmpty).toSet().toList()..sort();
-   _apply(rows,next,append:append,local:false,hasMore:data['hasMore']==true);
-   if(q.isEmpty&&next<=3)await widget.queue.cache(_cacheKey(next),rows);
+   _apply(rows,next,base:base,local:false,hasMore:data['hasMore']==true);
+   if(q.isEmpty&&next<=3){try{await widget.queue.cacheDirectoryPage(key,rows,total:total,hasMore:data['hasMore']==true,wards:availableWards);}catch(_){}}
   }on ApiFailure catch(e){
    if(!mounted||generation!=token)return;
    setState((){
     loading=false;offline=true;
-    if(e.status==401||e.status==403){items.clear();more=false;cached=false;}
+    if(e.status==401||e.status==403){items.clear();availableWards=[];more=false;total=0;cached=false;}
     error=cached?'Đang xem dữ liệu đã lưu trên máy':e.message;
    });
+   if(e.status==401||e.status==403){try{await widget.queue.revokeDirectory('market-prospects');}catch(_){}}
   }catch(_){
    if(!mounted||generation!=token)return;
    setState((){
@@ -96,12 +110,12 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
   }
  }
  void _apply(List<Map<String,dynamic>> rows,int n,
-   {required bool append,required bool local,required bool hasMore}){
+   {required List<Map<String,dynamic>> base,required bool local,required bool hasMore}){
   if(!mounted)return;
   setState((){
-   if(!append)items=[];
-   final ids=items.map((e)=>e['id'].toString()).toSet();
-   for(final row in rows)if(ids.add(row['id'].toString()))items.add(row);
+   final merged=<String,Map<String,dynamic>>{};
+   for(final row in [...base,...rows]){if(row['id']!=null)merged[row['id'].toString()]=row;}
+   items=merged.values.toList();
    page=n;more=hasMore;offline=local;loading=local;error=null;
   });
  }
@@ -589,7 +603,7 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
     Row(children:[
      Expanded(child:SizedBox(height:44,child:TextField(
       controller:search,
-      onChanged:(_){debounce?.cancel();debounce=Timer(
+      onChanged:(_){generation++;debounce?.cancel();debounce=Timer(
        const Duration(milliseconds:350),(){if(mounted)unawaited(_load());});},
       decoration:const InputDecoration(
        hintText:'Tìm điểm bán',isDense:true,
