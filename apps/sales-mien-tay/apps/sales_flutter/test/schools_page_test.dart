@@ -38,7 +38,10 @@ void main(){
   testWidgets('L3 saved empty school page remains a valid offline result',(tester)async{
    final session=SchoolSession()..offline=true;
    final queue=OfflineQueue(session,'school-empty','1',factory:newIdbFactoryMemory());
-   await queue.cacheDirectoryPage('schools:page:v2:_:_:_:1',[],total:0,hasMore:false);
+   // IndexedDB initialization uses real async I/O, not the widget fake clock.
+   await tester.runAsync(()async{
+    await queue.cacheDirectoryPage('schools:page:v2:_:_:_:1',[],total:0,hasMore:false);
+   });
    await tester.pumpWidget(MaterialApp(home:Scaffold(body:SchoolDirectoryPage(queue:queue,session:session))));
    await tester.pumpAndSettle();
    expect(find.text('Không có mạng, đang xem dữ liệu đã lưu.'),findsOneWidget);
