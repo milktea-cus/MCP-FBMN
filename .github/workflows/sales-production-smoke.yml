@@ -22,6 +22,8 @@ jobs:
           check 401 "$base/api/v1/notifications"
           check 401 "$base/api/v1/notifications/config"
           check 401 "$base/api/v1/notifications/preferences"
+          # N4 navigation is a per-recipient authorization boundary, not a blind URL.
+          check 401 "$base/api/v1/notifications/1/open"
           check 401 "$base/api/v1/notifications/diagnostics"
           # N2 business events use the existing authenticated mutation endpoints.
           check 401 "$base/api/v1/targets"
@@ -55,6 +57,12 @@ jobs:
           curl --fail --retry 2 --max-time 30 -o /tmp/index.html "$site/"
           grep -qi '<html' /tmp/index.html
           curl --fail --retry 2 --max-time 30 -o /tmp/flutter_bootstrap.js "$site/flutter_bootstrap.js"
+          curl --fail --retry 2 --max-time 30 -o /tmp/version.json "$site/version.json"
+          jq -e '.version=="aef40b487c93281660ac6b76bf1ddeba2997eef3"' /tmp/version.json
+          code=$(curl -sS --max-time 30 -o /tmp/open.json -w '%{http_code}' "$site/api/v1/notifications/1/open")
+          echo "/api/v1/notifications/1/open => HTTP $code"
+          test "$code" = 401
+          jq -e '.error | type=="string"' /tmp/open.json
           code=$(curl -sS --max-time 30 -o /tmp/me.json -w '%{http_code}' "$site/api/v1/me")
           echo "/api/v1/me => HTTP $code"
           test "$code" = 401
