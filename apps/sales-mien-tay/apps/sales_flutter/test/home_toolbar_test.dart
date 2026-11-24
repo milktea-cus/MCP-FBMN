@@ -77,6 +77,7 @@ void main(){
     expect(contentBuilds,1);
     notifications.items=[FieldNotification(
       'notice-1','Thông báo mới','Đã đồng bộ',DateTime(2026,11,11),null)];
+    notifications.unreadCount=1;
     notifications.changed();
     await tester.pump();
     expect(contentBuilds,1,reason:
@@ -85,6 +86,7 @@ void main(){
     await tester.tap(find.byTooltip('Thông báo'));
     expect(opens,1);
     notifications.items=[];
+    notifications.unreadCount=0;
     notifications.changed();
     await tester.pump();
     expect(contentBuilds,1);

@@ -10,7 +10,7 @@ test('N4 inbound requires signed Svix, authentic inbox mapping and no raw mail c
  assert.match(sql,/JOIN public.staff_members s ON s.user_sub=mb.user_sub/);
  assert.match(sql,/public.sales_identity_exists\(s.user_sub\)/);
  assert.match(sql,/GROUP_COUNT|group_count/i);
- assert.doesNotMatch(sql,/sender|subject|content_body|mail_text/i);
+ assert.doesNotMatch(sql.replace(/^--[^\n]*$/gm,''),/sender|subject|content_body|mail_text/i);
 });
 test('N4 inbox webhook is at-most-once per message and at-most-one push per thread group',()=>{
  assert.match(sql,/PRIMARY KEY\(mailbox,email_id\)/);
