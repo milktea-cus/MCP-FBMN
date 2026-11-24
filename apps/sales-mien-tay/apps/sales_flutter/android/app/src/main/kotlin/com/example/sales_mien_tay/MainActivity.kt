@@ -18,9 +18,17 @@ import java.security.MessageDigest
 /** Android-only APK validation. All downloads stay inside this app's cache. */
 class MainActivity : FlutterActivity() {
     private val channelName = "field_work/app_update"
+    private val fieldPushBridge by lazy { FieldPushBridge(this) }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        fieldPushBridge.onPermission(requestCode)
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "field_work/android_push")
+            .setMethodCallHandler(fieldPushBridge::onCall)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {

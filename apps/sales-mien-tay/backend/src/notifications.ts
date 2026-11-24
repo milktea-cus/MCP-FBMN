@@ -1,8 +1,9 @@
 import {neon} from '@neondatabase/serverless';
 import type {userFromRequest} from './auth';
+import {fcmConfigured,registerFcm,unregisterFcm,sendFcm,validFcmToken,validBinding} from './fcm';
 
 type Actor=Awaited<ReturnType<typeof userFromRequest>>;
-type PushEnv={DATABASE_URL:string;VAPID_PUBLIC_KEY?:string;VAPID_PRIVATE_JWK?:string;VAPID_SUBJECT?:string};
+type PushEnv={DATABASE_URL:string;FCM_SERVICE_ACCOUNT_JSON?:string;VAPID_PUBLIC_KEY?:string;VAPID_PRIVATE_JWK?:string;VAPID_SUBJECT?:string};
 const reply=(data:unknown,status=200)=>new Response(JSON.stringify(data),{
  status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}
 });
@@ -54,7 +55,7 @@ async function sendPush(env:PushEnv,endpoint:string):Promise<number>{
  },signal:AbortSignal.timeout(8000)});
  return res.status;
 }
-async function fanOut(env:PushEnv,recipient:string):Promise<void>{
+async function fanOutWeb(env:PushEnv,recipient:string):Promise<void>{
  if(!env.VAPID_PUBLIC_KEY||!env.VAPID_PRIVATE_JWK||!env.VAPID_SUBJECT)return;
  const sql=neon(env.DATABASE_URL);
  const subs=await sql`SELECT endpoint FROM field_push_subscriptions WHERE recipient_sub=${recipient}
@@ -76,7 +77,7 @@ export async function publishNotification(env:PushEnv,recipient:string,eventKey:
   SELECT s.user_sub,${eventKey},${title},${description}
   FROM staff_members s WHERE s.user_sub=${recipient} AND s.active
   ON CONFLICT(recipient_sub,event_key) DO NOTHING RETURNING id`;
- if(inserted.length)await fanOut(env,recipient);
+ if(inserted.length)await Promise.allSettled([fanOutWeb(env,recipient),sendFcm(env,recipient)]);
 }
 export async function notificationRoutes(req:Request,env:PushEnv,u:Actor,url:URL):Promise<Response|null>{
  const path=url.pathname;
@@ -84,7 +85,7 @@ export async function notificationRoutes(req:Request,env:PushEnv,u:Actor,url:URL
  const sql=neon(env.DATABASE_URL);
  if(path==='/api/v1/notifications/config'&&req.method==='GET')
   return reply({supported:!!(env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_JWK&&env.VAPID_SUBJECT),
-   public_key:env.VAPID_PUBLIC_KEY??null});
+   public_key:env.VAPID_PUBLIC_KEY??null,android_supported:fcmConfigured(env)});
  if(path==='/api/v1/notifications'&&req.method==='GET'){
   const [items,count]=await Promise.all([
    sql`SELECT id::text AS id,title,body,created_at,read_at FROM field_notifications
@@ -100,6 +101,19 @@ export async function notificationRoutes(req:Request,env:PushEnv,u:Actor,url:URL
     RETURNING id::text AS id,read_at`;
   if(!items.length)return fail('Thông báo không tồn tại',404);
   return reply({item:items[0]});
+ }
+ if(path==='/api/v1/notifications/android/subscription'&&req.method==='POST'){
+  if(!fcmConfigured(env))return fail('Máy chủ chưa cấu hình FCM',503);
+  let doc:Record<string,unknown>;try{doc=await body(req);}catch{return fail('Đăng ký không hợp lệ');}
+  if(!validFcmToken(doc.token)||!validBinding(doc.binding))return fail('Thiết bị Android không hợp lệ');
+  await registerFcm(env,u.sub,doc.token,doc.binding);
+  return reply({ok:true});
+ }
+ if(path==='/api/v1/notifications/android/unsubscribe'&&req.method==='POST'){
+  let doc:Record<string,unknown>;try{doc=await body(req);}catch{return fail('Đăng ký không hợp lệ');}
+  if(!validBinding(doc.binding))return fail('Thiết bị Android không hợp lệ');
+  await unregisterFcm(env,u.sub,doc.binding);
+  return reply({ok:true});
  }
  if(path==='/api/v1/notifications/subscription'&&req.method==='POST'){
   if(!env.VAPID_PUBLIC_KEY||!env.VAPID_PRIVATE_JWK)return fail('Chưa bật Push',503);

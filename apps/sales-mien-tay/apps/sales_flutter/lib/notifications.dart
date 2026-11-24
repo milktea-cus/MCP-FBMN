@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'offline_queue.dart';
 import 'session.dart';
+import 'android_push_bridge.dart';
 import 'push_bridge_stub.dart' if (dart.library.html) 'push_bridge_web.dart' as push;
 
 class FieldNotification {
@@ -30,6 +31,10 @@ class FieldNotificationStore extends ChangeNotifier {
  bool stale=false,loading=false,pushEnabled=false,hasBrowserPush=false;
  String? error,publicKey;
  bool _closed=false;
+ bool get isAndroid=>AndroidPushBridge.supported;
+ bool androidConfigured=false,pushBusy=false;
+ String? _registeredToken,_registeredBinding;
+ DateTime? _registeredAt;
  int get unread=>items.where((i)=>i.unread).length;
  void changed(){if(!_closed){push.badge(unread);notifyListeners();}}
  Future<void> start()async{
@@ -39,7 +44,13 @@ class FieldNotificationStore extends ChangeNotifier {
    stale=true;changed();
   }catch(_){}
   await refresh();
-  if(hasBrowserPush){
+  if(isAndroid){
+   try{
+    final config=await session.get('/api/v1/notifications/config');
+    androidConfigured=config['android_supported']==true;
+    if(androidConfigured)await _syncAndroid();
+   }catch(_){}
+  }else if(hasBrowserPush){
    try{
     final config=await session.get('/api/v1/notifications/config');
     publicKey=config['supported']==true?config['public_key']?.toString():null;
@@ -53,6 +64,23 @@ class FieldNotificationStore extends ChangeNotifier {
   }
   changed();
  }
+ Future<void> _syncAndroid()async{
+  if(!isAndroid||!androidConfigured||pushBusy||_closed)return;
+  pushBusy=true;
+  try{
+   final data=await AndroidPushBridge.status(queue.identity);
+   if(_closed)return;
+   if(data==null){pushEnabled=false;_registeredToken=null;_registeredBinding=null;return;}
+   if(data['token']!=_registeredToken||data['binding']!=_registeredBinding||
+     _registeredAt==null||DateTime.now().difference(_registeredAt!).inHours>=6){
+    await session.post('/api/v1/notifications/android/subscription',data);
+    _registeredToken=data['token'] as String;_registeredBinding=data['binding'] as String;
+    _registeredAt=DateTime.now();
+   }
+   pushEnabled=true;
+  }catch(_){pushEnabled=false;}
+  finally{pushBusy=false;changed();}
+ }
  Future<void> save()async=>queue.cache('notifications',items.map((x)=>x.toJson()).toList());
  Future<void> refresh()async{
   if(_closed||loading)return;
@@ -65,9 +93,11 @@ class FieldNotificationStore extends ChangeNotifier {
       Map<String,dynamic>.from(x as Map))))waiting.contains(item.id)?item.markRead():item];
    await save();
    stale=false;error=null;
+   if(isAndroid&&androidConfigured)await _syncAndroid();
   }catch(e){
    if(e is ApiFailure&&(e.status==401||e.status==403)){
     items=[];error='Phiên hết hạn hoặc quyền đã thay đổi.';
+    if(isAndroid){try{await AndroidPushBridge.disable(queue.identity);}catch(_){}pushEnabled=false;}
    }else{stale=true;error='Thông báo đang hiển thị từ bộ nhớ máy.';}
   }finally{loading=false;changed();}
  }
@@ -87,6 +117,7 @@ class FieldNotificationStore extends ChangeNotifier {
   catch(e){error=e.toString();changed();}
  }
  Future<void> enablePush()async{
+  if(isAndroid){await _enableAndroid();return;}
   if(publicKey==null){error='Máy chủ chưa cấu hình Push.';changed();return;}
   try{
    // The JS permission prompt begins directly inside the button handler.
@@ -97,7 +128,40 @@ class FieldNotificationStore extends ChangeNotifier {
   }catch(e){pushEnabled=false;error='Không bật được Push: $e';}
   changed();
  }
+ Future<void> _enableAndroid()async{
+  if(pushBusy||_closed)return;
+  if(!androidConfigured){error='Máy chủ chưa cấu hình FCM.';changed();return;}
+  pushBusy=true;changed();
+  String? binding;
+  try{
+   final data=await AndroidPushBridge.prepare(queue.identity);
+   binding=data['binding'] as String;
+   if(_closed)throw StateError('Phiên đã đóng');
+   await session.post('/api/v1/notifications/android/subscription',data);
+   if(_closed)throw StateError('Phiên đã đóng');
+   await AndroidPushBridge.activate(queue.identity,binding);
+   _registeredToken=data['token'] as String;_registeredBinding=binding;_registeredAt=DateTime.now();
+   pushEnabled=true;error=null;
+  }catch(e){
+   try{await AndroidPushBridge.disable(queue.identity);}catch(_){}
+   if(binding!=null){try{await session.post('/api/v1/notifications/android/unsubscribe',{'binding':binding});}catch(_){}}
+   pushEnabled=false;
+   error=e is ApiFailure?e.message:'Không bật được thông báo Android. Kiểm tra quyền thông báo, mạng và Google Play Services.';
+  }finally{pushBusy=false;changed();}
+ }
  Future<void> disablePush()async{
+  if(isAndroid){
+   // Local suppression first: no old-account notification even during offline logout.
+   try{
+    final binding=await AndroidPushBridge.disable(queue.identity);
+    pushEnabled=false;
+    final old=binding??_registeredBinding;
+    _registeredToken=null;_registeredBinding=null;_registeredAt=null;
+    if(old!=null)await session.post('/api/v1/notifications/android/unsubscribe',{'binding':old});
+    error=null;
+   }catch(_){pushEnabled=false;error='Đã yêu cầu tắt thông báo; máy chủ sẽ cập nhật lại khi có mạng.';}
+   changed();return;
+  }
   try{
    final raw=await push.disable();
    if(raw.isNotEmpty){
@@ -123,19 +187,19 @@ class FieldNotificationInbox extends StatelessWidget {
         child:Text('Đang xem bản đã lưu trên máy. Có mạng sẽ cập nhật lại.')),
       if(store.error!=null)Padding(padding:const EdgeInsets.all(8),
         child:Text(store.error!,style:TextStyle(color:Theme.of(context).colorScheme.error))),
-      if(store.hasBrowserPush)Card(child:SwitchListTile(
+      if(store.hasBrowserPush||store.isAndroid)Card(child:SwitchListTile(
         title:Text(store.pushEnabled?'Đã bật Push khóa màn hình':'Bật Push khóa màn hình'),
-        subtitle:const Text('Cần cho phép thông báo; iPhone phải cài PWA ra Màn hình chính.'),
+        subtitle:Text(store.isAndroid?(store.androidConfigured?'Cho phép thông báo Android để nhận khi khóa màn hình.':'Máy chủ chưa cấu hình FCM.'):'Cần cho phép thông báo; iPhone phải cài PWA ra Màn hình chính.'),
         secondary:const Icon(Icons.notifications_active_outlined),
         value:store.pushEnabled,
-        onChanged:store.publicKey==null?null:(value){
+        onChanged:(store.pushBusy||(store.isAndroid?!store.androidConfigured:store.publicKey==null))?null:(value){
           if(value){unawaited(store.enablePush());}
           else{unawaited(store.disablePush());}
         },
       )),
-      if(!store.hasBrowserPush)const Card(child:ListTile(
+      if(!store.hasBrowserPush&&!store.isAndroid)const Card(child:ListTile(
         leading:Icon(Icons.info_outline),title:Text('Push khóa màn hình'),
-        subtitle:Text('Android native cần FCM; hiện chỉ bật Web Push trong PWA được hỗ trợ.'),
+        subtitle:Text('Thiết bị hoặc trình duyệt hiện không hỗ trợ Push.'),
       )),
       Row(children:[
        Expanded(child:Text('Chưa đọc: ${store.unread}',style:Theme.of(context).textTheme.titleMedium)),

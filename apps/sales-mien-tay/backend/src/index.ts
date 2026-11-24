@@ -36,6 +36,7 @@ import {githubAndroidPublisher} from './android_release_publisher';
 interface Env {
   DATABASE_URL: string;
   RESEND_API_KEY?: string;
+  FCM_SERVICE_ACCOUNT_JSON?: string;
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_JWK?: string;
   VAPID_SUBJECT?: string;

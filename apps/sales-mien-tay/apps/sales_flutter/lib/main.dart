@@ -248,7 +248,7 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
   Future<void> _profile() async {
     await showDialog<void>(context:context,builder:(c)=>AlertDialog(title:const Text('Hồ sơ nhân viên'),content:Text(widget.me['full_name'].toString()+'\n'+widget.me['email'].toString()+'\nVai trò: '+widget.me['role'].toString()+'\nĐịa bàn: '+_catalog.provinces.join(', ')),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Đóng')),FilledButton(onPressed:()async{
       Navigator.pop(c);
-      if(_notifications.pushEnabled)await _notifications.disablePush();
+      if(_notifications.pushEnabled||_notifications.isAndroid)await _notifications.disablePush();
       await widget.onLogout();
     },child:const Text('Đăng xuất'))]));
   }
