@@ -94,7 +94,7 @@ export async function notificationRoutes(req:Request,env:PushEnv,u:Actor,url:URL
   return reply({supported:!!(env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_JWK&&env.VAPID_SUBJECT),
    public_key:env.VAPID_PUBLIC_KEY??null,android_supported:fcmConfigured(env)});
  if(path==='/api/v1/notifications/diagnostics'&&req.method==='GET'){
-  const [web,android,last,delivery,probe]=await Promise.all([
+  const [web,android,last,delivery,probe,provider]=await Promise.all([
    sql`SELECT count(*)::int AS n FROM public.field_push_subscriptions WHERE recipient_sub=${u.sub}`,
    sql`SELECT count(*)::int AS n FROM public.field_android_push_devices WHERE recipient_sub=${u.sub}`,
    sql`SELECT last_reason,last_accepted,last_failed,last_tested_at FROM public.field_notification_test_gate
@@ -104,12 +104,14 @@ export async function notificationRoutes(req:Request,env:PushEnv,u:Actor,url:URL
      AND (n.scope_revision IS NULL OR n.scope_revision=${String(u.staff.scope_revision)}::bigint)
     GROUP BY d.channel,d.state`,
    u.admin?sql`SELECT status,reason,checked_at FROM public.field_notification_runtime_checks
-    WHERE check_key='n1_fcm_oauth_rc16' LIMIT 1`:Promise.resolve([])
+    WHERE check_key='n1_fcm_oauth_rc16' LIMIT 1`:Promise.resolve([]),
+   u.admin?sql`SELECT status,reason,checked_at FROM public.field_notification_runtime_checks
+    WHERE check_key='n1_fcm_provider_validation_rc16' LIMIT 1`:Promise.resolve([])
   ]);
   return reply({web_devices:web[0]?.n??0,android_devices:android[0]?.n??0,
     web_configured:!!(env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_JWK&&env.VAPID_SUBJECT),
     android_configured:fcmConfigured(env),last_test:last[0]??null,delivery,
-    ...(u.admin?{fcm_oauth_probe:probe[0]??null}:{})});
+    ...(u.admin?{fcm_oauth_probe:probe[0]??null,fcm_provider_validation:provider[0]??null}:{})});
  }
  if(path==='/api/v1/notifications/preferences'&&req.method==='GET'){
   const [categories,settings]=await Promise.all([

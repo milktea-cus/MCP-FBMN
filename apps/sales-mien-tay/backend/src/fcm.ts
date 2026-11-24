@@ -138,3 +138,33 @@ export async function sendFcmDevice(env:FcmEnv,token:string,binding:string):Prom
   return {accepted:false,code:'http_'+r.status};
  }catch{return {accepted:false,code:'network_error'};}
 }
+
+// Firebase HTTP v1 dry-run: validate_only MUST remain true. This never delivers
+// a notification to the registered device and never logs the OAuth token.
+export async function validateFcmDevice(
+ env:FcmEnv,token:string,binding:string,
+ request:typeof fetch=globalThis.fetch,
+ getAccess:(env:FcmEnv)=>Promise<string>=accessToken
+):Promise<{ok:boolean;code:string}>{
+ if(!validFcmToken(token)||!validBinding(binding))return {ok:false,code:'invalid_device'};
+ let access:string;
+ try{access=await getAccess(env);}catch(e){
+  const code=e instanceof Error?e.message:'oauth_failed';
+  return {ok:false,code:/^oauth_[a-z0-9_]{1,70}$/.test(code)?code:'oauth_failed'};
+ }
+ try{
+  const r=await request('https://fcm.googleapis.com/v1/projects/'+project+'/messages:send',{
+   method:'POST',redirect:'manual',
+   headers:{Authorization:'Bearer '+access,'Content-Type':'application/json'},
+   body:JSON.stringify({validate_only:true,message:{token,data:{kind:'field_notification',binding},
+     android:{priority:'HIGH',ttl:'3600s'}}}),signal:AbortSignal.timeout(8000)
+  });
+  if(r.status>=300&&r.status<400)return {ok:false,code:'fcm_redirect_blocked'};
+  if(r.ok)return {ok:true,code:'validated'};
+  const doc=await r.json().catch(()=>null) as {error?:{details?:Array<{errorCode?:string}>}}|null;
+  const provider=doc?.error?.details?.find(x=>typeof x.errorCode==='string')?.errorCode;
+  if(provider&&['UNREGISTERED','SENDER_ID_MISMATCH','INVALID_ARGUMENT','QUOTA_EXCEEDED'].includes(provider))
+   return {ok:false,code:provider};
+  return {ok:false,code:'http_'+r.status};
+ }catch{return {ok:false,code:'network_error'};}
+}

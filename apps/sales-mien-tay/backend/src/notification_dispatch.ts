@@ -1,7 +1,7 @@
 import {neon} from '@neondatabase/serverless';
 import {sendWebPush} from './notifications';
 import {sendFcmDevice} from './fcm';
-import {probeFcmOAuthOnce} from './notification_probe';
+import {probeFcmOAuthOnce,probeFcmProviderOnce} from './notification_probe';
 import {transientPushError,deviceDigest} from './notification_policy';
 
 type Env={DATABASE_URL:string;FCM_SERVICE_ACCOUNT_JSON?:string;VAPID_PUBLIC_KEY?:string;
@@ -13,6 +13,7 @@ export async function dispatchNotifications(env:Env):Promise<{claimed:number;sen
  const sql=neon(env.DATABASE_URL);
  // FCM diagnostic must never prevent actual queued delivery.
  await probeFcmOAuthOnce(env).catch(()=>undefined);
+ await probeFcmProviderOnce(env).catch(()=>undefined);
  const lease=crypto.randomUUID();
  // A competing cron invocation can't claim the same row until lease expiry.
  const claimed=await sql`WITH due AS (
