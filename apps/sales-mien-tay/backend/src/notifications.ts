@@ -156,7 +156,7 @@ export async function notificationRoutes(req:Request,env:PushEnv,u:Actor,url:URL
  }
  // Server resolves the navigation target on every tap; stale or revoked
  // notifications never expose a route or another owner's business identifier.
- const open=/^\\/api\\/v1\\/notifications\\/([0-9]{1,19})\\/open$/.exec(path);
+ const open=/^\/api\/v1\/notifications\/([0-9]{1,19})\/open$/.exec(path);
  if(open&&req.method==='GET'){
   if(!validCursor(open[1]))return fail('Thông báo không tồn tại',404);
   const rows=await sql`SELECT category,entity_key FROM public.field_notifications
