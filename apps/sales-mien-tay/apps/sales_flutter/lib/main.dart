@@ -98,6 +98,34 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
     _notifications.dispose();
     _queue.removeListener(_queueChanged);_queue.dispose();super.dispose();
   }
+  Future<void> _openFromNotification(FieldNotification item)async{
+    final result=await widget.session.get('/api/v1/notifications/'+item.id+'/open');
+    final target=result['destination'] as Map?;
+    final screen=target?['screen']?.toString()??'';
+    final idx=const {'targets':3,'customers':1,'work':5,'reports':9,
+      'orders':12,'prospects':15,'support':8,'competitor':7,'sync':0}[screen];
+    if(screen=='mail'){
+      final thread=target?['entity_id']?.toString();
+      if(thread==null||thread.isEmpty)throw StateError('Hội thoại đã bị thu hồi');
+      if(!mounted)return;
+      Navigator.push(context,MaterialPageRoute(builder:(_)=>StaffMailPage(
+       key:ValueKey('mail-deep:'+_queue.namespace+':'+thread),
+       session:widget.session,initialThreadId:thread)));
+    }else if(screen=='profile'){
+      if(!mounted)return;
+      unawaited(_profile());
+    }else if(screen=='updates'&&!kIsWeb&&defaultTargetPlatform==TargetPlatform.android){
+      if(!mounted)return;
+      Navigator.push(context,MaterialPageRoute(
+        builder:(_)=>AppUpdatePage(session:widget.session)));
+    }else if(idx!=null){
+      if(!mounted)return;
+      setState(()=>_selectedIndex=idx);
+    }else{
+      throw StateError('Nghiệp vụ không còn khả dụng');
+    }
+    await _notifications.markRead(item);
+  }
   RegionCatalog get _catalog => widget.catalog;
   String get _apiUrl => salesOrigin;
   String get _accessToken => widget.session.cookie;
@@ -440,7 +468,7 @@ class _SalesHomeState extends State<SalesHome> with WidgetsBindingObserver {
         loading:_loading,
         store:_notifications,
         onNotifications:()=>Navigator.push(context,MaterialPageRoute(
-          builder:(_)=>FieldNotificationInbox(store:_notifications))),
+          builder:(_)=>FieldNotificationInbox(store:_notifications,onOpen:_openFromNotification))),
       ),
       bottomNavigationBar: narrow ? NavigationBar(
         selectedIndex: const [0,1,5,9].contains(_selectedIndex)?const [0,1,5,9].indexOf(_selectedIndex):0,

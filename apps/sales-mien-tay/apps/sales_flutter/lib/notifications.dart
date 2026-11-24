@@ -325,58 +325,240 @@ class FieldNotificationStore extends ChangeNotifier {
  @override void dispose(){_closed=true;super.dispose();}
 }
 
-class FieldNotificationInbox extends StatelessWidget {
+
+String notificationCategoryName(String c)=>const <String,String>{
+ 'target':'Chỉ tiêu','assignment':'Phân công','security':'Bảo mật',
+ 'support':'Đề xuất hỗ trợ','order_action':'Đơn cần xử lý','daily_digest':'Tổng hợp công việc',
+ 'email':'Email','day_route':'Tuyến ngày','weekly_route':'Tuyến tuần','monthly_route':'Tuyến tháng',
+ 'trip':'Chuyến công tác','survey':'Khảo sát','prospect':'Điểm tiềm năng',
+ 'actuals':'Doanh số','release':'Bản cập nhật','sync':'Đồng bộ',
+ 'order_summary':'Đơn hàng','customer':'Khách hàng','competitor':'Đối thủ'
+}[c]??'Thông báo';
+
+IconData notificationCategoryIcon(String c)=>switch(c){
+ 'target'=>Icons.flag_outlined,
+ 'assignment'||'security'=>Icons.admin_panel_settings_outlined,
+ 'support'=>Icons.support_agent_outlined,
+ 'order_action'||'order_summary'=>Icons.shopping_cart_outlined,
+ 'daily_digest'||'day_route'||'weekly_route'||'monthly_route'||'trip'=>Icons.route_outlined,
+ 'email'=>Icons.mail_outline,'survey'=>Icons.fact_check_outlined,
+ 'prospect'||'customer'=>Icons.storefront_outlined,'release'=>Icons.system_update_outlined,
+ _=>Icons.notifications_none_outlined
+};
+
+class FieldNotificationInbox extends StatefulWidget{
  final FieldNotificationStore store;
- const FieldNotificationInbox({super.key,required this.store});
- @override
- Widget build(BuildContext context)=>Scaffold(
-  appBar:AppBar(title:const Text('Thông báo')),
-  body:AnimatedBuilder(animation:store,builder:(context,_)=>ListView(
-    padding:const EdgeInsets.all(12),children:[
-      if(store.stale)const Padding(padding:EdgeInsets.all(8),
-        child:Text('Đang xem bản đã lưu trên máy. Có mạng sẽ cập nhật lại.')),
-      if(store.error!=null)Padding(padding:const EdgeInsets.all(8),
-        child:Text(store.error!,style:TextStyle(color:Theme.of(context).colorScheme.error))),
-      if(store.hasBrowserPush||store.isAndroid)Card(child:SwitchListTile(
-        title:Text(store.pushEnabled?'Đã bật Push khóa màn hình':'Bật Push khóa màn hình'),
-        subtitle:Text(store.isAndroid?(store.androidConfigured?'Cho phép thông báo Android để nhận khi khóa màn hình.':'Máy chủ chưa cấu hình FCM.'):'Cần cho phép thông báo; iPhone phải cài PWA ra Màn hình chính.'),
-        secondary:const Icon(Icons.notifications_active_outlined),
-        value:store.pushEnabled,
-        onChanged:(store.pushBusy||(store.isAndroid?!store.androidConfigured:store.publicKey==null))?null:(value){
-          if(value){unawaited(store.enablePush());}
-          else{unawaited(store.disablePush());}
-        },
-      )),
-      if(store.isAndroid)Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-        if(store.androidDiagnostics['sound']==false||((store.androidDiagnostics['importance'] as int?)??4)<4)const Text('Kênh thông báo đang im lặng hoặc không bật banner. Mở cài đặt để chọn âm thanh và hiển thị nổi.'),
-        if(store.pushReport!=null)Text(store.pushReport!),
-        if((store.androidDiagnostics['receivedAt'] as int? ?? 0)>0)Text('FCM gần nhất: ${DateTime.fromMillisecondsSinceEpoch(store.androidDiagnostics['receivedAt'] as int).toLocal().toString().substring(0,19)}'),
-        Wrap(spacing:8,children:[TextButton(onPressed:store.pushEnabled?()=>unawaited(store.localAndroidTest()):null,child:const Text('Thử âm thanh máy')),TextButton(onPressed:()=>unawaited(store.androidSettings()),child:const Text('Cài đặt âm thanh'))]),
-      ]))),
-      if(!store.hasBrowserPush&&!store.isAndroid)const Card(child:ListTile(
-        leading:Icon(Icons.info_outline),title:Text('Push khóa màn hình'),
-        subtitle:Text('Thiết bị hoặc trình duyệt hiện không hỗ trợ Push.'),
-      )),
-      Row(children:[
-       Expanded(child:Text('Chưa đọc: ${store.unread}',style:Theme.of(context).textTheme.titleMedium)),
-       IconButton(tooltip:'Làm mới',onPressed:()=>unawaited(store.refresh()),icon:const Icon(Icons.refresh)),
-       TextButton(onPressed:()=>unawaited(store.sendTest()),child:const Text('Gửi thử')),
-      ]),
-      if(store.items.isEmpty)const Padding(padding:EdgeInsets.all(24),
-       child:Center(child:Text('Chưa có thông báo.'))),
-      for(final item in store.items)Card(child:ListTile(
-        leading:Icon(item.unread?Icons.mark_email_unread_outlined:Icons.drafts_outlined,
-          color:item.unread?Theme.of(context).colorScheme.primary:null),
-        title:Text(item.title,style:TextStyle(fontWeight:item.unread?FontWeight.bold:FontWeight.normal)),
-        subtitle:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-         Text(item.body),
-         Text(item.created.toLocal().toString().substring(0,16),
-           style:Theme.of(context).textTheme.bodySmall),
-        ]),
-        trailing:item.unread?IconButton(tooltip:'Đánh dấu đã đọc',
-          onPressed:()=>unawaited(store.markRead(item)),icon:const Icon(Icons.done)):null,
-        onTap:item.unread?()=>unawaited(store.markRead(item)):null,
-      )),
-    ])),
+ final Future<void> Function(FieldNotification)? onOpen;
+ const FieldNotificationInbox({super.key,required this.store,this.onOpen});
+ @override State<FieldNotificationInbox> createState()=>_FieldNotificationInboxState();
+}
+class _FieldNotificationInboxState extends State<FieldNotificationInbox>{
+ String filter='all';
+ bool opening=false;
+ Future<void> _open(FieldNotification item)async{
+  if(opening)return;
+  setState(()=>opening=true);
+  try{
+   if(widget.onOpen!=null){await widget.onOpen!(item);}
+   else{await widget.store.markRead(item);}
+  }catch(_){
+   if(mounted)ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content:Text('Không mở được nghiệp vụ. Kiểm tra quyền hoặc kết nối.')));
+  }finally{if(mounted)setState(()=>opening=false);}
+ }
+ String day(DateTime time){
+  final d=time.toLocal(),today=DateTime.now();
+  if(d.year==today.year&&d.month==today.month&&d.day==today.day)return 'Hôm nay';
+  final yesterday=today.subtract(const Duration(days:1));
+  if(d.year==yesterday.year&&d.month==yesterday.month&&d.day==yesterday.day)return 'Hôm qua';
+  return d.day.toString().padLeft(2,'0')+'/'+d.month.toString().padLeft(2,'0')+'/'+d.year.toString();
+ }
+ String hour(DateTime time){
+  final d=time.toLocal();
+  return d.hour.toString().padLeft(2,'0')+':'+d.minute.toString().padLeft(2,'0');
+ }
+ @override Widget build(BuildContext context)=>Scaffold(
+  appBar:AppBar(title:const Text('Trung tâm thông báo'),actions:[
+   IconButton(tooltip:'Thiết lập thông báo',icon:const Icon(Icons.tune_outlined),
+    onPressed:()=>Navigator.push(context,MaterialPageRoute(
+     builder:(_)=>FieldNotificationSettingsPage(store:widget.store))))]),
+  body:AnimatedBuilder(animation:widget.store,builder:(context,_){
+   final store=widget.store;
+   final showing=store.items.where((item)=>filter=='unread'?item.unread:
+     filter=='action'?item.actionable:true).toList();
+   final children=<Widget>[
+    if(store.loading)const LinearProgressIndicator(minHeight:2),
+    if(store.stale)const Padding(padding:EdgeInsets.all(8),
+     child:Text('Đang xem bản lưu trên thiết bị. Có mạng sẽ tự cập nhật.')),
+    if(store.error!=null)Padding(padding:const EdgeInsets.all(8),
+     child:Text(store.error!,style:TextStyle(color:Theme.of(context).colorScheme.error))),
+    Row(children:[
+     Expanded(child:Text(store.unread.toString()+' chưa đọc',
+       style:Theme.of(context).textTheme.titleMedium)),
+     IconButton(tooltip:'Làm mới',onPressed:store.loading?null:()=>unawaited(store.refresh()),
+      icon:const Icon(Icons.refresh)),
+     TextButton.icon(icon:const Icon(Icons.done_all,size:18),label:const Text('Đọc tất cả'),
+      onPressed:store.readAllBusy||store.unread==0?null:()=>unawaited(store.markAllRead()))
+    ]),
+    Wrap(spacing:8,runSpacing:6,children:[
+     for(final choice in const [('all','Tất cả'),('action','Cần xử lý'),('unread','Chưa đọc')])
+      FilterChip(label:Text(choice.$2),selected:filter==choice.$1,
+       onSelected:(_)=>setState(()=>filter=choice.$1))
+    ]),
+    const SizedBox(height:12),
+    if(showing.isEmpty)const Padding(padding:EdgeInsets.all(28),
+     child:Center(child:Text('Không có thông báo trong bộ lọc này.'))),
+   ];
+   String? lastDay;
+   for(final item in showing){
+    final value=day(item.created);
+    if(lastDay!=value){
+     children.add(Padding(padding:const EdgeInsets.fromLTRB(4,10,0,6),
+      child:Text(value,style:Theme.of(context).textTheme.titleSmall)));
+     lastDay=value;
+    }
+    children.add(Card(margin:const EdgeInsets.only(bottom:7),child:ListTile(
+     key:ValueKey('notification-'+item.id),
+     contentPadding:const EdgeInsets.symmetric(horizontal:12,vertical:6),
+     leading:Icon(notificationCategoryIcon(item.category),
+      color:item.unread?Theme.of(context).colorScheme.primary:null),
+     title:Text(item.title,maxLines:2,overflow:TextOverflow.ellipsis,
+      style:TextStyle(fontWeight:item.unread?FontWeight.w700:FontWeight.w500)),
+     subtitle:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+      const SizedBox(height:4),Text(item.body,maxLines:3,overflow:TextOverflow.ellipsis),
+      const SizedBox(height:6),
+      Text(notificationCategoryName(item.category)+' · '+hour(item.created)+
+       (item.groupCount>1?' · '+item.groupCount.toString()+' sự kiện':''),
+       style:Theme.of(context).textTheme.bodySmall)
+     ]),
+     trailing:item.unread?IconButton(tooltip:'Đánh dấu đã đọc',
+      icon:const Icon(Icons.done,size:20),
+      onPressed:()=>unawaited(store.markRead(item))):
+      const Icon(Icons.chevron_right),
+     onTap:opening?null:()=>unawaited(_open(item)),
+    )));
+   }
+   if(store.nextCursor!=null)children.add(Padding(
+    padding:const EdgeInsets.symmetric(vertical:10),
+    child:OutlinedButton.icon(
+     icon:store.paging?const SizedBox(width:16,height:16,
+      child:CircularProgressIndicator(strokeWidth:2)):const Icon(Icons.expand_more),
+     label:const Text('Xem thông báo cũ'),
+     onPressed:store.paging?null:()=>unawaited(store.loadMore()))));
+   return ListView(padding:const EdgeInsets.all(12),children:children);
+  }),
  );
+}
+
+class FieldNotificationSettingsPage extends StatelessWidget{
+ final FieldNotificationStore store;
+ const FieldNotificationSettingsPage({super.key,required this.store});
+ String showTime(int minute)=>(minute~/60).toString().padLeft(2,'0')+':'+
+   (minute%60).toString().padLeft(2,'0');
+ Future<void> pick(BuildContext context,bool start)async{
+  final n=start?store.quietStart:store.quietEnd;
+  final t=await showTimePicker(context:context,initialTime:TimeOfDay(hour:n~/60,minute:n%60));
+  if(t==null)return;
+  await store.setQuietHours(start?t.hour*60+t.minute:store.quietStart,
+   start?store.quietEnd:t.hour*60+t.minute);
+ }
+ Widget item(Map<String,dynamic> entry){
+  final key=entry['category']?.toString()??'';
+  final choice=entry['mode']?.toString()??'off';
+  return ListTile(dense:true,
+   leading:Icon(notificationCategoryIcon(key),size:20),
+   title:Text(notificationCategoryName(key)),
+   subtitle:entry['mandatory']==true?const Text('Bắt buộc giữ trong hộp thư'):null,
+   trailing:DropdownButton<String>(
+    value:const ['immediate','digest','in_app','off'].contains(choice)?choice:'off',
+    onChanged:store.preferencesBusy?null:(v){if(v!=null)unawaited(store.setMode(key,v));},
+    items:const [
+     DropdownMenuItem(value:'immediate',child:Text('Báo ngay')),
+     DropdownMenuItem(value:'digest',child:Text('Tổng hợp')),
+     DropdownMenuItem(value:'in_app',child:Text('Trong app')),
+     DropdownMenuItem(value:'off',child:Text('Tắt'))
+    ]));
+ }
+ @override Widget build(BuildContext context)=>Scaffold(
+  appBar:AppBar(title:const Text('Thiết lập thông báo')),
+  body:AnimatedBuilder(animation:store,builder:(context,_){
+   final active=store.categories.where((r)=>r['producer_enabled']==true).toList();
+   final other=store.categories.where((r)=>r['producer_enabled']!=true).toList();
+   return ListView(padding:const EdgeInsets.all(12),children:[
+    Text('Theo nghiệp vụ',style:Theme.of(context).textTheme.titleMedium),
+    const Padding(padding:EdgeInsets.symmetric(vertical:6),
+     child:Text('Chọn báo ngay, tổng hợp, chỉ trong app hoặc tắt từng nghiệp vụ.')),
+    if(active.isEmpty)const ListTile(title:Text('Thiết lập chưa tải được'),
+     subtitle:Text('Có thể đang offline. Mở lại khi kết nối.')),
+    for(final row in active)item(row),
+    if(other.isNotEmpty)ExpansionTile(
+     title:Text('Nhóm chưa kích hoạt ('+other.length.toString()+')'),
+     children:[for(final row in other)ListTile(
+      title:Text(notificationCategoryName(row['category']?.toString()??'')),
+      subtitle:const Text('Chưa phát thông báo nghiệp vụ'))]),
+    const SizedBox(height:12),
+    Text('Giờ yên lặng · Việt Nam (UTC+7)',style:Theme.of(context).textTheme.titleMedium),
+    Row(children:[
+     Expanded(child:OutlinedButton.icon(
+      icon:const Icon(Icons.bedtime_outlined),
+      label:Text('Từ '+showTime(store.quietStart)),
+      onPressed:store.preferencesBusy?null:()=>unawaited(pick(context,true)))),
+     const SizedBox(width:8),
+     Expanded(child:OutlinedButton.icon(
+      icon:const Icon(Icons.wb_sunny_outlined),
+      label:Text('Đến '+showTime(store.quietEnd)),
+      onPressed:store.preferencesBusy?null:()=>unawaited(pick(context,false)))),
+    ]),
+    const SizedBox(height:5),
+    const Text('Âm thanh, rung và màn hình khóa phụ thuộc quyền hệ điều hành.'),
+    if(store.isAndroid||store.hasBrowserPush)SwitchListTile(
+     title:const Text('Nhận Push trên thiết bị này'),
+     value:store.pushEnabled,
+     onChanged:store.pushBusy?null:(v)=>unawaited(v?store.enablePush():store.disablePush())),
+    ListTile(
+     leading:const Icon(Icons.health_and_safety_outlined),
+     title:const Text('Chẩn đoán và gửi thử'),
+     subtitle:const Text('Tách khỏi hộp thư công việc để tránh thao tác nhầm'),
+     trailing:const Icon(Icons.chevron_right),
+     onTap:()=>Navigator.push(context,MaterialPageRoute(
+       builder:(_)=>FieldNotificationDiagnosticsPage(store:store)))),
+    if(store.error!=null)Text(store.error!,
+     style:TextStyle(color:Theme.of(context).colorScheme.error)),
+   ]);
+  }));
+}
+
+class FieldNotificationDiagnosticsPage extends StatelessWidget{
+ final FieldNotificationStore store;
+ const FieldNotificationDiagnosticsPage({super.key,required this.store});
+ @override Widget build(BuildContext context)=>Scaffold(
+  appBar:AppBar(title:const Text('Chẩn đoán Push')),
+  body:AnimatedBuilder(animation:store,builder:(context,_)=>
+   ListView(padding:const EdgeInsets.all(14),children:[
+    ListTile(leading:const Icon(Icons.notifications_outlined),
+     title:Text(store.pushEnabled?'Thiết bị đã đăng ký Push':'Chưa bật Push trên thiết bị')),
+    if(store.isAndroid)Card(child:Padding(padding:const EdgeInsets.all(12),
+     child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+      if(store.androidDiagnostics['sound']==false||
+       ((store.androidDiagnostics['importance'] as int?)??4)<4)
+        const Text('Android đang tắt âm thanh hoặc banner nổi.'),
+      if((store.androidDiagnostics['receivedAt'] as int? ??0)>0)
+       Text('FCM gần nhất tại máy: '+
+        DateTime.fromMillisecondsSinceEpoch(store.androidDiagnostics['receivedAt'] as int).toLocal().toString()),
+      TextButton.icon(icon:const Icon(Icons.music_note),
+       onPressed:store.pushEnabled?()=>unawaited(store.localAndroidTest()):null,
+       label:const Text('Thử âm thanh trên máy')),
+      TextButton.icon(icon:const Icon(Icons.settings_outlined),
+       onPressed:()=>unawaited(store.androidSettings()),
+       label:const Text('Cài đặt Android')),
+     ]))),
+    if(store.pushReport!=null)Text(store.pushReport!),
+    FilledButton.icon(icon:const Icon(Icons.send_outlined),
+     onPressed:()=>unawaited(store.sendTest()),
+     label:const Text('Gửi thử từ máy chủ tới tài khoản của tôi')),
+    const SizedBox(height:8),
+    const Text('FCM chấp nhận yêu cầu không bảo đảm thiết bị đã hiển thị thông báo trên màn hình khóa.'),
+    if(store.error!=null)Text(store.error!,
+     style:TextStyle(color:Theme.of(context).colorScheme.error)),
+   ])));
 }
