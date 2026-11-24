@@ -4,7 +4,7 @@ import 'package:sales_mien_tay/offline_queue.dart';
 import 'package:sales_mien_tay/offline_factory.dart';
 import 'package:sales_mien_tay/session.dart';
 
-import '../test/bulk_replay_fixture.dart';
+import 'bulk_replay_fixture.dart';
 
 void main(){
  test('L5 real Chrome IndexedDB bulk offline recovery',
