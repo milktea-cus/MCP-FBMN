@@ -26,6 +26,18 @@ class CountedFailure extends SalesSession{
  }
 }
 void main(){
+ test('L3 successful prospect creation is cached atomically before clearing outbox',()async{
+  final session=ReadyForSync(),factory=newIdbFactoryMemory();
+  const id='11111111-1111-4111-8111-111111111111';
+  final network=MockClient((req)async=>http.Response(jsonEncode({'item':{'id':id,'name':'Điểm bán','status':'new','version':1}}),201,headers:{'content-type':'application/json'}));
+  final q=OfflineQueue(session,'retry-user','8',factory:factory,networkClient:network);
+  await q.enqueue('/api/v1/market-prospects',{'client_ref':id,'name':'Điểm bán'});
+  await q.sync();expect(q.pending,isEmpty);
+  final restart=OfflineQueue(session,'retry-user','8',factory:factory);
+  expect((await restart.cached(OfflineQueue.prospectReceiptCache)).single['id'],id);
+  q.dispose();restart.dispose();network.close();
+ });
+
  test('L3 two queue instances cannot send the same operation concurrently',()async{
   final factory=newIdbFactoryMemory(),session=ReadyForSync();
   final entered=Completer<void>(),release=Completer<void>();

@@ -235,6 +235,44 @@ class OfflineQueue extends ChangeNotifier {
   final d=await db;final t=d.transaction('outbox',idbModeReadWrite);final store=t.objectStore('outbox');
   if(await store.getObject(row['key'] as String)!=null)await store.put(row);await t.completed;
  }
+ static const prospectReceiptCache='market-prospects:confirmed:v1';
+ bool _isProspectRecordWrite(Map<String,dynamic> row){
+  final path=row['path']?.toString()??'';
+  return path=='/api/v1/market-prospects'||
+   RegExp(r'^/api/v1/market-prospects/[a-f0-9-]{36}(?:/(?:convert|close))?$').hasMatch(path);
+ }
+ Future<void> _ackProspect(Map<String,dynamic> row,Map<String,dynamic> saved)async{
+  final expected=row['path']=='/api/v1/market-prospects'
+   ?(row['payload'] as Map)['client_ref']?.toString():row['path'].toString().split('/')[4];
+  if(saved['id']?.toString()!=expected||saved['version'] is! num||
+     !['new','closed','converted'].contains(saved['status'])){
+   throw StateError('Máy chủ chưa xác nhận đúng điểm bán');
+  }
+  final d=await db,t=d.transactionList(['cache','outbox'],idbModeReadWrite);
+  final store=t.objectStore('cache'),key='$namespace:$prospectReceiptCache';
+  final raw=await store.getObject(key);
+  final records=(raw is Map&&raw['items'] is List?(raw['items'] as List).whereType<Map>().map((v)=>Map<String,dynamic>.from(v)).toList():<Map<String,dynamic>>[]);
+  final old=records.where((r)=>r['id']==saved['id']).firstOrNull;
+  records.removeWhere((r)=>r['id']==saved['id']);
+  records.add({...?old,...saved,'confirmed_at':DateTime.now().millisecondsSinceEpoch});
+  if(records.length>100)records.removeRange(0,records.length-100);
+  await store.put({'key':key,'items':records});
+  await t.objectStore('outbox').delete(row['key'] as String);
+  await t.completed;
+ }
+ Future<bool> _ackProspectPatchConflict(Map<String,dynamic> row)async{
+  if(row['method']!='PATCH'||!_isProspectRecordWrite(row))return false;
+  final payload=row['payload'] as Map;
+  final response=await session.get(row['path'] as String);
+  final saved=response['item'];
+  if(saved is! Map||saved['status']!='new'||saved['version'] is! num||
+    payload['version'] is! num||(saved['version'] as num)<=(payload['version'] as num))return false;
+  // A lost response can be acknowledged only when every edited field matches.
+  for(final field in ['name','address_line','category','phone','tax_code','note']){
+   if((saved[field]??'').toString()!=(payload[field]??'').toString())return false;
+  }
+  await _ackProspect(row,Map<String,dynamic>.from(saved));return true;
+ }
  Future<void> _remove(String key) async{
   final d=await db;
   final t=d.transaction('outbox',idbModeReadWrite);
@@ -1185,12 +1223,20 @@ class OfflineQueue extends ChangeNotifier {
        await _ackSellingUpdate(row,Map<String,dynamic>.from(saved));
      }else if(row['session_id']!=null){
       await _ackSurvey(row,item);
+     }else if(_isProspectRecordWrite(row)){
+      final saved=result['item'];if(saved is! Map)throw StateError('Thiếu xác nhận điểm bán từ máy chủ');
+      await _ackProspect(row,Map<String,dynamic>.from(saved));
      }else{
       await _remove(row['key'] as String);
      }
      lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;
     }catch(e){
      final path=row['path']?.toString()??'';
+     if(e is ApiFailure&&e.status==409&&row['method']=='PATCH'&&_isProspectRecordWrite(row)){
+      try{if(await _ackProspectPatchConflict(row)){
+       lastSuccessAt=DateTime.now();transientFailures=0;nextRetryAt=null;continue;
+      }}catch(_){}
+     }
      if(e is ApiFailure&&e.status==409&&row['method']=='PATCH'&&
        RegExp(r'^/api/v1/day-routes/[a-f0-9-]{36}$',
         caseSensitive:false).hasMatch(path)){
@@ -1223,7 +1269,7 @@ class OfflineQueue extends ChangeNotifier {
        }
       }catch(_){}
      }
-     final blocked=e is ApiFailure&&[400,401,403,404,409,413,415,422].contains(e.status);
+     final blocked=e is ApiFailure&&[400,401,403,404,405,409,410,413,415,422].contains(e.status);
      await _updateIfPresent({...row,
       'status':blocked?'blocked':'pending',
       'attempts':((row['attempts'] as num?)?.toInt()??0)+1,
@@ -1231,6 +1277,10 @@ class OfflineQueue extends ChangeNotifier {
       'last_error_at':DateTime.now().toIso8601String(),
      });
      error='${describe(row)}: ${describeFailure(e)}';
+     if(e is ApiFailure&&(e.status==401||e.status==403)){
+      // Scope/session failure must stop this pass. Other drafts remain intact.
+      nextRetryAt=DateTime.now().add(const Duration(minutes:5));break;
+     }
      if(!blocked){
       transientFailures++;
       nextRetryAt=DateTime.now().add(retryDelay);

@@ -54,7 +54,7 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
       try{await widget.queue.cache('schools:areas:v1',rows);}catch(_){}
     }on ApiFailure catch(e){
       if(e.status==401||e.status==403){
-        if(mounted)setState((){areas={};schools.clear();more=false;total=0;loading=false;error=e.message;});
+        if(mounted)setState((){areas={};province='';district='';schools.clear();more=false;total=0;loading=false;error=e.message;});
         try{await widget.queue.revokeDirectory('schools');}catch(_){}
         return;
       }
@@ -71,7 +71,7 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
       values[p]=((row['districts'] as List?)??[])
           .map((value)=>value.toString()).toSet().toList()..sort();
     }
-    setState(()=>areas=values);
+    setState((){areas=values;if(!values.containsKey(province)){province='';district='';}else if(!values[province]!.contains(district)){district='';}});
   }
 
   String _cacheKey(int next)=>
@@ -92,7 +92,7 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
   }
 
   Future<void> _load({bool loadMore=false})async{
-    if(loading&&loadMore)return;
+    if(!mounted||(loading&&loadMore))return;
     final request=++generation;
     final next=loadMore?page+1:1;
     final chosenProvince=province,chosenDistrict=district,
@@ -104,15 +104,16 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
     final key=_cacheKey(next);
     final base=loadMore?List<Map<String,dynamic>>.of(schools):<Map<String,dynamic>>[];
     var hasCached=false;
-    if(chosenSearch.isEmpty && next<=3){
+    if(next<=3){
       try{
         final saved=await widget.queue.directoryPage(key);
         if(!mounted||request!=generation)return;
         if(saved!=null){
           final rows=(saved['items'] as List).whereType<Map>().map((v)=>Map<String,dynamic>.from(v)).toList();
           hasCached=true;
-          _apply(rows,next,base:base,isOffline:true,
-            reportedTotal:(saved['total'] as num?)?.toInt(),
+          final matches=chosenSearch.isEmpty?rows:rows.where((r)=>r['name'].toString().toLowerCase().contains(chosenSearch.toLowerCase())).toList();
+          _apply(matches,next,base:base,isOffline:true,
+            reportedTotal:chosenSearch.isEmpty?(saved['total'] as num?)?.toInt():null,
             hasMore:next<3&&(saved['has_more'] as bool? ??rows.length==pageSize));
         }
       }catch(_){}
@@ -142,16 +143,16 @@ class _SchoolDirectoryPageState extends State<SchoolDirectoryPage> {
       setState((){
         loading=false;offline=true;
         if(e.status==401||e.status==403){
-          schools.clear();areas={};more=false;total=0;hasCached=false;
+          schools.clear();areas={};province='';district='';more=false;total=0;hasCached=false;
         }
-        error=hasCached?'Không có mạng, đang xem dữ liệu đã lưu.':e.message;
+        error=hasCached?(chosenSearch.isEmpty?'Không có mạng, đang xem dữ liệu đã lưu.':'Ngoại tuyến · chỉ tìm trong trang đã lưu.'):e.message;
       });
       if(e.status==401||e.status==403){try{await widget.queue.revokeDirectory('schools');}catch(_){}}
     }catch(_){
       if(!mounted||request!=generation)return;
       setState((){
         loading=false;offline=true;
-        error=hasCached?'Không có mạng, đang xem dữ liệu đã lưu.':
+        error=hasCached?(chosenSearch.isEmpty?'Không có mạng, đang xem dữ liệu đã lưu.':'Ngoại tuyến · chỉ tìm trong trang đã lưu.'):
           'Không tải được trường học. Hãy thử lại khi có mạng.';
       });
     }

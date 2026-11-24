@@ -30,7 +30,8 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
  Timer? debounce;
  String province='',district='',wardNew='',status='';
  List<String> availableWards=[];
- List<Map<String,dynamic>> items=[];
+ List<Map<String,dynamic>> items=[],confirmed=[];
+ bool denied=false;
  int page=0,total=0,generation=0;
  bool loading=false,offline=false,more=false;
  String? error;
@@ -64,7 +65,12 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
   final base=append?List<Map<String,dynamic>>.of(items):<Map<String,dynamic>>[];
   setState((){loading=true;error=null;if(!append){items=[];page=0;total=0;more=false;}});
   bool cached=false;
-  if(q.isEmpty&&next<=3)try{
+  try{
+   final receipts=await widget.queue.cached(OfflineQueue.prospectReceiptCache);
+   if(!mounted||generation!=token)return;
+   setState(()=>confirmed=receipts);
+  }catch(_){}
+  if(next<=3)try{
    final saved=await widget.queue.directoryPage(key);
    if(!mounted||generation!=token)return;
    if(saved!=null){
@@ -72,7 +78,8 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
     cached=true;
     total=(saved['total'] as num?)?.toInt()??0;
     availableWards=(saved['wards'] as List? ??[]).whereType<String>().toList();
-    _apply(rows,next,base:base,local:true,hasMore:next<3&&(saved['has_more'] as bool? ??rows.length==20));
+    final matches=q.isEmpty?rows:rows.where((r)=>r['name'].toString().toLowerCase().contains(q.toLowerCase())).toList();
+    _apply(matches,next,base:base,local:true,hasMore:next<3&&(saved['has_more'] as bool? ??rows.length==20));
    }
   }catch(_){}
   try{
@@ -91,21 +98,22 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
    total=(data['total'] as num?)?.toInt()??0;
    availableWards=(data['wards'] as List? ??const [])
     .map((v)=>v.toString()).where((v)=>v.isNotEmpty).toSet().toList()..sort();
+   denied=false;
    _apply(rows,next,base:base,local:false,hasMore:data['hasMore']==true);
    if(q.isEmpty&&next<=3){try{await widget.queue.cacheDirectoryPage(key,rows,total:total,hasMore:data['hasMore']==true,wards:availableWards);}catch(_){}}
   }on ApiFailure catch(e){
    if(!mounted||generation!=token)return;
    setState((){
     loading=false;offline=true;
-    if(e.status==401||e.status==403){items.clear();availableWards=[];more=false;total=0;cached=false;}
-    error=cached?'Đang xem dữ liệu đã lưu trên máy':e.message;
+    if(e.status==401||e.status==403){denied=true;items.clear();confirmed=[];availableWards=[];more=false;total=0;cached=false;}
+    error=cached?(q.isEmpty?'Đang xem dữ liệu đã lưu trên máy':'Ngoại tuyến · chỉ tìm trong trang đã lưu.'):e.message;
    });
    if(e.status==401||e.status==403){try{await widget.queue.revokeDirectory('market-prospects');}catch(_){}}
   }catch(_){
    if(!mounted||generation!=token)return;
    setState((){
     loading=false;offline=true;
-    error=cached?'Đang xem dữ liệu đã lưu trên máy':'Không tải được danh sách';
+    error=cached?(q.isEmpty?'Đang xem dữ liệu đã lưu trên máy':'Ngoại tuyến · chỉ tìm trong trang đã lưu.'):'Không tải được danh sách';
    });
   }
  }
@@ -592,7 +600,22 @@ class _MarketProspectsPageState extends State<MarketProspectsPage>{
    ])));
  }
  @override Widget build(BuildContext context){
-  final all=[...pendingNew,...items.where((i)=>!pendingNew.any((p)=>p['id']==i['id']))];
+  final local=<String,Map<String,dynamic>>{for(final r in items)r['id'].toString():r};
+  // Only overlay server acknowledgements while offline. Online list is authoritative.
+  if(offline&&!denied){
+   for(final r in confirmed){
+    final id=r['id'].toString(),old=local[id];
+    if(old!=null&&((old['version'] as num?)??0)>((r['version'] as num?)??0))continue;
+    if((province.isEmpty||r['province']==province)&&
+      (district.isEmpty||r['district']==district)&&(wardNew.isEmpty||r['ward_new']==wardNew)&&
+      (status.isEmpty||r['status']==status)&&(widget.initialSchool==null||r['school_id']==widget.initialSchool!['id'])&&
+      (search.text.trim().isEmpty||r['name'].toString().toLowerCase().contains(search.text.trim().toLowerCase()))){
+     local[id]={...?old,...r};
+    }else{local.remove(id);}
+   }
+  }
+  final drafts=denied?<Map<String,dynamic>>[]:pendingNew;
+  final all=[...drafts,...local.values.where((i)=>!drafts.any((p)=>p['id']==i['id']))];
    final wards=[...availableWards];
    if(wardNew.isNotEmpty&&!wards.contains(wardNew))wards.add(wardNew);
    wards.sort();
