@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validateAttachments,renderBrandedMail,SIGNATURE_TEMPLATE} from '../src/mail.ts';
+import {validateAttachments,renderBrandedMail,SIGNATURE_TEMPLATE,attachmentRoute,parseMailBody,mailProviderStatus} from '../src/mail.ts';
 
 const file=(name='invoice.pdf',bytes='aGVsbG8=')=>({filename:name,content:bytes});
 
@@ -19,7 +19,11 @@ test('published Resend signature centrally brands outbound HTML without trusting
  assert.match(rendered.html,/FUTUREBOOK MIỀN NAM/);
  assert.match(rendered.html,/&lt;script&gt;/);
  assert.doesNotMatch(rendered.html,/<script>/);
- assert.match(rendered.html,/Lần 2/);
+ assert.match(rendered.html,/&lt;\/script&gt;<br>Lần 2/);
+ assert.equal(rendered.text,'Xin chào <script>alert(1)</script>\nLần 2\n\n'+template.text);
+ for(const tag of ['script','iframe','form','object','embed']){
+  assert.equal(renderBrandedMail('Hello',{...template,html:template.html.replace(footer,footer+'<'+tag+'>x</'+tag+'>')}),null);
+ }
  assert.equal(rendered.html.split('FUTUREBOOK MIỀN NAM').length,2);
  assert.match(rendered.text,/info@fbmn.vn/);
  assert.equal(renderBrandedMail('Xin chào',{...template,status:'draft'}),null);
@@ -45,4 +49,25 @@ test('total attachment bytes are limited, including multiple files',()=>{
  assert.equal(validateAttachments([file('oversize.pdf',oversized)]),null);
  const threeMeg='Y'.repeat(4*1024*1024); // 3 MiB
  assert.equal(validateAttachments([file('a.pdf',threeMeg),file('b.pdf',threeMeg)]),null);
+});
+
+test('attachment route validates exactly three identifiers for web and native',()=>{
+ const id='11111111-1111-4111-8111-111111111111';
+ const path='/api/v1/mail/threads/'+id+'/emails/'+id+'/attachments/'+id;
+ assert.deepEqual(attachmentRoute(path),{thread:id,email:id,attachment:id,redirect:false});
+ assert.equal(attachmentRoute(path+'/download')?.redirect,true);
+ assert.equal(attachmentRoute(path.replace(id,'invalid')),null);
+});
+test('reply and send share the same bounded JSON envelope including a 5 MiB attachment',()=>{
+ const content=Buffer.alloc(5*1024*1024,65).toString('base64');
+ const raw=JSON.stringify({text:'reply',request_id:'11111111-1111-4111-8111-111111111111',attachments:[file('large.pdf',content)]});
+ const body=parseMailBody(raw);
+ assert.ok(body);assert.equal(validateAttachments(body.attachments)?.length,1);
+ assert.equal(parseMailBody('[]'),null);
+ assert.equal(parseMailBody('null'),null);
+ assert.equal(parseMailBody('x'.repeat(9*1024*1024+1)),null);
+});
+test('provider resource errors are distinct from app authentication failures',()=>{
+ for(const status of [400,404,409,413,415,422,429])assert.equal(mailProviderStatus(status),status);
+ for(const status of [401,403,500,502])assert.equal(mailProviderStatus(status),503);
 });

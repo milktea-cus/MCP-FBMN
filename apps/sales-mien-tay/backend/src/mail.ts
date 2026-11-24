@@ -62,12 +62,29 @@ export function renderBrandedMail(body:string,template:Record<string,unknown>):{
  if(i<0||j<=i+begin.length||raw.indexOf(begin,i+begin.length)>=0||
    raw.indexOf(finish,j+finish.length)>=0)return null;
  const footer=raw.slice(i+begin.length,j).trim();
- if(footer.length<100||/<script\\b|<iframe\\b|<form\\b/i.test(footer))return null;
- const safeBody=escapeHtml(body.trim()).replace(/\\r?\\n/g,'<br>');
+ if(footer.length<100||/<\s*\/?\s*(?:script|iframe|form|object|embed)\b/i.test(footer))return null;
+ const safeBody=escapeHtml(body.trim()).replace(/\r\n|\r|\n/g,'<br>');
  const html='<!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"></head>'+
   '<body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#26213a;">'+
   '<p style="white-space:normal;margin-bottom:16px;">'+safeBody+'</p>'+footer+'</body></html>';
- return {html,text:body.trimEnd()+'\\n\\n'+plain.trim()};
+ return {html,text:body.trimEnd()+'\n\n'+plain.trim()};
+}
+// Only the three UUID captures belong to the attachment identity.
+export function attachmentRoute(path:string){
+ const match=/^\/api\/v1\/mail\/threads\/([0-9a-f-]{36})\/emails\/([0-9a-f-]{36})\/attachments\/([0-9a-f-]{36})(\/download)?$/i.exec(path);
+ if(!match||match.slice(1,4).some(id=>!uuid.test(id)))return null;
+ return {thread:match[1],email:match[2],attachment:match[3],redirect:!!match[4]};
+}
+export function parseMailBody(raw:string):Record<string,unknown>|null{
+ if(raw.length>MAX_BODY_CHARS)return null;
+ try{const data=JSON.parse(raw);return data&&typeof data==='object'&&!Array.isArray(data)?data:null;}catch{return null;}
+}
+// Provider auth failures are infrastructure failures, NOT app-session rejection.
+export function mailProviderStatus(status:number):number{
+ return [400,404,409,413,415,422,429].includes(status)?status:503;
+}
+function pageCursor(items:Record<string,unknown>[],more:boolean):string|null{
+ const last=items.at(-1)?.id;return more&&typeof last==='string'&&uuid.test(last)?last:null;
 }
 type ResendResult={status:number;data:Record<string,unknown>|null};
 async function provider(env:MailEnv,path:string,method:'GET'|'POST'|'PATCH'='GET',body?:unknown,idempotency?:string):Promise<ResendResult>{
@@ -89,7 +106,7 @@ async function provider(env:MailEnv,path:string,method:'GET'|'POST'|'PATCH'='GET
    signal:AbortSignal.timeout(method==='POST'?25000:12000)
   });
   if(!resp.ok||!resp.headers.get('content-type')?.includes('application/json'))
-   return {status:resp.status===429?429:503,data:null};
+   return {status:mailProviderStatus(resp.status),data:null};
   const text=await resp.text();
   if(text.length>1000000)return {status:503,data:null};
   const data=JSON.parse(text);
@@ -144,18 +161,25 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
   if(!result.data)return fail('Cổng email chưa sẵn sàng',result.status);
   const items=result.data.data;
   if(!Array.isArray(items))return fail('Phản hồi hộp thư không hợp lệ',503);
-  return json({mailbox:assigned,items:items.map(v=>view(v as Record<string,unknown>)),
-    has_more:result.data.has_more===true});
+  const rows=items.map(v=>view(v as Record<string,unknown>));
+  const next=pageCursor(rows,result.data.has_more===true);
+  return json({mailbox:assigned,items:rows,has_more:next!==null,next_cursor:next});
  }
  const thread=/^\/api\/v1\/mail\/threads\/([0-9a-f-]{36})$/i.exec(url.pathname);
  if(thread&&req.method==='GET'){
   if(!uuid.test(thread[1]))return fail('Mã thư không hợp lệ');
-  const result=await provider(env,`/inboxes/${box}/threads/${thread[1]}`);
+  const after=url.searchParams.get('after');
+  if(after!==null&&!uuid.test(after))return fail('Phân trang hội thoại không hợp lệ');
+  const q=new URLSearchParams({limit:'100'});if(after)q.set('after',after);
+  const [result,page]=await Promise.all([
+   provider(env,`/inboxes/${box}/threads/${thread[1]}`),
+   provider(env,`/inboxes/${box}/threads/${thread[1]}/emails?${q}`)
+  ]);
   if(!result.data)return fail('Không mở được hội thoại',result.status);
-  const page=await provider(env,`/inboxes/${box}/threads/${thread[1]}/emails?limit=100`);
   if(!page.data||!Array.isArray(page.data.data))return fail('Không tải được danh sách thư trong hội thoại',page.status);
-  return json({thread:view(result.data),emails:page.data.data.map(v=>view(v as Record<string,unknown>)),
-   has_more:page.data.has_more===true});
+  const rows=page.data.data.map(v=>view(v as Record<string,unknown>));
+  const next=pageCursor(rows,page.data.has_more===true);
+  return json({thread:view(result.data),emails:rows,has_more:next!==null,next_cursor:next});
  }
  const letter=/^\/api\/v1\/mail\/threads\/([0-9a-f-]{36})\/emails\/([0-9a-f-]{36})$/i.exec(url.pathname);
  if(letter&&req.method==='GET'){
@@ -166,18 +190,17 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
  }
  // No globally scoped Resend attachment lookup is allowed until a message
  // and the attachment's ID have been resolved inside this employee's inbox.
- const download=/^\/api\/v1\/mail\/threads\/([0-9a-f-]{36})\/emails\/([0-9a-f-]{36})\/attachments\/([0-9a-f-]{36})(\/download)?$/i.exec(url.pathname);
+ const download=attachmentRoute(url.pathname);
  if(download&&req.method==='GET'){
-  if(download.slice(1).some(id=>!uuid.test(id)))return fail('Mã tệp không hợp lệ');
-  const item=await provider(env,`/inboxes/${box}/threads/${download[1]}/emails/${download[2]}`);
+  const item=await provider(env,`/inboxes/${box}/threads/${download.thread}/emails/${download.email}`);
   if(!item.data)return fail('Không được truy cập tệp này',404);
   const matches=Array.isArray(item.data.attachments)&&item.data.attachments.some((a:unknown)=>
-   !!a&&typeof a==='object'&&(a as Record<string,unknown>).id===download[3]);
+   !!a&&typeof a==='object'&&(a as Record<string,unknown>).id===download.attachment);
   if(!matches)return fail('Tệp không thuộc email đã chọn',404);
   const receiving=item.data.direction==='inbound';
   const target=receiving?
-   `/emails/receiving/${download[2]}/attachments/${download[3]}`:
-   `/emails/${download[2]}/attachments/${download[3]}`;
+   `/emails/receiving/${download.email}/attachments/${download.attachment}`:
+   `/emails/${download.email}/attachments/${download.attachment}`;
   const file=await provider(env,target);
   if(!file.data||typeof file.data.download_url!=='string')
    return fail('Tệp chưa sẵn sàng để tải',503);
@@ -185,7 +208,7 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
   try{safe=new URL(file.data.download_url);}catch{return fail('Liên kết tệp không hợp lệ',503);}
   if(safe.protocol!=='https:'||safe.username||safe.password)
    return fail('Liên kết tệp không an toàn',503);
-  if(download[4]==='/download'){
+  if(download.redirect){
    // Same-origin browser navigation keeps the HttpOnly session cookie intact,
    // while the redirect points only to the short-lived Resend signed URL.
    return new Response(null,{status:302,headers:{
@@ -205,12 +228,8 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
  const reply=/^\/api\/v1\/mail\/threads\/([0-9a-f-]{36})\/emails\/([0-9a-f-]{36})\/reply$/i.exec(url.pathname);
  if(reply&&req.method==='POST'){
   if(!uuid.test(reply[1])||!uuid.test(reply[2]))return fail('Mã thư không hợp lệ');
-  let data:Record<string,unknown>;
-  try{
-   const raw=await req.text();
-   if(raw.length>60000)throw Error('limit');
-   data=JSON.parse(raw);
-  }catch{return fail('Nội dung trả lời không hợp lệ');}
+  if(!req.headers.get('content-type')?.startsWith('application/json'))return fail('Chỉ hỗ trợ JSON',415);
+  const data=parseMailBody(await req.text());
   if(!data||typeof data!=='object'||Array.isArray(data)||
    Object.keys(data).some(k=>!['text','request_id','attachments'].includes(k))||
    typeof data.text!=='string'||!data.text.trim()||data.text.length>12000||
@@ -228,13 +247,8 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
  }
  if(url.pathname==='/api/v1/mail/send'&&req.method==='POST'){
   if(!req.headers.get('content-type')?.startsWith('application/json'))return fail('Chỉ hỗ trợ JSON',415);
-  let payload:Record<string,unknown>;
-  try{
-   const raw=await req.text();
-   if(raw.length>MAX_BODY_CHARS)throw Error('limit');
-   payload=JSON.parse(raw);
-   if(!payload||typeof payload!=='object'||Array.isArray(payload))throw Error('shape');
-  }catch{return fail('Nội dung email không hợp lệ');}
+  const payload=parseMailBody(await req.text());
+  if(!payload)return fail('Nội dung email không hợp lệ');
   if(Object.keys(payload).some(k=>!['to','subject','text','request_id','attachments'].includes(k))||
    typeof payload.to!=='string'||!email.test(payload.to)||
    typeof payload.subject!=='string'||!payload.subject.trim()||

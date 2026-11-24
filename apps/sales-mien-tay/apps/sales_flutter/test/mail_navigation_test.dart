@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sales_mien_tay/mail_page.dart';
@@ -38,7 +39,51 @@ class FakeMailSession extends SalesSession {
 
 }
 
+const otherThread='44444444-4444-4444-8444-444444444444';
+const otherEmail='55555555-5555-4555-8555-555555555555';
+class PagingMailSession extends FakeMailSession{
+ final slow=Completer<Map<String,dynamic>>();
+ final reads=<String>[];
+ @override Future<Map<String,dynamic>> get(String path)async{
+  if(path=='/api/v1/mail/threads?folder=inbox')return {
+   'items':[{'id':threadId,'subject':'Hội thoại đầu'}],'has_more':true,'next_cursor':threadId};
+  if(path=='/api/v1/mail/threads?folder=inbox&after=$threadId')return {
+   'items':[{'id':threadId,'subject':'Hội thoại đầu'},{'id':otherThread,'subject':'Hội thoại sau'}],'has_more':false};
+  if(path=='/api/v1/mail/threads/$threadId')return {
+   'emails':[{'id':emailId,'subject':'Thư chậm'},{'id':otherEmail,'subject':'Thư nhanh'}],
+   'has_more':true,'next_cursor':otherEmail};
+  if(path=='/api/v1/mail/threads/$threadId?after=$otherEmail')return {
+   'emails':[{'id':fileId,'subject':'Thư trang tiếp'}],'has_more':false};
+  if(path=='/api/v1/mail/threads/$threadId/emails/$emailId')return slow.future;
+  if(path=='/api/v1/mail/threads/$threadId/emails/$otherEmail')return {
+   'item':{'id':otherEmail,'subject':'Thư nhanh','text':'Nội dung đúng'}};
+  return super.get(path);
+ }
+ @override Future<Map<String,dynamic>> post(String path,Map<String,dynamic> data)async{
+  reads.add(path);return super.post(path,data);
+ }
+}
 void main(){
+ testWidgets('mail pagination merges IDs and stale message completion cannot overwrite current mail',(tester)async{
+  final session=PagingMailSession();
+  await tester.pumpWidget(MaterialApp(home:StaffMailPage(session:session)));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Tải thêm hội thoại'));await tester.pumpAndSettle();
+  expect(find.text('Hội thoại đầu'),findsOneWidget);
+  expect(find.text('Hội thoại sau'),findsOneWidget);
+  await tester.tap(find.text('Hội thoại đầu'));await tester.pumpAndSettle();
+  await tester.tap(find.text('Tải thêm thư'));await tester.pumpAndSettle();
+  expect(find.text('Thư trang tiếp'),findsOneWidget);
+  await tester.tap(find.text('Thư chậm'));await tester.pump();
+  await tester.tap(find.text('Thư nhanh'));await tester.pumpAndSettle();
+  expect(find.text('Nội dung đúng'),findsOneWidget);
+  session.slow.complete({'item':{'id':emailId,'text':'Nội dung cũ'}});
+  await tester.pumpAndSettle();
+  expect(find.text('Nội dung cũ'),findsNothing);
+  expect(find.text('Nội dung đúng'),findsOneWidget);
+  expect(session.reads.length,1);
+ });
+
  testWidgets('read view has visible back and reply; reply returns to thread',(tester) async {
   tester.view.physicalSize=const Size(390,844);
   tester.view.devicePixelRatio=1;

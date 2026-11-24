@@ -17,66 +17,103 @@ class StaffMailPage extends StatefulWidget {
 
 class _StaffMailPageState extends State<StaffMailPage>{
  bool busy=true;
- String? error,mailbox,selectedFolder,selectedThread;
+ int generation=0;
+ String? error,mailbox,selectedFolder,selectedThread,threadCursor,messageCursor;
  List<Map<String,dynamic>> threads=[],messages=[];
  Map<String,dynamic>? selectedMail;
+ bool current(int token)=>mounted&&generation==token;
+ List<Map<String,dynamic>> rows(dynamic value)=>(value as List? ?? [])
+   .whereType<Map>().map((v)=>Map<String,dynamic>.from(v)).toList();
+ List<Map<String,dynamic>> merge(List<Map<String,dynamic>> old,List<Map<String,dynamic>> fresh)=>
+   {for(final row in [...old,...fresh])row['id'].toString():row}.values.toList();
+ String? cursor(Map<String,dynamic> result,List<Map<String,dynamic>> page,String? previous){
+  if(result['has_more']!=true||page.isEmpty)return null;
+  final next=result['next_cursor']?.toString()??page.last['id']?.toString();
+  return next==null||next==previous?null:next;
+ }
  @override void initState(){super.initState();unawaited(_loadInitial());}
  Future<void> _loadInitial()async{
+  final first=generation+1;
   await load();
   final thread=widget.initialThreadId;
-  if(mounted&&thread!=null&&RegExp(r'^[0-9a-f-]{36}$',caseSensitive:false).hasMatch(thread))
+  if(current(first)&&thread!=null&&RegExp(r'^[0-9a-f-]{36}$',caseSensitive:false).hasMatch(thread))
    await openThread(thread);
  }
- Future<void> load({String folder='inbox'})async{
-  if(!mounted)return;
-  setState((){busy=true;error=null;selectedFolder=folder;selectedThread=null;selectedMail=null;});
+ Future<void> load({String folder='inbox',bool more=false})async{
+  if(!mounted||more&&(busy||threadCursor==null||selectedThread!=null))return;
+  final after=more?threadCursor:null,token=++generation;
+  setState((){
+   busy=true;error=null;selectedFolder=folder;selectedThread=null;selectedMail=null;
+   messages=[];messageCursor=null;
+   if(!more){threads=[];threadCursor=null;}
+  });
   try{
-   final me=await widget.session.get('/api/v1/mail/me');
-   final result=await widget.session.get('/api/v1/mail/threads?folder=$folder');
-   if(mounted)setState((){
-    mailbox=me['mailbox']?.toString();
-    threads=(result['items'] as List? ?? []).whereType<Map>()
-      .map((v)=>Map<String,dynamic>.from(v)).toList();
+   final me=mailbox==null?await widget.session.get('/api/v1/mail/me'):null;
+   final result=await widget.session.get('/api/v1/mail/threads?folder=$folder'+(after==null?'':'&after=$after'));
+   if(!current(token))return;
+   final page=rows(result['items']);
+   setState((){
+    if(me!=null)mailbox=me['mailbox']?.toString();
+    threads=merge(more?threads:[],page);
+    threadCursor=cursor(result,page,after);
    });
-  }catch(e){if(mounted)setState(()=>error=e.toString());}
-  finally{if(mounted)setState(()=>busy=false);}
+  }catch(e){if(current(token))setState(()=>error=e.toString());}
+  finally{if(current(token))setState(()=>busy=false);}
  }
- Future<void> openThread(String id)async{
-  setState((){busy=true;error=null;selectedThread=id;messages=[];selectedMail=null;});
+ Future<void> openThread(String id,{bool more=false})async{
+  if(!mounted||more&&(busy||messageCursor==null||selectedThread!=id))return;
+  final after=more?messageCursor:null,token=++generation;
+  setState((){
+   busy=true;error=null;selectedThread=id;selectedMail=null;
+   if(!more){messages=[];messageCursor=null;}
+  });
   try{
-   final result=await widget.session.get('/api/v1/mail/threads/$id');
-   if(mounted)setState(()=>messages=(result['emails'] as List? ?? [])
-      .whereType<Map>().map((v)=>Map<String,dynamic>.from(v)).toList());
-  }catch(e){if(mounted)setState(()=>error=e.toString());}
-  finally{if(mounted)setState(()=>busy=false);}
+   final result=await widget.session.get('/api/v1/mail/threads/$id'+(after==null?'':'?after=$after'));
+   if(!current(token))return;
+   final page=rows(result['emails']);
+   setState((){
+    messages=merge(more?messages:[],page);
+    messageCursor=cursor(result,page,after);
+   });
+  }catch(e){if(current(token))setState(()=>error=e.toString());}
+  finally{if(current(token))setState(()=>busy=false);}
  }
  Future<void> openMessage(String id)async{
-  if(selectedThread==null)return;
-  setState(()=>busy=true);
+  final thread=selectedThread;
+  if(!mounted||thread==null)return;
+  final token=++generation;
+  setState((){busy=true;error=null;selectedMail=null;});
   try{
-   final result=await widget.session.get('/api/v1/mail/threads/$selectedThread/emails/$id');
-   if(mounted)setState(()=>selectedMail=Map<String,dynamic>.from(result['item'] as Map));
-   try{await widget.session.post('/api/v1/mail/threads/$selectedThread/read',{});}catch(_){/* Reading remains possible if the receipt fails. */}
-  }catch(e){if(mounted)setState(()=>error=e.toString());}
-  finally{if(mounted)setState(()=>busy=false);}
+   final result=await widget.session.get('/api/v1/mail/threads/$thread/emails/$id');
+   if(!current(token))return;
+   final item=Map<String,dynamic>.from(result['item'] as Map);
+   if(item['id']?.toString()!=id)throw StateError('Máy chủ trả nhầm email.');
+   setState(()=>selectedMail=item);
+   try{
+    await widget.session.post('/api/v1/mail/threads/$thread/read',{});
+    if(current(token))setState((){
+     threads=[for(final row in threads)if(row['id']==thread){...row,'read':true}else row];
+    });
+   }catch(_){/* Reading remains possible if the receipt fails. */}
+  }catch(e){if(current(token))setState(()=>error=e.toString());}
+  finally{if(current(token))setState(()=>busy=false);}
  }
  Future<void> reply()async{
-  if(selectedThread==null||selectedMail?['id']==null)return;
-  final sent=await showDialog<bool>(context:context,builder:(context)=>
+  final thread=selectedThread,id=selectedMail?['id']?.toString();
+  if(busy||thread==null||id==null)return;
+  final token=generation;
+  final sent=await showDialog<bool>(context:context,barrierDismissible:false,builder:(context)=>
    _MailComposer(session:widget.session,mailbox:mailbox??'',
-    threadId:selectedThread,emailId:selectedMail?['id']?.toString(),
+    threadId:thread,emailId:id,
     replyTo:selectedMail?['from']?.toString()));
-  if(sent==true&&mounted){
-   setState(()=>selectedMail=null);
-   await openThread(selectedThread!);
-  }
+  if(sent==true&&current(token))await openThread(thread);
  }
  void backWithinMail(){
-  if(busy)return;
+  if(!mounted)return;
   if(selectedMail!=null){
-   setState(()=>selectedMail=null);
+   generation++;setState((){selectedMail=null;busy=false;error=null;});
   }else if(selectedThread!=null){
-   setState((){selectedThread=null;messages=[];});
+   generation++;setState((){selectedThread=null;messages=[];messageCursor=null;busy=false;error=null;});
   }else{
    Navigator.of(context).maybePop();
   }
@@ -101,7 +138,7 @@ class _StaffMailPageState extends State<StaffMailPage>{
   }catch(e){if(mounted)setState(()=>error='Không tải được tệp: $e');}
  }
  Future<void> compose()async{
-  final sent=await showDialog<bool>(context:context,builder:(context)=>
+  final sent=await showDialog<bool>(context:context,barrierDismissible:false,builder:(context)=>
    _MailComposer(session:widget.session,mailbox:mailbox??''));
   if(sent==true&&mounted)await load(folder:'sent');
  }
@@ -110,7 +147,7 @@ class _StaffMailPageState extends State<StaffMailPage>{
   return Scaffold(appBar:AppBar(
    leading:selectedThread!=null?IconButton(icon:const Icon(Icons.arrow_back),
     tooltip:selectedMail!=null?'Về hội thoại':'Về danh sách thư',
-    onPressed:busy?null:backWithinMail):null,
+    onPressed:backWithinMail):null,
    title:Text(selectedMail!=null?'Đọc email':selectedThread!=null?'Hội thoại':'Email'),
    actions:[
     if(selectedMail!=null)
@@ -168,21 +205,23 @@ class _StaffMailPageState extends State<StaffMailPage>{
        ],
        const SizedBox(height:18),
        Align(alignment:Alignment.centerRight,child:FilledButton.tonalIcon(
-        onPressed:reply,icon:const Icon(Icons.reply_outlined),
+        onPressed:busy?null:reply,icon:const Icon(Icons.reply_outlined),
         label:const Text('Trả lời'))),
       ]):
       selectedThread!=null?
        ListView(children:[
         ListTile(leading:const Icon(Icons.arrow_back),title:const Text('Về danh sách'),
-         onTap:()=>setState((){selectedThread=null;selectedMail=null;})),
+         onTap:backWithinMail),
         for(final item in messages)ListTile(
          leading:const Icon(Icons.email_outlined),
          title:Text(item['subject']?.toString()??'Không có tiêu đề'),
          subtitle:Text(item['from']?.toString()??''),
          onTap:()=>openMessage(item['id'].toString())),
+        if(messageCursor!=null)TextButton(onPressed:busy?null:()=>openThread(selectedThread!,more:true),child:const Text('Tải thêm thư')),
        ]):
        threads.isEmpty&&!busy?Center(child:Text(error==null?'Chưa có email':'Không tải được hộp thư')):
-       ListView.builder(itemCount:threads.length,itemBuilder:(context,index){
+       ListView.builder(itemCount:threads.length+(threadCursor==null?0:1),itemBuilder:(context,index){
+        if(index==threads.length)return TextButton(onPressed:busy?null:()=>load(folder:selectedFolder??'inbox',more:true),child:const Text('Tải thêm hội thoại'));
         final item=threads[index];
         return ListTile(
          leading:Icon(item['read']==false?Icons.mark_email_unread_outlined:Icons.mail_outline),
@@ -205,13 +244,14 @@ class _MailComposer extends StatefulWidget{
 }
 class _MailComposerState extends State<_MailComposer>{
  final to=TextEditingController(),subject=TextEditingController(),text=TextEditingController();
- bool busy=false;String? error;
+ bool busy=false,picking=false;String? error;
  final List<Map<String,dynamic>> attachments=[];
  late final String requestId=const Uuid().v4();
  static const maxAttachmentBytes=5*1024*1024;
  static const allowedExtensions=['pdf','png','jpg','jpeg','webp','txt','csv','docx','xlsx','pptx'];
  Future<void> pickAttachments()async{
-  if(busy)return;
+  if(busy||picking)return;
+  setState(()=>picking=true);
   try{
    final picked=await FilePicker.platform.pickFiles(type:FileType.custom,
      allowedExtensions:allowedExtensions,allowMultiple:true,withData:true);
@@ -229,11 +269,12 @@ class _MailComposerState extends State<_MailComposer>{
    }
    if(mounted)setState((){attachments..clear()..addAll(selected);error=null;});
   }catch(e){if(mounted)setState(()=>error='Không thêm được tệp: $e');}
+  finally{if(mounted)setState(()=>picking=false);}
  }
 
  @override void dispose(){to.dispose();subject.dispose();text.dispose();super.dispose();}
  Future<void> send()async{
-  if(busy)return;
+  if(busy||picking)return;
   if((widget.threadId==null&&(!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(to.text.trim())||subject.text.trim().isEmpty))||text.text.trim().isEmpty){
     setState(()=>error='Nhập đầy đủ người nhận, tiêu đề và nội dung.');return;
   }
@@ -258,15 +299,15 @@ class _MailComposerState extends State<_MailComposer>{
   content:SizedBox(width:480,child:SingleChildScrollView(child:Column(
    mainAxisSize:MainAxisSize.min,children:[
     if(widget.threadId==null)...[
-      TextField(controller:to,decoration:const InputDecoration(labelText:'Đến')),
-      TextField(controller:subject,decoration:const InputDecoration(labelText:'Tiêu đề'),maxLength:200),
+      TextField(controller:to,enabled:!busy,decoration:const InputDecoration(labelText:'Đến')),
+      TextField(controller:subject,enabled:!busy,decoration:const InputDecoration(labelText:'Tiêu đề'),maxLength:200),
     ]else Padding(padding:const EdgeInsets.symmetric(vertical:8),
       child:Align(alignment:Alignment.centerLeft,child:Text('Trả lời đến: ${widget.replyTo??'người gửi'}'))),
-    TextField(controller:text,decoration:const InputDecoration(labelText:'Nội dung'),
+    TextField(controller:text,enabled:!busy,decoration:const InputDecoration(labelText:'Nội dung'),
      maxLines:8,minLines:4,maxLength:12000),
     const SizedBox(height:8),
     Align(alignment:Alignment.centerLeft,child:TextButton.icon(
-     onPressed:busy?null:pickAttachments,icon:const Icon(Icons.attach_file),
+     onPressed:busy||picking?null:pickAttachments,icon:const Icon(Icons.attach_file),
      label:const Text('Đính kèm tệp (4 tệp, tổng 5 MB)'))),
     for(var i=0;i<attachments.length;i++)
      ListTile(dense:true,contentPadding:EdgeInsets.zero,
@@ -274,12 +315,12 @@ class _MailComposerState extends State<_MailComposer>{
       title:Text(attachments[i]['filename'].toString(),maxLines:1,overflow:TextOverflow.ellipsis),
       subtitle:Text('${((attachments[i]['size'] as int)/1024).toStringAsFixed(0)} KB'),
       trailing:IconButton(tooltip:'Bỏ tệp',icon:const Icon(Icons.close),
-       onPressed:busy?null:()=>setState(()=>attachments.removeAt(i)))),
+       onPressed:busy||picking?null:()=>setState(()=>attachments.removeAt(i)))),
     if(error!=null)Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error))
    ]))),
   actions:[
    TextButton(onPressed:busy?null:()=>Navigator.pop(context,false),child:const Text('Hủy')),
-   FilledButton.icon(onPressed:busy?null:send,icon:const Icon(Icons.send_outlined),
+   FilledButton.icon(onPressed:busy||picking?null:send,icon:const Icon(Icons.send_outlined),
     label:Text(busy?'Đang gửi...':'Gửi email')),
   ]);
 }
