@@ -317,10 +317,12 @@ class _OrdersPageState extends State<OrdersPage>{
    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Kiểm lại số lượng và số mã trong giỏ.')));
    return false;
   }
-  try{await _persist();}catch(_){return false;}
-  if(!mounted)return false;
+  // Acquire the save lock before the first await. Rapid taps must not start
+  // a second request or change the persisted operation while the first saves.
   setState(()=>busy=true);
   try{
+   try{await _persist();}catch(_){return false;}
+   if(!mounted)return false;
    final doc=await client.post('/api/v1/orders',{
     'id':selected!['id'],'client_ref':operation,
     'version':selected!['version']??0,'owner_sub':customer!['owner_sub'],

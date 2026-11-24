@@ -4,7 +4,12 @@ import 'package:sales_mien_tay/offline_queue.dart';
 import 'package:sales_mien_tay/offline_factory.dart';
 import 'package:sales_mien_tay/session.dart';
 
+import '../test/bulk_replay_fixture.dart';
+
 void main(){
+ test('L5 real Chrome IndexedDB bulk offline recovery',
+  ()=>exerciseBulkReplay(offlineFactory()));
+
  test('L3 real IndexedDB retains empty page metadata without deleting outbox on revocation',()async{
   final owner=const Uuid().v4(),factory=offlineFactory();
   final a=OfflineQueue(SalesSession(),owner,'1',factory:factory);

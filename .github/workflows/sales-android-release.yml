@@ -36,12 +36,13 @@ concurrency:
 jobs:
   signed-release:
     name: Android / Signed APK and verified immutable R2 release
-    # Comment trigger is restricted to the Owner, exact command and Issue #3.
+    # Comment triggers are restricted to the Owner, exact commands and Issue #3.
+    # Candidate command signs an artifact only; it never advances R2 latest.
     # The manual workflow_dispatch remains available for future signed releases.
     if: >-
       github.actor == 'milktea-cus' && (
         (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
-        (github.event_name == 'issue_comment' && github.event.issue.number == 3 && github.event.comment.body == '/field-work-release')
+        (github.event_name == 'issue_comment' && github.event.issue.number == 3 && (github.event.comment.body == '/field-work-release' || github.event.comment.body == '/field-work-candidate'))
       )
     runs-on: ubuntu-latest
     defaults:
@@ -80,7 +81,7 @@ jobs:
                   return json.load(reply)
           if event=='issue_comment':
               issue=json.loads(pathlib.Path(os.environ['GITHUB_EVENT_PATH']).read_text())
-              if issue.get('issue',{}).get('number')!=3 or issue.get('comment',{}).get('body')!='/field-work-release':
+              if issue.get('issue',{}).get('number')!=3 or issue.get('comment',{}).get('body') not in ('/field-work-release','/field-work-candidate'):
                   raise SystemExit('Release command is not approved')
               expected_code=actual_code
               notes='Field Work Android signed release; update subsequent versions inside the app.'
@@ -94,6 +95,9 @@ jobs:
           checked=gh_json('/actions/runs/'+ci)
           if checked.get('head_sha')!=sha or checked.get('conclusion')!='success' or checked.get('name')!='Sales Miền Tây CI':
               raise SystemExit('CI not green for exact release SHA')
+          jobs=gh_json('/actions/runs/'+ci+'/jobs?per_page=100')['jobs']
+          if len(jobs)!=13 or any(j.get('conclusion')!='success' for j in jobs):
+              raise SystemExit('Expected all 13 CI jobs successful')
           if expected_code!=actual_code or not expected_code.isdigit():
               raise SystemExit('VersionCode does not match pubspec')
           if not notes or len(notes)>2000 or '\n' in notes or '\r' in notes:
@@ -171,7 +175,7 @@ jobs:
           path: apps/sales-mien-tay/apps/sales_flutter/build/app/outputs/flutter-apk/app-release.apk
           retention-days: 30
       - name: Publish signed APK to private R2 through verified GitHub OIDC
-        if: inputs.publish_production == 'yes' || github.event_name == 'issue_comment'
+        if: (github.event_name == 'workflow_dispatch' && inputs.publish_production == 'yes') || (github.event_name == 'issue_comment' && github.event.comment.body == '/field-work-release')
         env:
           EXPECTED_CODE: ${{ env.FIELD_WORK_RELEASE_CODE }}
           RELEASE_NOTES: ${{ env.FIELD_WORK_RELEASE_NOTES }}
