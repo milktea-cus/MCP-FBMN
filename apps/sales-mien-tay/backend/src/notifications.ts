@@ -49,6 +49,7 @@ async function vapidJwt(env:PushEnv,endpoint:string):Promise<string>{
 }
 /** Empty-payload standard Web Push: private customer details never reach a locked screen. */
 export async function sendWebPush(env:PushEnv,endpoint:string):Promise<number>{
+ if(!validEndpoint(endpoint))throw Error('invalid_endpoint');
  const token=await vapidJwt(env,endpoint);
  const res=await fetch(endpoint,{method:'POST',redirect:'manual',headers:{
   Authorization:'vapid t='+token+', k='+env.VAPID_PUBLIC_KEY,

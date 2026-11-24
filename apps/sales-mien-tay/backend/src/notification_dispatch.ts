@@ -98,6 +98,13 @@ export async function dispatchNotifications(env:Env):Promise<{claimed:number;sen
   if(!lock)continue;
   let code='invalid_device',ok=false;
   try{
+   // Check revocation once more at the last boundary before provider delivery.
+   const [fresh]=await sql`SELECT s.active,public.sales_identity_exists(s.user_sub) AS identity_valid,
+    (n.scope_revision IS NULL OR n.scope_revision=s.scope_revision) AS valid_scope
+    FROM public.staff_members s JOIN public.field_notifications n ON n.recipient_sub=s.user_sub
+    WHERE n.id=${row.notification_id} AND s.user_sub=${row.recipient_sub}`;
+   if(!fresh?.active||!fresh?.identity_valid||!fresh?.valid_scope){code='revoked';}
+   else {
    const devices=row.channel==='web'?
     await sql`SELECT endpoint AS address,NULL::text AS binding FROM public.field_push_subscriptions
      WHERE recipient_sub=${row.recipient_sub} ORDER BY updated_at DESC LIMIT 5`:
@@ -118,6 +125,7 @@ export async function dispatchNotifications(env:Env):Promise<{claimed:number;sen
      ok=status>=200&&status<300;
      code=ok?'accepted':status>=300&&status<400?'web_redirect_blocked':'http_'+status;
     }
+   }
    }
   }catch{code='network_error';}
   const transient=transientPushError(code);
