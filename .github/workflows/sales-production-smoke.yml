@@ -63,6 +63,10 @@ jobs:
           echo "/api/v1/notifications/diagnostics => HTTP $check_status"
           test "$check_status" = 401
           jq -e '.error | type=="string"' /tmp/push-diagnostics.json
+          code=$(curl -sS --max-time 30 -o /tmp/n3-config.json -w '%{http_code}' "$site/api/v1/notifications/config")
+          echo "/api/v1/notifications/config => HTTP $code"
+          test "$code" = 401
+          jq -e '.error | type=="string"' /tmp/n3-config.json
           code=$(curl -sS --max-time 30 -o /tmp/business.json -w '%{http_code}' "$site/api/v1/targets")
           echo "/api/v1/targets => HTTP $code"
           test "$code" = 401
