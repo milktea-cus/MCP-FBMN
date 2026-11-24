@@ -2,6 +2,7 @@ import { neon } from '@neondatabase/serverless';
 import {AuthError, authRoutes, userFromRequest, provisionIdentity} from './auth';
 import {staffRoutes} from './staff';
 import {mailRoutes} from './mail';
+import {resendInboundWebhook} from './mail_webhooks';
 import {orgRoutes} from './org';
 import districts from './districts_old.json';
 import {customerRoutes} from './customers';
@@ -38,6 +39,7 @@ import {githubAndroidPublisher} from './android_release_publisher';
 interface Env {
   DATABASE_URL: string;
   RESEND_API_KEY?: string;
+  RESEND_INBOUND_WEBHOOK_SECRET?: string;
   FCM_SERVICE_ACCOUNT_JSON?: string;
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_JWK?: string;
@@ -135,6 +137,8 @@ export default {
         try{await neon(env.DATABASE_URL)`SELECT 1`;return json({status:'ok',database:'ok'});}catch{return json({status:'unavailable',database:'unavailable'},503);}
       }
       if (!env.DATABASE_URL) return bad('DATABASE_URL chưa được cấu hình', 503);
+      if(url.pathname==='/api/v1/webhooks/resend-inbound')
+        return resendInboundWebhook(req,env);
       const authResponse = await authRoutes(req, env, url);
       if (authResponse) return authResponse;
       let user: Awaited<ReturnType<typeof userFromRequest>>;
