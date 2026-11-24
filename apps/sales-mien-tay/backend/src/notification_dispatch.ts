@@ -110,10 +110,17 @@ export async function dispatchNotifications(env:Env):Promise<{claimed:number;sen
   try{
    // Check revocation once more at the last boundary before provider delivery.
    const [fresh]=await sql`SELECT s.active,public.sales_identity_exists(s.user_sub) AS identity_valid,
-    (n.scope_revision IS NULL OR n.scope_revision=s.scope_revision) AS valid_scope
+    (n.scope_revision IS NULL OR n.scope_revision=s.scope_revision) AS valid_scope,
+    EXISTS (
+      SELECT 1 FROM public.field_notification_outbox b
+      WHERE b.notification_id=n.id AND b.recipient_sub=n.recipient_sub
+        AND b.scope_revision=s.scope_revision AND b.expires_at>now()
+        AND b.state IN ('pending','processing','done')
+    ) AS within_expiry
     FROM public.staff_members s JOIN public.field_notifications n ON n.recipient_sub=s.user_sub
     WHERE n.id=${row.notification_id} AND s.user_sub=${row.recipient_sub}`;
    if(!fresh?.active||!fresh?.identity_valid||!fresh?.valid_scope){code='revoked';}
+   else if(!fresh.within_expiry){code='expired';}
    else {
    const devices=row.channel==='web'?
     await sql`SELECT endpoint AS address,NULL::text AS binding FROM public.field_push_subscriptions
@@ -140,7 +147,8 @@ export async function dispatchNotifications(env:Env):Promise<{claimed:number;sen
   }catch{code='network_error';}
   const transient=transientPushError(code);
   if(ok)sent++;else failed++;
-  const state=ok?'accepted':transient&&Number(lock.attempts)<5?'pending':'dead';
+  const state=ok?'accepted':code==='revoked'||code==='expired'?'cancelled':
+   transient&&Number(lock.attempts)<5?'pending':'dead';
   const backoff=Math.min(60,Math.pow(2,Number(lock.attempts)))+Math.floor(Math.random()*3);
   await sql`UPDATE public.field_notification_delivery
    SET state=${state},lease_id=NULL,lease_until=NULL,error_code=${ok?null:cleanCode(code)},
