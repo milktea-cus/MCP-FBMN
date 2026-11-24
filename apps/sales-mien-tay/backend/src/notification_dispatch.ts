@@ -18,7 +18,7 @@ export async function dispatchNotifications(env:Env):Promise<{claimed:number;sen
  // A competing cron invocation can't claim the same row until lease expiry.
  const claimed=await sql`WITH due AS (
   SELECT event_id,recipient_sub FROM public.field_notification_outbox
-  WHERE ((state='pending') OR (state='processing' AND lease_until<now()))
+  WHERE mode<>'digest' AND ((state='pending') OR (state='processing' AND lease_until<now()))
    AND available_at<=now() AND expires_at>now()
   ORDER BY available_at,event_id LIMIT 20 FOR UPDATE SKIP LOCKED)
  UPDATE public.field_notification_outbox b SET state='processing',
@@ -51,12 +51,7 @@ export async function dispatchNotifications(env:Env):Promise<{claimed:number;sen
      WHERE event_id=${task.event_id} AND recipient_sub=${task.recipient_sub} AND lease_id=${lease}::uuid`;
     continue;
    }
-   // Digest aggregation is a separate N3 producer; do not send each digest row.
-   if(scope.current_mode==='digest'){
-    await sql`UPDATE public.field_notification_outbox SET state='done',lease_id=NULL,lease_until=NULL
-     WHERE event_id=${task.event_id} AND recipient_sub=${task.recipient_sub} AND lease_id=${lease}::uuid`;
-    continue;
-   }
+   // N3 consumes digest rows transactionally into one daily summary.
    const prev=await sql`SELECT budget_reserved FROM public.field_notification_outbox
     WHERE event_id=${task.event_id} AND recipient_sub=${task.recipient_sub} AND lease_id=${lease}::uuid`;
    if(!prev[0]?.budget_reserved){

@@ -31,6 +31,7 @@ import {orderRoutes} from './orders';
 import {performanceRoutes} from './performance';
 import {notificationRoutes} from './notifications';
 import {dispatchNotifications} from './notification_dispatch';
+import {runScheduledSummaries} from './notification_scheduler';
 import {appReleaseRoutes,publicAndroidInstaller} from './app_releases';
 import {githubAndroidPublisher} from './android_release_publisher';
 
@@ -112,7 +113,7 @@ async function readBody(req: Request): Promise<SalesRecordBody> {
 }
 export default {
   async scheduled(_controller:ScheduledController,env:Env,ctx:ExecutionContext):Promise<void>{
-    ctx.waitUntil(dispatchNotifications(env).then(()=>undefined));
+    ctx.waitUntil(runScheduledSummaries(env).catch(()=>0).then(()=>dispatchNotifications(env)).then(()=>undefined));
   },
   async fetch(req: Request, env: Env): Promise<Response> {
     const origin = req.headers.get('Origin');
