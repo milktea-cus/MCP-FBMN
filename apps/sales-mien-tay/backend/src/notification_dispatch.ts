@@ -28,20 +28,31 @@ export async function dispatchNotifications(env:Env):Promise<{claimed:number;sen
  let sent=0,failed=0;
  for(const task of claimed){
   try{
-   const [scope]=await sql`SELECT s.scope_revision,s.active,public.sales_identity_exists(s.user_sub) AS valid
-    FROM public.staff_members s WHERE s.user_sub=${task.recipient_sub}`;
-   if(!scope||!scope.active||!scope.valid||String(scope.scope_revision)!==String(task.scope_revision)){
+   // A permission batch can advance scope_revision while this lease is open.
+   const [scope]=await sql`SELECT s.scope_revision,s.active,public.sales_identity_exists(s.user_sub) AS valid,
+     b.scope_revision AS queued_revision,b.mode AS current_mode,
+     b.available_at<=now() AS due,b.expires_at>now() AS unexpired
+     FROM public.staff_members s JOIN public.field_notification_outbox b
+      ON b.recipient_sub=s.user_sub AND b.event_id=${task.event_id}
+      AND b.lease_id=${lease}::uuid WHERE s.user_sub=${task.recipient_sub}`;
+   if(!scope)continue;
+   if(!scope.active||!scope.valid||String(scope.scope_revision)!==String(scope.queued_revision)||!scope.unexpired){
     await sql`UPDATE public.field_notification_outbox SET state='cancelled',lease_id=NULL,lease_until=NULL
       WHERE event_id=${task.event_id} AND recipient_sub=${task.recipient_sub} AND lease_id=${lease}::uuid`;
     continue;
    }
-   if(task.mode==='in_app'){
+   if(!scope.due){
+    await sql`UPDATE public.field_notification_outbox SET state='pending',lease_id=NULL,lease_until=NULL
+      WHERE event_id=${task.event_id} AND recipient_sub=${task.recipient_sub} AND lease_id=${lease}::uuid`;
+    continue;
+   }
+   if(scope.current_mode==='in_app'){
     await sql`UPDATE public.field_notification_outbox SET state='done',lease_id=NULL,lease_until=NULL
      WHERE event_id=${task.event_id} AND recipient_sub=${task.recipient_sub} AND lease_id=${lease}::uuid`;
     continue;
    }
    // Digest aggregation is a separate N3 producer; do not send each digest row.
-   if(task.mode==='digest'){
+   if(scope.current_mode==='digest'){
     await sql`UPDATE public.field_notification_outbox SET state='done',lease_id=NULL,lease_until=NULL
      WHERE event_id=${task.event_id} AND recipient_sub=${task.recipient_sub} AND lease_id=${lease}::uuid`;
     continue;
