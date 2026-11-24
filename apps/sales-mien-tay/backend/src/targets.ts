@@ -1,6 +1,5 @@
 import {neon} from '@neondatabase/serverless';
 import type {userFromRequest} from './auth';
-import {publishNotification} from './notifications';
 type User=Awaited<ReturnType<typeof userFromRequest>>;
 const json=(v:unknown,status=200)=>new Response(JSON.stringify(v),{
  status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}});
@@ -148,11 +147,9 @@ export async function targetRoutes(req:Request,env:{
    ${u.sub},${b.client_ref as string}::uuid,${b.owner as string},
    ${b.year as number},${b.dimension as string},${b.entity_id as string},
    ${JSON.stringify(b.months)}::jsonb) AS items`;
-  if(b.owner!==u.sub){
-   try{await publishNotification(env,b.owner as string,'target:'+b.client_ref,
-    'Được giao chỉ tiêu','Có chỉ tiêu kinh doanh mới. Mở Field Work để xem.');}
-   catch{/* A notification outage cannot reverse a committed target assignment. */}
-  }
+  // N2: the target_mutations audit INSERT creates the notification in the same
+  // SQL transaction, after a real amount change. Never send an independent
+  // legacy push after this RPC (prevents double delivery and replay spam).
   return json({items:saved[0].items});
  }catch(e){
   const m=(e as Error).message??'';
