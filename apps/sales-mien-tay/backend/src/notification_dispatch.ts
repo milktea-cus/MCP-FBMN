@@ -1,15 +1,10 @@
 import {neon} from '@neondatabase/serverless';
 import {sendWebPush} from './notifications';
 import {sendFcmDevice} from './fcm';
-import {transientPushError} from './notification_policy';
+import {transientPushError,deviceDigest} from './notification_policy';
 
 type Env={DATABASE_URL:string;FCM_SERVICE_ACCOUNT_JSON?:string;VAPID_PUBLIC_KEY?:string;
  VAPID_PRIVATE_JWK?:string;VAPID_SUBJECT?:string};
-const bytes=new TextEncoder();
-const hex=(data:ArrayBuffer)=>Array.from(new Uint8Array(data)).map(x=>x.toString(16).padStart(2,'0')).join('');
-export async function deviceDigest(value:string):Promise<string> {
- return hex(await crypto.subtle.digest('SHA-256',bytes.encode(value)));
-}
 function cleanCode(v:string):string {
  return /^[A-Za-z0-9_]{1,80}$/.test(v)?v:'provider_error';
 }

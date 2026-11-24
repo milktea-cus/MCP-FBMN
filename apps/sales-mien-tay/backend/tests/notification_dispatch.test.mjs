@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {deviceDigest} from '../src/notification_dispatch.ts';
+import {deviceDigest} from '../src/notification_policy.ts';
 import {safeNotice} from '../src/notification_events.ts';
 test('event validation suppresses self notification and malformed event',()=>{
  const n={eventKey:'target:batch:abc',category:'target',entityKey:'abc',actor:'manager',recipient:'sales',title:'Thông báo',body:'Có cập nhật'};

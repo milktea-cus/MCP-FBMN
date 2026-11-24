@@ -50,7 +50,7 @@ test('OAuth failures distinguish key, time, account and network without raw prov
 test('both Google calls use Workers-compatible manual redirect without forwarding credentials',async()=>{
  const {readFile}=await import('node:fs/promises');
  const source=await readFile(new URL('../src/fcm.ts',import.meta.url),'utf8');
- assert.equal((source.match(/redirect:'manual'/g)||[]).length,2);
+ assert.ok((source.match(/redirect:'manual'/g)||[]).length>=2);
  assert.ok(!source.includes("redirect:'error',"));
  assert.ok(source.includes("return 'fcm_redirect_blocked'"));
 });

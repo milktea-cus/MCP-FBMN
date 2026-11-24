@@ -33,3 +33,8 @@ export function transientPushError(code:string):boolean {
  return code==='network_error'||code==='oauth_network_failed'||code==='QUOTA_EXCEEDED'||
   /^(?:oauth_)?http_(?:429|5[0-9]{2})$/.test(code);
 }
+
+export async function deviceDigest(value:string):Promise<string> {
+ const data=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));
+ return Array.from(new Uint8Array(data)).map(x=>x.toString(16).padStart(2,'0')).join('');
+}
