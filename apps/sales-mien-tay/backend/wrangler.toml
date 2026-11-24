@@ -20,3 +20,7 @@ bucket_name = "sales-mien-tay-customer-media"
 [[r2_buckets]]
 binding = "APP_RELEASES_BUCKET"
 bucket_name = "sales-mien-tay-app-releases"
+
+# N1: app-internal outbox dispatcher, NOT a ChatGPT scheduled task.
+[triggers]
+crons = ["*/5 * * * *"]

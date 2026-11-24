@@ -48,9 +48,9 @@ async function vapidJwt(env:PushEnv,endpoint:string):Promise<string>{
  return unsigned+'.'+b64(signature);
 }
 /** Empty-payload standard Web Push: private customer details never reach a locked screen. */
-async function sendPush(env:PushEnv,endpoint:string):Promise<number>{
+export async function sendWebPush(env:PushEnv,endpoint:string):Promise<number>{
  const token=await vapidJwt(env,endpoint);
- const res=await fetch(endpoint,{method:'POST',headers:{
+ const res=await fetch(endpoint,{method:'POST',redirect:'manual',headers:{
   Authorization:'vapid t='+token+', k='+env.VAPID_PUBLIC_KEY,
   TTL:'3600',Urgency:'normal'
  },signal:AbortSignal.timeout(8000)});
@@ -65,7 +65,7 @@ async function fanOutWeb(env:PushEnv,recipient:string):Promise<void>{
   const endpoint=String(s.endpoint);
   if(!validEndpoint(endpoint))return;
   try{
-   const status=await sendPush(env,endpoint);
+   const status=await sendWebPush(env,endpoint);
    if(status===404||status===410)await sql`DELETE FROM field_push_subscriptions
     WHERE recipient_sub=${recipient} AND endpoint=${endpoint}`;
   }catch{/* A push service failure cannot undo a business transaction. */}
