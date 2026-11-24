@@ -81,5 +81,5 @@ test('N5 recipient isolation and revocation gate both queued and delivered pushe
  assert.match(dispatch,/if\(!fresh\?\.active\|\|!fresh\?\.identity_valid\|\|!fresh\?\.valid_scope\)/);
  assert.match(dispatch,/ON CONFLICT DO NOTHING/);
  assert.match(sql,/pg_advisory_xact_lock/);
- assert.match(sql,/ON CONFLICT\(event_id,recipient_sub\)/);
+ assert.match(sql,/INSERT INTO public\.field_notification_event_recipients\(event_id,recipient_sub\)[\s\S]*?ON CONFLICT DO NOTHING/);
 });
