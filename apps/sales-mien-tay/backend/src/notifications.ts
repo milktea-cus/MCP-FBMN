@@ -1,4 +1,5 @@
 import {neon} from '@neondatabase/serverless';
+import {validMode,validMinute,pageSize,validCursor} from './notification_policy';
 import type {userFromRequest} from './auth';
 import {fcmConfigured,registerFcm,unregisterFcm,sendFcm,validFcmToken,validBinding,type FcmReport} from './fcm';
 
@@ -78,7 +79,7 @@ async function publishWithReport(env:PushEnv,recipient:string,eventKey:string,ti
  const sql=neon(env.DATABASE_URL);
  const inserted=await sql`INSERT INTO field_notifications(recipient_sub,event_key,title,body)
   SELECT s.user_sub,${eventKey},${title},${description}
-  FROM staff_members s WHERE s.user_sub=${recipient} AND s.active
+  FROM staff_members s WHERE s.user_sub=${recipient} AND s.active AND public.sales_identity_exists(s.user_sub)
   ON CONFLICT(recipient_sub,event_key) DO NOTHING RETURNING id`;
  if(!inserted.length)return {accepted:0,failed:0,reason:'not_inserted'};
  const [,android]=await Promise.allSettled([fanOutWeb(env,recipient),sendFcm(env,recipient)]);
@@ -91,18 +92,60 @@ export async function notificationRoutes(req:Request,env:PushEnv,u:Actor,url:URL
  if(path==='/api/v1/notifications/config'&&req.method==='GET')
   return reply({supported:!!(env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_JWK&&env.VAPID_SUBJECT),
    public_key:env.VAPID_PUBLIC_KEY??null,android_supported:fcmConfigured(env)});
- if(path==='/api/v1/notifications'&&req.method==='GET'){
-  const [items,count]=await Promise.all([
-   sql`SELECT id::text AS id,title,body,created_at,read_at FROM field_notifications
-      WHERE recipient_sub=${u.sub} ORDER BY id DESC LIMIT 60`,
-   sql`SELECT count(*)::int AS unread FROM field_notifications WHERE recipient_sub=${u.sub} AND read_at IS NULL`
+ if(path==='/api/v1/notifications/preferences'&&req.method==='GET'){
+  const [categories,settings]=await Promise.all([
+   sql`SELECT c.category,c.default_mode,c.mandatory,
+     CASE WHEN c.mandatory AND p.mode='off' THEN 'in_app' ELSE coalesce(p.mode,c.default_mode) END AS mode
+     FROM public.field_notification_categories c LEFT JOIN public.field_notification_preferences p
+     ON p.category=c.category AND p.recipient_sub=${u.sub} ORDER BY c.category`,
+   sql`SELECT quiet_start,quiet_end FROM public.field_notification_settings WHERE recipient_sub=${u.sub}`
   ]);
-  return reply({items,unread_count:count[0]?.unread??0});
+  return reply({categories,quiet_hours:settings[0]??{quiet_start:1260,quiet_end:420},timezone:'Asia/Ho_Chi_Minh'});
+ }
+ if(path==='/api/v1/notifications/preferences'&&req.method==='PATCH'){
+  let doc:Record<string,unknown>;try{doc=await body(req);}catch{return fail('Thiết lập không hợp lệ');}
+  if(typeof doc.category!=='string'||!validMode(doc.mode))return fail('Thiết lập không hợp lệ');
+  const rows=await sql`INSERT INTO public.field_notification_preferences(recipient_sub,category,mode)
+   SELECT ${u.sub},category,CASE WHEN mandatory AND ${doc.mode}='off' THEN 'in_app' ELSE ${doc.mode} END
+   FROM public.field_notification_categories WHERE category=${doc.category}
+   ON CONFLICT(recipient_sub,category) DO UPDATE SET mode=excluded.mode RETURNING category,mode`;
+  if(!rows.length)return fail('Nhóm thông báo không tồn tại',404);
+  return reply({item:rows[0]});
+ }
+ if(path==='/api/v1/notifications/quiet-hours'&&req.method==='PATCH'){
+  let doc:Record<string,unknown>;try{doc=await body(req);}catch{return fail('Thiết lập không hợp lệ');}
+  if(!validMinute(doc.quiet_start)||!validMinute(doc.quiet_end))return fail('Giờ yên lặng không hợp lệ');
+  const rows=await sql`INSERT INTO public.field_notification_settings(recipient_sub,quiet_start,quiet_end)
+   VALUES (${u.sub},${doc.quiet_start},${doc.quiet_end}) ON CONFLICT(recipient_sub) DO UPDATE
+   SET quiet_start=excluded.quiet_start,quiet_end=excluded.quiet_end RETURNING quiet_start,quiet_end`;
+  return reply({quiet_hours:rows[0],timezone:'Asia/Ho_Chi_Minh'});
+ }
+ if(path==='/api/v1/notifications'&&req.method==='GET'){
+  const limit=pageSize(url.searchParams.get('limit')),before=url.searchParams.get('before');
+  if(limit===null||(before!==null&&!validCursor(before)))return fail('Phân trang không hợp lệ');
+  const [items,count]=await Promise.all([
+   sql`SELECT id::text AS id,title,body,created_at,read_at,category,group_count,updated_at FROM field_notifications
+      WHERE recipient_sub=${u.sub} AND (scope_revision IS NULL OR scope_revision=${String(u.staff.scope_revision)}::bigint)
+      AND (${before}::bigint IS NULL OR id<${before}::bigint) ORDER BY id DESC LIMIT ${limit+1}`,
+   sql`SELECT count(*)::int AS unread FROM field_notifications WHERE recipient_sub=${u.sub} AND read_at IS NULL
+      AND (scope_revision IS NULL OR scope_revision=${String(u.staff.scope_revision)}::bigint)`
+  ]);
+  const page=items.slice(0,limit);
+  return reply({items:page,unread_count:count[0]?.unread??0,next_cursor:items.length>limit?page[page.length-1].id:null});
+ }
+ if(path==='/api/v1/notifications/read-all'&&req.method==='POST'){
+  const rows=await sql`WITH changed AS (UPDATE field_notifications SET read_at=now()
+    WHERE recipient_sub=${u.sub} AND read_at IS NULL
+    AND (scope_revision IS NULL OR scope_revision=${String(u.staff.scope_revision)}::bigint) RETURNING id)
+    SELECT count(*)::int AS updated FROM changed`;
+  return reply({updated:rows[0]?.updated??0});
  }
  const read=/^\/api\/v1\/notifications\/([0-9]{1,19})\/read$/.exec(path);
  if(read&&req.method==='POST'){
+  if(!validCursor(read[1]))return fail('Thông báo không tồn tại',404);
   const items=await sql`UPDATE field_notifications SET read_at=coalesce(read_at,now())
     WHERE id=${read[1]}::bigint AND recipient_sub=${u.sub}
+    AND (scope_revision IS NULL OR scope_revision=${String(u.staff.scope_revision)}::bigint)
     RETURNING id::text AS id,read_at`;
   if(!items.length)return fail('Thông báo không tồn tại',404);
   return reply({item:items[0]});
@@ -140,9 +183,15 @@ export async function notificationRoutes(req:Request,env:PushEnv,u:Actor,url:URL
   return reply({ok:true});
  }
  if(path==='/api/v1/notifications/test'&&req.method==='POST'){
-  const last=await sql`SELECT id FROM field_notifications WHERE recipient_sub=${u.sub}
-   AND event_key LIKE 'test:%' AND created_at>now()-interval '60 seconds' LIMIT 1`;
-  if(last.length)return fail('Chỉ gửi thử mỗi 60 giây',429);
+  // Atomic per-account gate: concurrent requests cannot each claim a slot.
+  const gate=await sql`INSERT INTO public.field_notification_test_gate(recipient_sub,next_at)
+   SELECT s.user_sub,now()+interval '60 seconds' FROM public.staff_members s
+   WHERE s.user_sub=${u.sub} AND s.active AND public.sales_identity_exists(s.user_sub)
+    AND NOT EXISTS(SELECT 1 FROM public.field_notifications WHERE recipient_sub=${u.sub}
+      AND event_key LIKE 'test:%' AND created_at>now()-interval '60 seconds')
+   ON CONFLICT(recipient_sub) DO UPDATE SET next_at=excluded.next_at
+    WHERE field_notification_test_gate.next_at<=now() RETURNING recipient_sub`;
+  if(!gate.length)return fail('Chỉ gửi thử mỗi 60 giây',429);
   try{const android=await publishWithReport(env,u.sub,'test:'+crypto.randomUUID(),
     'Thử thông báo Field Work','Thông báo đã đến hộp thư của bạn.');
     return reply({ok:true,android},201);}
