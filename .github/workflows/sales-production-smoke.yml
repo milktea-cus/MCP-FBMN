@@ -22,6 +22,7 @@ jobs:
           check 401 "$base/api/v1/notifications"
           check 401 "$base/api/v1/notifications/config"
           check 401 "$base/api/v1/notifications/preferences"
+          check 401 "$base/api/v1/notifications/diagnostics"
           check 401 -X PATCH -H 'Origin: https://sales-mien-tay.vercel.app' -H 'Content-Type: application/json' -d '{"category":"target","mode":"off"}' "$base/api/v1/notifications/preferences"
           check 401 -X PATCH -H 'Origin: https://sales-mien-tay.vercel.app' -H 'Content-Type: application/json' -d '{"quiet_start":1260,"quiet_end":420}' "$base/api/v1/notifications/quiet-hours"
           check 401 -H 'Origin: https://sales-mien-tay.vercel.app' -H 'Content-Type: application/json' -d '{}' "$base/api/v1/notifications/read-all"
