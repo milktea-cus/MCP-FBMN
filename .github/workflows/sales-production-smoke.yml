@@ -23,6 +23,12 @@ jobs:
           check 401 "$base/api/v1/notifications/config"
           check 401 "$base/api/v1/notifications/preferences"
           check 401 "$base/api/v1/notifications/diagnostics"
+          # N2 business events use the existing authenticated mutation endpoints.
+          check 401 "$base/api/v1/targets"
+          check 401 "$base/api/v1/admin/staff"
+          check 401 "$base/api/v1/admin/org"
+          check 401 "$base/api/v1/scoped-records?kind=support"
+          check 401 -X POST -H 'Origin: https://sales-mien-tay.vercel.app' -H 'Content-Type: application/json' --data '{}' "$base/api/v1/orders/lifecycle"
           check 401 "$base/api/v1/notifications?limit=100&before=9223372036854775807"
           check 403 -H 'Origin: https://untrusted.invalid' "$base/api/v1/notifications/diagnostics"
           check 401 -X PATCH -H 'Origin: https://sales-mien-tay.vercel.app' -H 'Content-Type: application/json' -d '{"category":"target","mode":"off"}' "$base/api/v1/notifications/preferences"
@@ -55,6 +61,10 @@ jobs:
           echo "/api/v1/notifications/diagnostics => HTTP $check_status"
           test "$check_status" = 401
           jq -e '.error | type=="string"' /tmp/push-diagnostics.json
+          code=$(curl -sS --max-time 30 -o /tmp/business.json -w '%{http_code}' "$site/api/v1/targets")
+          echo "/api/v1/targets => HTTP $code"
+          test "$code" = 401
+          jq -e '.error | type=="string"' /tmp/business.json
           code=$(curl -sS --max-time 30 -o /tmp/login.json -w '%{http_code}' \
             -H 'Origin: https://sales-mien-tay.vercel.app' -H 'Content-Type: application/json' --data '{}' "$site/api/auth/login")
           echo "/api/auth/login (invalid) => HTTP $code"
