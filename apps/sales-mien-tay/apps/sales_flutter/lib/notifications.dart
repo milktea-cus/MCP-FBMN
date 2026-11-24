@@ -6,6 +6,11 @@ import 'session.dart';
 import 'android_push_bridge.dart';
 import 'push_bridge_stub.dart' if (dart.library.html) 'push_bridge_web.dart' as push;
 
+bool notificationCoveredByWatermark(String id,BigInt? cutoff){
+ final value=BigInt.tryParse(id);
+ return cutoff!=null&&value!=null&&value<=cutoff;
+}
+
 class FieldNotification {
  final String id,title,body,category;
  final DateTime created;
@@ -211,12 +216,19 @@ class FieldNotificationStore extends ChangeNotifier {
    final res=await session.get('/api/v1/notifications');
    final waiting=queue.pending.map((x)=>RegExp(r'/notifications/([0-9]+)/read$')
        .firstMatch(x['path']?.toString()??'')?.group(1)).whereType<String>().toSet();
-   final pendingAll=queue.pending.any((x)=>x['path']=='/api/v1/notifications/read-all');
-   items=[for(final item in (res['items'] as List).map((x)=>FieldNotification.parse(
-      Map<String,dynamic>.from(x as Map))))(pendingAll||waiting.contains(item.id))?item.markRead():item];
+   final cutoffs=queue.pending.where((x)=>x['path']=='/api/v1/notifications/read-all')
+    .map((x)=>BigInt.tryParse((x['payload'] as Map?)?['upto']?.toString()??''))
+    .whereType<BigInt>().toList();
+   final cutoff=cutoffs.isEmpty?null:cutoffs.reduce((a,b)=>a>b?a:b);
+   final serverItems=(res['items'] as List).map((x)=>FieldNotification.parse(
+      Map<String,dynamic>.from(x as Map))).toList();
+   final locallyRead=serverItems.where((item)=>item.unread&&
+    (waiting.contains(item.id)||notificationCoveredByWatermark(item.id,cutoff))).length;
+   items=[for(final item in serverItems)
+    (waiting.contains(item.id)||notificationCoveredByWatermark(item.id,cutoff))
+       ?item.markRead():item];
    nextCursor=res['next_cursor']?.toString();
-   unreadCount=pendingAll?0:((res['unread_count'] as num?)?.toInt()??0);
-   if(!pendingAll)unreadCount=(unreadCount-waiting.length).clamp(0,2147483647);
+   unreadCount=(((res['unread_count'] as num?)?.toInt()??0)-locallyRead).clamp(0,2147483647);
    await save();
    stale=false;error=null;
    if(isAndroid&&androidConfigured)await _syncAndroid();
