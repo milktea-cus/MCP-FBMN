@@ -38,3 +38,12 @@ export async function deviceDigest(value:string):Promise<string> {
  const data=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));
  return Array.from(new Uint8Array(data)).map(x=>x.toString(16).padStart(2,'0')).join('');
 }
+
+// A generated summary is already grouped, so do not recursively digest it.
+export function deliveryMode(mode:Mode,mandatory:boolean,category:string):Mode {
+ const effective=effectiveMode(mode,mandatory);
+ return category==='daily_digest'&&effective==='digest'?'immediate':effective;
+}
+export function retiredDevice(channel:string,code:string):boolean {
+ return channel==='android'?code==='UNREGISTERED':channel==='web'&&['http_404','http_410'].includes(code);
+}

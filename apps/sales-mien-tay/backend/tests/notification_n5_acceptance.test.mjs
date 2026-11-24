@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {quietUntil,validMode,effectiveMode,validMinute,pageSize,validCursor,transientPushError,deviceDigest} from '../src/notification_policy.ts';
+import {quietUntil,validMode,effectiveMode,validMinute,pageSize,validCursor,transientPushError,deviceDigest,deliveryMode,retiredDevice} from '../src/notification_policy.ts';
 import {safeNotice} from '../src/notification_events.ts';
 
 // N5 executable, deterministic policy checks; physical FCM/lock-screen receipt
@@ -82,8 +82,26 @@ test('N5 recipient isolation and revocation gate both queued and delivered pushe
  assert.match(dispatch,/b.expires_at>now\(\)/);
  assert.match(dispatch,/b.state IN \('pending','processing','done'\)/);
  assert.match(dispatch,/else if\(!fresh.within_expiry\)\{code='expired';\}/);
- assert.match(dispatch,/code==='revoked'\|\|code==='expired'\?'cancelled'/);
+ assert.match(dispatch,/code==='revoked'\|\|code==='expired'\|\|code==='suppressed'\?'cancelled'/);
  assert.match(dispatch,/ON CONFLICT DO NOTHING/);
  assert.match(sql,/pg_advisory_xact_lock/);
  assert.match(sql,/INSERT INTO public\.field_notification_event_recipients\(event_id,recipient_sub\)[\s\S]*?ON CONFLICT DO NOTHING/);
+});
+
+test('L2 current mode and permanent device errors',()=>{
+ assert.equal(deliveryMode('off',true,'security'),'in_app');
+ assert.equal(deliveryMode('digest',false,'email'),'digest');
+ assert.equal(deliveryMode('digest',false,'daily_digest'),'immediate');
+ assert.equal(deliveryMode('off',false,'email'),'off');
+ assert.equal(retiredDevice('android','UNREGISTERED'),true);
+ assert.equal(retiredDevice('android','INVALID_ARGUMENT'),false);
+ assert.equal(retiredDevice('web','http_410'),true);
+ assert.equal(retiredDevice('web','http_429'),false);
+});
+test('L2 dispatch rechecks quiet hours at both boundaries and reserves budget atomically',async()=>{
+ const source=await readFile(new URL('../src/notification_dispatch.ts',import.meta.url),'utf8');
+ assert.match(source,/quietUntil\(now,Number\(scope.quiet_start\)/);
+ assert.match(source,/quietUntil\(now,Number\(fresh.quiet_start\)/);
+ assert.match(source,/attempts=greatest\(0,attempts-1\)/);
+ assert.match(source,/WITH locked AS \([\s\S]*?budget AS \([\s\S]*?SET budget_reserved=true/);
 });

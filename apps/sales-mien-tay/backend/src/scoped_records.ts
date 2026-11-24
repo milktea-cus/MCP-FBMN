@@ -61,7 +61,8 @@ export async function scopedRecordRoutes(req:Request,env:Env,actor:Actor,url:URL
  const match=/^\/api\/v1\/scoped-records\/([0-9a-f-]{36})$/i.exec(path);
  if(path!=='/api/v1/scoped-records'&&!match)return null;
  const db=neon(env.DATABASE_URL);
- if(path==='/api/v1/scoped-records'&&req.method==='GET'){
+ if((path==='/api/v1/scoped-records'||match)&&req.method==='GET'){
+  if(match&&!uuid.test(match[1]))return bad('Mã bản ghi không hợp lệ');
   const kind=url.searchParams.get('kind')??'';
   if(!kinds.includes(kind))return bad('Loại biểu mẫu không hợp lệ');
   const province=(url.searchParams.get('province')??'').trim();
@@ -76,12 +77,14 @@ export async function scopedRecordRoutes(req:Request,env:Env,actor:Actor,url:URL
         WHERE x.record_id=r.id AND public.sales_customer_allowed(${actor.sub},c.id,'view')),'[]'::jsonb)
     )) AS item
     FROM public.sales_records r WHERE r.kind=${kind}
+     AND (${match?.[1]??null}::uuid IS NULL OR r.id=${match?.[1]??null}::uuid)
      AND public.sales_staff_action_allowed(${actor.sub},r.owner_sub,'view')
      AND (${province}='' OR EXISTS(SELECT 1 FROM public.sales_record_areas a
        WHERE a.record_id=r.id AND a.province=${province})
        OR (NOT EXISTS(SELECT 1 FROM public.sales_record_areas a WHERE a.record_id=r.id)
          AND r.province=${province}))
     ORDER BY r.updated_at DESC,r.id DESC LIMIT 200`;
+  if(match)return rows.length?ok({item:rows[0].item}):bad('Không có quyền hoặc không tìm thấy bản ghi',404);
   return ok({items:rows.map(r=>r.item)});
  }
  if((path==='/api/v1/scoped-records'&&req.method==='POST')||(match&&req.method==='PATCH')){

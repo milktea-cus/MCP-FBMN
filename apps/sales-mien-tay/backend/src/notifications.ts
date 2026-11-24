@@ -188,9 +188,16 @@ export async function notificationRoutes(req:Request,env:PushEnv,u:Actor,url:URL
    const id=/^[a-f0-9-]{36}$/i.test(key)?key:'';
    if(!id)return fail('Đề xuất không tồn tại',404);
    const ok=await sql`SELECT 1 FROM public.sales_records r
-     WHERE r.id=${id}::uuid AND r.kind='support' AND r.owner_sub=${u.sub} LIMIT 1`;
+     WHERE r.id=${id}::uuid AND r.kind='support' AND r.owner_sub=${u.sub}
+      AND public.sales_staff_action_allowed(${u.sub},r.owner_sub,'view') LIMIT 1`;
    return ok.length?reply({destination:{screen:'support',entity_id:id}}):
     fail('Đề xuất không còn trong phạm vi',404);
+  }
+  if(category==='target'){
+   const prefix='target:'+u.sub+':';
+   const year=key.startsWith(prefix)?key.slice(prefix.length):'';
+   return /^20[0-9]{2}$/.test(year)?reply({destination:{screen:'targets',year:Number(year)}}):
+    reply({destination:{screen:'targets'}});
   }
   const known:Record<string,string>={
    target:'targets',assignment:'profile',security:'profile',
