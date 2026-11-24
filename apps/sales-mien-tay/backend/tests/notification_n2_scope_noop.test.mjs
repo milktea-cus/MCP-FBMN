@@ -5,5 +5,6 @@ test('N2 repeated org saves never change scope_revision or create audit triggers
   assert.match(s,new RegExp('CREATE OR REPLACE FUNCTION public\\.'+name+'\\('));
  assert.match(s,/previous IS NOT DISTINCT FROM \(/);
  assert.equal((s.match(/previous->>'active' IS NOT DISTINCT FROM p_active::text/g)||[]).length,3);
+ assert.equal((s.match(/\\$function\\$;(?=\\s*(?:CREATE OR REPLACE FUNCTION|$))/g)||[]).length,4);
  assert.match(s,/RETURN jsonb_build_object\('scopes',previous/);
 });

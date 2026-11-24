@@ -75,7 +75,7 @@ BEGIN
  RETURN jsonb_build_object('scopes',result,
    'scope_revision',(SELECT scope_revision FROM public.staff_members WHERE user_sub=p_staff));
 END
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.sales_set_staff_business_assignment(p_actor text, p_staff text, p_kind text, p_key text, p_active boolean)
@@ -119,7 +119,7 @@ BEGIN
      CASE WHEN p_active THEN 'assign' ELSE 'unassign' END,previous,to_jsonb(saved));
  END IF;
  RETURN to_jsonb(saved);
-END $function$
+END $function$;
 
 
 CREATE OR REPLACE FUNCTION public.sales_set_scope_grant(p_actor text, p_grantee text, p_kind text, p_key text, p_action text, p_active boolean)
@@ -160,7 +160,7 @@ BEGIN
    VALUES(p_actor,'grant',next_row.id::text,CASE WHEN p_active THEN 'grant' ELSE 'revoke' END,previous,to_jsonb(next_row));
  END IF;
  RETURN to_jsonb(next_row);
-END;$function$
+END;$function$;
 
 
 CREATE OR REPLACE FUNCTION public.sales_set_customer_binding(p_actor text, p_customer uuid, p_kind text, p_key text, p_active boolean)
@@ -202,5 +202,5 @@ BEGIN
    VALUES(p_actor,'customer_binding',p_customer::text,CASE WHEN p_active THEN 'assign' ELSE 'unassign' END,previous,to_jsonb(next_row));
  END IF;
  RETURN to_jsonb(next_row);
-END;$function$
+END;$function$;
 
