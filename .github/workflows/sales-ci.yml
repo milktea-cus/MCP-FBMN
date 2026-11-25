@@ -184,8 +184,10 @@ jobs:
           test -s android/app/src/main/kotlin/com/example/sales_mien_tay/MainActivity.kt
           flutter create --platforms=android .
       - run: flutter pub get
-      - name: Generate brand icons
-        run: python3 scripts/generate_app_icons.py
+      - name: Generate and validate brand icons
+        run: |
+          python3 scripts/generate_app_icons.py
+          python3 scripts/check_app_icons.py
       - name: Prefer Maven Central for Flutter Gradle composite build
         # Flutter's included Gradle build may resolve Kotlin from the plugin
         # portal alone; the artifact is published on Maven Central.
@@ -204,6 +206,8 @@ jobs:
           GRADLE
       - name: Compile debug APK
         run: flutter build apk --debug
+      - name: Verify compiled APK contains approved launcher icons
+        run: python3 scripts/check_apk_icons.py build/app/outputs/flutter-apk/app-debug.apk
       - uses: actions/upload-artifact@v4
         with:
           name: field-work-android-debug

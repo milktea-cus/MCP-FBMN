@@ -118,6 +118,10 @@ jobs:
           # Running with JDK 17 crashes lintVitalAnalyzeRelease, not app code.
           java-version: '21'
       - run: flutter pub get
+      - name: Generate and verify approved launcher icons before release signing
+        run: |
+          python3 scripts/generate_app_icons.py
+          python3 scripts/check_app_icons.py
       - name: Restore or bootstrap durable release keystore using GitHub OIDC
         run: python3 ../../scripts/github_oidc_release.py signing
       - name: Build signed release APK (never debug signing)
@@ -169,6 +173,9 @@ jobs:
           print('Verified package, versionCode and release signing certificate')
           pathlib.Path(os.environ['RUNNER_TEMP'],'field-work-signer.txt').write_text(signer)
           PY
+      - name: Verify compiled APK contains the approved launcher icons
+        run: |
+          python3 scripts/check_apk_icons.py build/app/outputs/flutter-apk/app-release.apk
       - uses: actions/upload-artifact@v4
         with:
           name: field-work-android-signed-${{ env.FIELD_WORK_RELEASE_CODE }}
