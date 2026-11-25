@@ -1,4 +1,5 @@
 import {neon} from '@neondatabase/serverless';
+import {Parser} from 'htmlparser2';
 
 type MailEnv={DATABASE_URL:string;RESEND_API_KEY?:string};
 type StaffActor={sub:string;staff:Record<string,unknown>};
@@ -113,6 +114,45 @@ async function provider(env:MailEnv,path:string,method:'GET'|'POST'|'PATCH'='GET
   return data&&typeof data==='object'&&!Array.isArray(data)?{status:200,data}: {status:503,data:null};
  }catch{return {status:503,data:null};}
 }
+// Render email as inert plain text. Do not forward HTML, remote images,
+// scripts, CSS or tracking URLs to the app. Preserve meaningful line breaks.
+export function mailText(data:Record<string,unknown>):string|null{
+ if(typeof data.text==='string'&&data.text.trim())return data.text.slice(0,120000);
+ if(typeof data.html!=='string'||!data.html.trim())return null;
+ const ignored=new Set(['head','script','style','iframe','object','embed','template','noscript','svg','math']);
+ const blocks=new Set(['address','article','aside','blockquote','div','dl','dt','dd','footer','h1','h2','h3','h4','h5','h6','header','li','main','ol','p','pre','section','table','tr','ul']);
+ const stack:{name:string;hidden:boolean}[]=[];
+ let hidden=0,output='';
+ function append(value:string){if(output.length<120000)output+=value.slice(0,120000-output.length);}
+ function line(){if(output&&!output.endsWith('\n'))append('\n');}
+ const parser=new Parser({
+  onopentag(name,attrs){
+   const skip=ignored.has(name)||Object.prototype.hasOwnProperty.call(attrs,'hidden')||
+    attrs['aria-hidden']==='true'||/display\s*:\s*none\b|visibility\s*:\s*hidden\b/i.test(attrs.style??'');
+   stack.push({name,hidden:skip});if(skip)hidden++;
+   if(hidden)return;
+   if(name==='br')append('\n');
+   else if(blocks.has(name)){line();if(name==='li')append('• ');}
+   else if(name==='td'||name==='th'){if(output&&!output.endsWith('\n'))append(' ');}
+  },
+  ontext(value){if(!hidden)append(value.replace(/[\t\r\n\f ]+/g,' '));},
+  onclosetag(name){
+   const last=stack.pop();
+   if(last?.hidden)hidden--;
+   if(!hidden&&!last?.hidden&&blocks.has(name))line();
+  }
+ },{decodeEntities:true});
+ parser.end(data.html.slice(0,1000000));
+ const plain=output.replace(/[^\S\n]+/g,' ').replace(/ *\n */g,'\n').replace(/\n{3,}/g,'\n\n').trim();
+ return plain||null;
+}
+export function validMailId(value:unknown):value is string{
+ return typeof value==='string'&&uuid.test(value);
+}
+export function mailRows(value:unknown):Record<string,unknown>[]|null{
+ if(!Array.isArray(value)||value.some(v=>!v||typeof v!=='object'||Array.isArray(v)||!validMailId(v.id)))return null;
+ return value.map(v=>view(v as Record<string,unknown>));
+}
 function view(data:Record<string,unknown>){
  // Do not forward untrusted HTML, raw provider headers or signed attachment URLs.
  return {id:data.id,subject:data.subject,from:data.from,to:data.to,
@@ -124,7 +164,7 @@ function view(data:Record<string,unknown>){
     const a=(x&&typeof x==='object'&&!Array.isArray(x))?x as Record<string,unknown>:{};
     return {id:a.id,filename:a.filename,size:a.size};
    }):[],
-  text:typeof data.text==='string'?data.text.slice(0,120000):null};
+  text:mailText(data)};
 }
 export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:URL):Promise<Response|null>{
  if(!url.pathname.startsWith('/api/v1/mail'))return null;
@@ -159,9 +199,8 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
   if(after)q.set('after',after);
   const result=await provider(env,`/inboxes/${box}/threads?${q}`);
   if(!result.data)return fail('Cổng email chưa sẵn sàng',result.status);
-  const items=result.data.data;
-  if(!Array.isArray(items))return fail('Phản hồi hộp thư không hợp lệ',503);
-  const rows=items.map(v=>view(v as Record<string,unknown>));
+  const rows=mailRows(result.data.data);
+  if(!rows)return fail('Phản hồi hộp thư không hợp lệ',503);
   const next=pageCursor(rows,result.data.has_more===true);
   return json({mailbox:assigned,items:rows,has_more:next!==null,next_cursor:next});
  }
@@ -175,17 +214,17 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
    provider(env,`/inboxes/${box}/threads/${thread[1]}`),
    provider(env,`/inboxes/${box}/threads/${thread[1]}/emails?${q}`)
   ]);
-  if(!result.data)return fail('Không mở được hội thoại',result.status);
-  if(!page.data||!Array.isArray(page.data.data))return fail('Không tải được danh sách thư trong hội thoại',page.status);
-  const rows=page.data.data.map(v=>view(v as Record<string,unknown>));
-  const next=pageCursor(rows,page.data.has_more===true);
+  if(!result.data||result.data.id!==thread[1])return fail('Không mở được hội thoại',mailProviderStatus(result.status));
+  const rows=mailRows(page.data?.data);
+  if(!rows)return fail('Không tải được danh sách thư trong hội thoại',mailProviderStatus(page.status));
+  const next=pageCursor(rows,page.data?.has_more===true);
   return json({thread:view(result.data),emails:rows,has_more:next!==null,next_cursor:next});
  }
  const letter=/^\/api\/v1\/mail\/threads\/([0-9a-f-]{36})\/emails\/([0-9a-f-]{36})$/i.exec(url.pathname);
  if(letter&&req.method==='GET'){
   if(!uuid.test(letter[1])||!uuid.test(letter[2]))return fail('Mã thư không hợp lệ');
   const result=await provider(env,`/inboxes/${box}/threads/${letter[1]}/emails/${letter[2]}`);
-  if(!result.data)return fail('Không mở được email',result.status);
+  if(!result.data||result.data.id!==letter[2])return fail('Không mở được email',mailProviderStatus(result.status));
   return json({item:view(result.data)});
  }
  // No globally scoped Resend attachment lookup is allowed until a message
@@ -193,7 +232,7 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
  const download=attachmentRoute(url.pathname);
  if(download&&req.method==='GET'){
   const item=await provider(env,`/inboxes/${box}/threads/${download.thread}/emails/${download.email}`);
-  if(!item.data)return fail('Không được truy cập tệp này',404);
+  if(!item.data||item.data.id!==download.email)return fail('Không được truy cập tệp này',item.status===404?404:mailProviderStatus(item.status));
   const matches=Array.isArray(item.data.attachments)&&item.data.attachments.some((a:unknown)=>
    !!a&&typeof a==='object'&&(a as Record<string,unknown>).id===download.attachment);
   if(!matches)return fail('Tệp không thuộc email đã chọn',404);
@@ -242,7 +281,7 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
   const result=await provider(env,`/inboxes/${box}/threads/${reply[1]}/emails/${reply[2]}/reply`,
    'POST',{text:signed.text,html:signed.html,...(attachments.length?{attachments}:{})},
    'field-mail-reply/'+data.request_id);
-  if(!result.data||typeof result.data.id!=='string')return fail('Không trả lời được email',result.status);
+  if(!result.data||!validMailId(result.data.id))return fail('Chưa xác nhận trả lời email thành công',mailProviderStatus(result.status));
   return json({id:result.data.id,status:'sent'},201);
  }
  if(url.pathname==='/api/v1/mail/send'&&req.method==='POST'){
@@ -267,11 +306,11 @@ export async function mailRoutes(req:Request,env:MailEnv,actor:StaffActor,url:UR
    to:[payload.to.trim().toLowerCase()],subject:payload.subject.trim(),
    text:signed.text,html:signed.html,...(attachments.length?{attachments}:{})
   },'field-mail-draft/'+requestId);
-  if(!draft.data||typeof draft.data.id!=='string'||!uuid.test(draft.data.id))
-   return fail('Chưa tạo được thư nháp để gửi',draft.status);
+  if(!draft.data||!validMailId(draft.data.id))
+   return fail('Chưa tạo được thư nháp để gửi',mailProviderStatus(draft.status));
   const sent=await provider(env,`/inboxes/${box}/drafts/${draft.data.id}/send`,'POST',
    undefined,'field-mail-send/'+requestId);
-  if(!sent.data||typeof sent.data.id!=='string')
+  if(!sent.data||!validMailId(sent.data.id))
    return json({error:'Chưa xác nhận gửi thành công; thư nháp vẫn được giữ',
      draft_id:draft.data.id},503);
   return json({id:sent.data.id,status:'sent'},201);

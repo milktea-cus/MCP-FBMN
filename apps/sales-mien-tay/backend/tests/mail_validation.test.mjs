@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validateAttachments,renderBrandedMail,SIGNATURE_TEMPLATE,attachmentRoute,parseMailBody,mailProviderStatus} from '../src/mail.ts';
+import {validateAttachments,renderBrandedMail,SIGNATURE_TEMPLATE,attachmentRoute,parseMailBody,mailProviderStatus,mailText,mailRows,validMailId} from '../src/mail.ts';
 
 const file=(name='invoice.pdf',bytes='aGVsbG8=')=>({filename:name,content:bytes});
 
@@ -70,4 +70,30 @@ test('reply and send share the same bounded JSON envelope including a 5 MiB atta
 test('provider resource errors are distinct from app authentication failures',()=>{
  for(const status of [400,404,409,413,415,422,429])assert.equal(mailProviderStatus(status),status);
  for(const status of [401,403,500,502])assert.equal(mailProviderStatus(status),503);
+});
+
+test('HTML-only mail becomes inert readable text, preserving paragraphs and Unicode',()=>{
+ const html='<html><head><title>Hidden title</title><style>hidden css</style></head><body>'+
+  '<p>Xin chào &amp; cảm ơn &#x1F44B;<br>Hẹn gặp lại</p>'+
+  '<script>bad script</script><div hidden>hidden content</div>'+
+  '<div style="display:none">tracking</div><img src="https://example.test/pixel">'+
+  '<p>Đơn <b>hàng</b></p><ul><li>Kho A</li><li>Kho B</li></ul>'+
+  '<p><a href="https://example.test/private">Xem tài liệu</a></p></body></html>';
+ const plain=mailText({html,text:''});
+ assert.match(plain,/Xin chào & cảm ơn 👋\nHẹn gặp lại/);
+ assert.match(plain,/Đơn hàng\n• Kho A\n• Kho B/);
+ assert.match(plain,/Xem tài liệu/);
+ assert.doesNotMatch(plain,/hidden|bad script|tracking|https:|<img/i);
+ assert.equal(mailText({text:'original\nbody',html}), 'original\nbody');
+ assert.equal(mailText({html:'<script>hidden</script>'}),null);
+ assert.equal(mailText({html:'<p>'+'x'.repeat(130000)+'</p>'})?.length,120000);
+});
+test('malformed provider success becomes a non-2xx error and invalid rows fail closed',()=>{
+ for(const status of [200,201,204,302])assert.equal(mailProviderStatus(status),503);
+ const id='11111111-1111-4111-8111-111111111111';
+ assert.equal(validMailId(id),true);assert.equal(validMailId('unexpected'),false);
+ assert.equal(mailRows(null),null);assert.equal(mailRows([null]),null);
+ assert.equal(mailRows([{id:'bad'}]),null);
+ assert.deepEqual(mailRows([]),[]);
+ assert.equal(mailRows([{id,html:'<p>Nội dung</p>'}])?.[0].text,'Nội dung');
 });

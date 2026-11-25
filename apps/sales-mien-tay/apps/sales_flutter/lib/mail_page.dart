@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -98,6 +99,13 @@ class _StaffMailPageState extends State<StaffMailPage>{
   }catch(e){if(current(token))setState(()=>error=e.toString());}
   finally{if(current(token))setState(()=>busy=false);}
  }
+ Future<void> refreshCurrent()async{
+  if(busy)return;
+  final thread=selectedThread,id=selectedMail?['id']?.toString();
+  if(thread!=null&&id!=null){await openMessage(id);return;}
+  if(thread!=null){await openThread(thread);return;}
+  await load(folder:selectedFolder??'inbox');
+ }
  Future<void> reply()async{
   final thread=selectedThread,id=selectedMail?['id']?.toString();
   if(busy||thread==null||id==null)return;
@@ -153,8 +161,8 @@ class _StaffMailPageState extends State<StaffMailPage>{
     if(selectedMail!=null)
      IconButton(tooltip:'Trả lời thư này',onPressed:busy?null:reply,
       icon:const Icon(Icons.reply_outlined)),
-    IconButton(tooltip:'Làm mới',onPressed:busy?null:()=>
-       load(folder:selectedFolder??'inbox'),icon:const Icon(Icons.refresh))
+    IconButton(tooltip:'Làm mới',onPressed:busy?null:refreshCurrent,
+       icon:const Icon(Icons.refresh))
    ]),
    body:Column(children:[
     if(mailbox!=null)Padding(padding:const EdgeInsets.fromLTRB(16,12,16,4),
@@ -246,7 +254,10 @@ class _MailComposerState extends State<_MailComposer>{
  final to=TextEditingController(),subject=TextEditingController(),text=TextEditingController();
  bool busy=false,picking=false;String? error;
  final List<Map<String,dynamic>> attachments=[];
- late final String requestId=const Uuid().v4();
+ // Reuse the UUID only for byte-identical authored payloads. Returning to
+ // a previous payload also returns its UUID, so a lost reply cannot cause
+ // a second send of that same content during this composer session.
+ final requestIds=<String,String>{};
  static const maxAttachmentBytes=5*1024*1024;
  static const allowedExtensions=['pdf','png','jpg','jpeg','webp','txt','csv','docx','xlsx','pptx'];
  Future<void> pickAttachments()async{
@@ -280,18 +291,25 @@ class _MailComposerState extends State<_MailComposer>{
   }
   setState((){busy=true;error=null;});
   try{
-   if(widget.threadId!=null&&widget.emailId!=null){
-    await widget.session.postMail('/api/v1/mail/threads/${widget.threadId}/emails/${widget.emailId}/reply',{
-      'request_id':requestId,'text':text.text.trim(),
-      'attachments':attachments.map((f)=>{'filename':f['filename'],'content':f['content']}).toList()});
-   }else{
-    await widget.session.postMail('/api/v1/mail/send',{
-      'request_id':requestId,'to':to.text.trim(),
-      'subject':subject.text.trim(),'text':text.text.trim(),
-      'attachments':attachments.map((f)=>{'filename':f['filename'],'content':f['content']}).toList()});
+   final replying=widget.threadId!=null&&widget.emailId!=null;
+   final path=replying
+    ?'/api/v1/mail/threads/${widget.threadId}/emails/${widget.emailId}/reply'
+    :'/api/v1/mail/send';
+   final payload=<String,dynamic>{
+    if(!replying)'to':to.text.trim().toLowerCase(),
+    if(!replying)'subject':subject.text.trim(),
+    'text':text.text.trim(),
+    'attachments':attachments.map((f)=>{'filename':f['filename'],'content':f['content']}).toList(),
+   };
+   final fingerprint=sha256.convert(utf8.encode(jsonEncode(payload))).toString();
+   final requestId=requestIds.putIfAbsent(fingerprint,()=>const Uuid().v4());
+   final result=await widget.session.postMail(path,{'request_id':requestId,...payload});
+   if(result['status']!='sent'||result['id'] is! String||
+      !RegExp(r'^[0-9a-f-]{36}$',caseSensitive:false).hasMatch(result['id'] as String)){
+    throw const ApiFailure(503,'Chưa xác nhận gửi thư thành công.');
    }
    if(mounted)Navigator.of(context).pop(true);
-  }catch(e){if(mounted)setState(()=>error=e.toString());}
+  }catch(e){if(mounted)setState(()=>error='$e\nNếu chưa rõ đã gửi hay chưa, kiểm tra mục Đã gửi trước khi đổi nội dung.');}
   finally{if(mounted)setState(()=>busy=false);}
  }
  @override Widget build(BuildContext context)=>AlertDialog(

@@ -34,7 +34,7 @@ class FakeMailSession extends SalesSession {
   throw StateError('Unexpected POST $path');
  }
  @override Future<Map<String,dynamic>> postMail(String path,Map<String,dynamic> data) async {
-  sendPaths.add(path);sentPayload=data;return {'status':'sent'};
+  sendPaths.add(path);sentPayload=data;return {'status':'sent','id':emailId};
  }
 
 }
@@ -63,7 +63,53 @@ class PagingMailSession extends FakeMailSession{
   reads.add(path);return super.post(path,data);
  }
 }
+class RetryMailSession extends FakeMailSession{
+ final attempts=<Map<String,dynamic>>[];
+ @override Future<Map<String,dynamic>> postMail(String path,Map<String,dynamic> data)async{
+  attempts.add(Map<String,dynamic>.from(data));
+  if(attempts.length==1)return {'error':'Malformed provider success'};
+  if(attempts.length<5)throw const ApiFailure(503,'Chưa xác nhận');
+  return {'status':'sent','id':emailId};
+ }
+}
 void main(){
+ testWidgets('refresh preserves exact message and thread',(tester)async{
+  final session=FakeMailSession();
+  await tester.pumpWidget(MaterialApp(home:StaffMailPage(session:session)));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Thư thử nghiệm'));await tester.pumpAndSettle();
+  await tester.tap(find.byTooltip('Làm mới'));await tester.pumpAndSettle();
+  expect(find.text('Hội thoại'),findsOneWidget);
+  await tester.tap(find.text('Thư thử nghiệm'));await tester.pumpAndSettle();
+  await tester.tap(find.byTooltip('Làm mới'));await tester.pumpAndSettle();
+  expect(find.text('Đọc email'),findsOneWidget);
+  expect(find.text('Nội dung thư'),findsOneWidget);
+ });
+ testWidgets('mail malformed success retains composer and retry UUID follows content',(tester)async{
+  final session=RetryMailSession();
+  await tester.pumpWidget(MaterialApp(home:StaffMailPage(session:session)));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byTooltip('Soạn email'));await tester.pumpAndSettle();
+  final fields=find.byType(TextField);
+  await tester.enterText(fields.at(0),'client@example.test');
+  await tester.enterText(fields.at(1),'Subject');
+  await tester.enterText(fields.at(2),'Original');
+  Future<void> send()async{
+   await tester.tap(find.text('Gửi email'));await tester.pumpAndSettle();
+  }
+  await send();
+  expect(find.textContaining('Chưa xác nhận gửi thư thành công'),findsOneWidget);
+  await send();
+  await tester.enterText(fields.at(2),'Changed');await send();
+  await tester.enterText(fields.at(2),'Original');await send();
+  expect(session.attempts[0]['request_id'],session.attempts[1]['request_id']);
+  expect(session.attempts[0]['request_id'],isNot(session.attempts[2]['request_id']));
+  expect(session.attempts[0]['request_id'],session.attempts[3]['request_id']);
+  await send();
+  expect(find.text('Soạn thư · info@fbmn.vn'),findsNothing);
+  expect(session.attempts[0]['request_id'],session.attempts[4]['request_id']);
+ });
+
  testWidgets('mail pagination merges IDs and stale message completion cannot overwrite current mail',(tester)async{
   final session=PagingMailSession();
   await tester.pumpWidget(MaterialApp(home:StaffMailPage(session:session)));
